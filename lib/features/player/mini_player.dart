@@ -20,7 +20,9 @@ class MiniPlayer extends ConsumerWidget {
     // Pre-warm dominant color while mini player is visible so it's already
     // computed by the time the user opens the full player.
     final coverUrl = ref.watch(coverArtUrlProvider(song.coverArt ?? '')) ?? '';
-    if (coverUrl.isNotEmpty) ref.watch(dominantColorProvider(coverUrl));
+    // Always watch unconditionally — dominantColorProvider returns null for
+    // empty URLs instantly, and conditional watches are a Riverpod antipattern.
+    ref.watch(dominantColorProvider(coverUrl));
 
     return _MiniPlayerShell(song: song, onOpen: onOpen);
   }

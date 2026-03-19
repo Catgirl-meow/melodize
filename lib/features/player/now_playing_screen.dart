@@ -50,12 +50,14 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
   final _pageController = PageController();
   int _currentPage = 0;
   Timer? _sleepCountdown;
-  Duration? _sleepRemaining;
+  // ValueNotifier so only _BottomActions rebuilds each tick — not the whole screen
+  final _sleepNotifier = ValueNotifier<Duration?>(null);
 
   @override
   void dispose() {
     _pageController.dispose();
     _sleepCountdown?.cancel();
+    _sleepNotifier.dispose();
     super.dispose();
   }
 
@@ -162,7 +164,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
                           _PlayerPage(
                             song: song,
                             coverUrl: coverUrl,
-                            sleepRemaining: _sleepRemaining,
+                            sleepNotifier: _sleepNotifier,
                             onSleepTimer: () =>
                                 _showSleepTimerDialog(context),
                             onQueueOpen: () => _openQueue(context),
@@ -240,10 +242,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
                 title: const Text('Cancel timer'),
                 onTap: () {
                   handler.cancelSleepTimer();
-                  setState(() {
-                    _sleepCountdown?.cancel();
-                    _sleepRemaining = null;
-                  });
+                  _sleepCountdown?.cancel();
+                  _sleepNotifier.value = null;
                   Navigator.pop(context);
                 },
               ),
@@ -266,20 +266,19 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
 
   void _startSleepCountdown(Duration initial) {
     _sleepCountdown?.cancel();
-    setState(() => _sleepRemaining = initial);
+    _sleepNotifier.value = initial;
     _sleepCountdown = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) {
         t.cancel();
         return;
       }
-      final remaining = _sleepRemaining;
+      final remaining = _sleepNotifier.value;
       if (remaining == null || remaining.inSeconds <= 0) {
         t.cancel();
-        setState(() => _sleepRemaining = null);
+        _sleepNotifier.value = null;
         return;
       }
-      setState(
-          () => _sleepRemaining = Duration(seconds: remaining.inSeconds - 1));
+      _sleepNotifier.value = Duration(seconds: remaining.inSeconds - 1);
     });
   }
 }
@@ -423,7 +422,7 @@ class _TopBar extends ConsumerWidget {
 class _PlayerPage extends StatelessWidget {
   final Song song;
   final String coverUrl;
-  final Duration? sleepRemaining;
+  final ValueNotifier<Duration?> sleepNotifier;
   final VoidCallback onSleepTimer;
   final VoidCallback onQueueOpen;
   final VoidCallback onLyricsOpen;
@@ -431,7 +430,7 @@ class _PlayerPage extends StatelessWidget {
   const _PlayerPage({
     required this.song,
     required this.coverUrl,
-    required this.sleepRemaining,
+    required this.sleepNotifier,
     required this.onSleepTimer,
     required this.onQueueOpen,
     required this.onLyricsOpen,
@@ -458,7 +457,7 @@ class _PlayerPage extends StatelessWidget {
           RepaintBoundary(child: _PlayControls()),
           const SizedBox(height: 12),
           _BottomActions(
-            sleepRemaining: sleepRemaining,
+            sleepNotifier: sleepNotifier,
             onSleepTimer: onSleepTimer,
             onQueueOpen: onQueueOpen,
             onLyricsOpen: onLyricsOpen,
@@ -657,12 +656,15 @@ class _PlayControls extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isPlaying =
-        ref.watch(playerStateStreamProvider).valueOrNull?.playing ?? false;
-    final isShuffled =
-        ref.watch(shuffleModeStreamProvider).valueOrNull ?? false;
-    final loopMode =
-        ref.watch(loopModeStreamProvider).valueOrNull ?? LoopMode.off;
+    final isPlaying = ref.watch(
+      playerStateStreamProvider.select((s) => s.valueOrNull?.playing ?? false),
+    );
+    final isShuffled = ref.watch(
+      shuffleModeStreamProvider.select((s) => s.valueOrNull ?? false),
+    );
+    final loopMode = ref.watch(
+      loopModeStreamProvider.select((s) => s.valueOrNull ?? LoopMode.off),
+    );
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -726,13 +728,13 @@ class _PlayControls extends ConsumerWidget {
 // ---------------------------------------------------------------------------
 
 class _BottomActions extends StatelessWidget {
-  final Duration? sleepRemaining;
+  final ValueNotifier<Duration?> sleepNotifier;
   final VoidCallback onSleepTimer;
   final VoidCallback onQueueOpen;
   final VoidCallback onLyricsOpen;
 
   const _BottomActions({
-    required this.sleepRemaining,
+    required this.sleepNotifier,
     required this.onSleepTimer,
     required this.onQueueOpen,
     required this.onLyricsOpen,
@@ -749,28 +751,30 @@ class _BottomActions extends StatelessWidget {
       onVerticalDragEnd: (_) {},
       behavior: HitTestBehavior.opaque,
       child: Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        _ActionButton(
-          icon: Icons.queue_music_rounded,
-          label: 'Queue',
-          onTap: onQueueOpen,
-        ),
-        _ActionButton(
-          icon: Icons.lyrics_outlined,
-          label: 'Lyrics',
-          onTap: onLyricsOpen,
-        ),
-        _ActionButton(
-          icon: Icons.bedtime_rounded,
-          label: sleepRemaining != null
-              ? _fmtSleep(sleepRemaining!)
-              : 'Sleep',
-          active: sleepRemaining != null,
-          onTap: onSleepTimer,
-        ),
-      ],
-    ),
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _ActionButton(
+            icon: Icons.queue_music_rounded,
+            label: 'Queue',
+            onTap: onQueueOpen,
+          ),
+          _ActionButton(
+            icon: Icons.lyrics_outlined,
+            label: 'Lyrics',
+            onTap: onLyricsOpen,
+          ),
+          // Only this button rebuilds every second — the rest of the row is stable
+          ValueListenableBuilder<Duration?>(
+            valueListenable: sleepNotifier,
+            builder: (_, remaining, __) => _ActionButton(
+              icon: Icons.bedtime_rounded,
+              label: remaining != null ? _fmtSleep(remaining) : 'Sleep',
+              active: remaining != null,
+              onTap: onSleepTimer,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -873,9 +877,16 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
 
         if (result.hasSynced) {
           final lines = result.syncedLines;
-          int current = 0;
-          for (int i = 0; i < lines.length; i++) {
-            if (lines[i].timestamp <= position) current = i;
+          // Binary search for current lyric line — O(log n) vs O(n)
+          int lo = 0, hi = lines.length - 1, current = 0;
+          while (lo <= hi) {
+            final mid = (lo + hi) >> 1;
+            if (lines[mid].timestamp <= position) {
+              current = mid;
+              lo = mid + 1;
+            } else {
+              hi = mid - 1;
+            }
           }
           if (current != _currentLine) {
             _currentLine = current;

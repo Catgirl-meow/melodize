@@ -9,13 +9,24 @@ class DownloadsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Only rebuild when the list of active items changes — not on every
-    // progress tick. Individual _ActiveTile widgets watch their own slice.
-    final activeItems = ref.watch(
-      downloadNotifierProvider.select((m) => m.values
-          .where((d) => d.status == 'downloading' || d.status == 'queued')
-          .toList()),
+    // Select returns a comma-joined string of active IDs — stable for equality
+    // checks so this screen only rebuilds when downloads are added/removed,
+    // not on every progress tick. Individual _ActiveTile widgets watch their
+    // own slice for progress updates.
+    final activeIdsStr = ref.watch(
+      downloadNotifierProvider.select((m) {
+        final ids = m.entries
+            .where((e) =>
+                e.value.status == 'downloading' ||
+                e.value.status == 'queued')
+            .map((e) => e.key)
+            .toList()
+          ..sort();
+        return ids.join(',');
+      }),
     );
+    final activeIds =
+        activeIdsStr.isEmpty ? const <String>[] : activeIdsStr.split(',');
     final downloadedAsync = ref.watch(downloadedSongsProvider);
     final scheme = Theme.of(context).colorScheme;
 
@@ -28,7 +39,7 @@ class DownloadsScreen extends ConsumerWidget {
           ),
 
           // Active downloads
-          if (activeItems.isNotEmpty) ...[
+          if (activeIds.isNotEmpty) ...[
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
               sliver: SliverToBoxAdapter(
@@ -41,8 +52,8 @@ class DownloadsScreen extends ConsumerWidget {
             ),
             SliverList(
               delegate: SliverChildBuilderDelegate(
-                (_, i) => _ActiveTile(songId: activeItems[i].song.id),
-                childCount: activeItems.length,
+                (_, i) => _ActiveTile(songId: activeIds[i]),
+                childCount: activeIds.length,
               ),
             ),
           ],
@@ -55,7 +66,7 @@ class DownloadsScreen extends ConsumerWidget {
             error: (e, _) =>
                 SliverFillRemaining(child: Center(child: Text('$e'))),
             data: (songs) {
-              if (songs.isEmpty && activeItems.isEmpty) {
+              if (songs.isEmpty && activeIds.isEmpty) {
                 return SliverFillRemaining(
                   child: Center(
                     child: Column(
