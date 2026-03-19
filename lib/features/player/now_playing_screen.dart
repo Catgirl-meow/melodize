@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:palette_generator/palette_generator.dart';
-import 'package:path_provider/path_provider.dart';
+import '../../core/utils/platform_dirs.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import 'queue_screen.dart';
@@ -344,7 +344,7 @@ class _TopBar extends ConsumerWidget {
                 title: const Text('Download'),
                 onTap: () async {
                   Navigator.pop(context);
-                  final dir = await getApplicationDocumentsDirectory();
+                  final dir = await getAppStorageDirectory();
                   final prefs = ref.read(preferencesNotifierProvider);
                   final path =
                       '${dir.path}/melodize_downloads/${song.id}.${song.suffix ?? 'mp3'}';

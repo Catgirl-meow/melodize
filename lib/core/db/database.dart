@@ -1,8 +1,8 @@
 import 'dart:io';
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import '../utils/platform_dirs.dart';
 
 part 'database.g.dart';
 
@@ -245,7 +245,7 @@ class AppDatabase extends _$AppDatabase {
 
 LazyDatabase _openConnection() {
   return LazyDatabase(() async {
-    final dbFolder = await getApplicationDocumentsDirectory();
+    final dbFolder = await getAppStorageDirectory();
     final file = File(p.join(dbFolder.path, 'melodize.db'));
     return NativeDatabase(
       file,

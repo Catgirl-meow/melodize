@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
+import '../../core/utils/platform_dirs.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import 'cover_art_image.dart';
@@ -212,7 +212,7 @@ class _MoreButton extends ConsumerWidget {
   }
 
   Future<void> _startDownload(BuildContext context, WidgetRef ref) async {
-    final dir = await getApplicationDocumentsDirectory();
+    final dir = await getAppStorageDirectory();
     final prefs = ref.read(preferencesNotifierProvider);
     final path =
         '${dir.path}/melodize_downloads/${song.id}.${song.suffix ?? 'mp3'}';

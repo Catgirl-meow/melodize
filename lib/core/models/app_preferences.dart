@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:path_provider/path_provider.dart';
+import '../utils/platform_dirs.dart';
 
 class AppPreferences {
   final String streamQuality;   // 'lossless' | '320' | '192' | '128'
@@ -51,7 +51,7 @@ class AppPreferences {
       };
 
   static Future<File> get _file async {
-    final dir = await getApplicationDocumentsDirectory();
+    final dir = await getAppStorageDirectory();
     return File('${dir.path}/melodize_prefs.json');
   }
 

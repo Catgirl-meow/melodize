@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:drift/drift.dart' show Value;
-import 'package:path_provider/path_provider.dart';
+import 'core/utils/platform_dirs.dart';
 import 'core/audio/audio_handler.dart';
 import 'core/db/database.dart';
 import 'core/models/song.dart';
@@ -92,7 +92,7 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
           if (!mounted) return;
           final prefs = ref.read(preferencesNotifierProvider);
           if (prefs.autoDownload != 'on_play') return;
-          final dir = await getApplicationDocumentsDirectory();
+          final dir = await getAppStorageDirectory();
           final path =
               '${dir.path}/melodize_downloads/${song.id}.${song.suffix ?? 'mp3'}';
           ref
@@ -112,7 +112,7 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
   Future<void> _redownloadAll(WidgetRef ref, String quality) async {
     final songs = await ref.read(downloadedSongsProvider.future);
     if (songs.isEmpty) return;
-    final dir = await getApplicationDocumentsDirectory();
+    final dir = await getAppStorageDirectory();
     for (final song in songs) {
       final path =
           '${dir.path}/melodize_downloads/${song.id}.${song.suffix ?? 'mp3'}';
@@ -129,7 +129,7 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
     final songs = ref.read(allSongsProvider).valueOrNull ?? [];
     if (songs.isEmpty) return;
     final prefs = ref.read(preferencesNotifierProvider);
-    final dir = await getApplicationDocumentsDirectory();
+    final dir = await getAppStorageDirectory();
     final baseDir = '${dir.path}/melodize_downloads';
     ref
         .read(downloadNotifierProvider.notifier)

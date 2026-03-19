@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
+import '../../core/utils/platform_dirs.dart';
 import '../../core/models/app_preferences.dart';
 import '../../core/providers.dart';
 import 'downloaded_songs_screen.dart';
@@ -40,7 +40,7 @@ class SettingsScreen extends ConsumerWidget {
 
     // Delete downloaded files
     try {
-      final dir = await getApplicationDocumentsDirectory();
+      final dir = await getAppStorageDirectory();
       final downloadsDir = Directory('${dir.path}/melodize_downloads');
       if (await downloadsDir.exists()) {
         await downloadsDir.delete(recursive: true);
