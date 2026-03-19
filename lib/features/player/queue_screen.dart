@@ -21,12 +21,12 @@ class QueueScreen extends ConsumerWidget {
     final handler = ref.read(audioHandlerNotifierProvider);
     final scheme = Theme.of(context).colorScheme;
 
-    return Container(
+    return Material(
+      color: scheme.surface,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
       height: MediaQuery.of(context).size.height * 0.75,
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      ),
       child: Column(
         children: [
           // Handle
@@ -129,6 +129,7 @@ class QueueScreen extends ConsumerWidget {
                   ),
           ),
         ],
+      ),
       ),
     );
   }
