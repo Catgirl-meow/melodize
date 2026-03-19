@@ -14,7 +14,7 @@ class SetupScreen extends ConsumerStatefulWidget {
 
 class _SetupScreenState extends ConsumerState<SetupScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _urlController = TextEditingController(text: 'http://');
+  final _urlController = TextEditingController();
   final _userController = TextEditingController();
   final _passController = TextEditingController();
   bool _loading = false;
@@ -117,7 +117,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                   controller: _urlController,
                   decoration: InputDecoration(
                     labelText: 'Server URL',
-                    hintText: 'http://192.168.1.100:4533',
+                    hintText: 'https://music.example.com',
                     prefixIcon: const Icon(Icons.dns_rounded),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                     filled: true,

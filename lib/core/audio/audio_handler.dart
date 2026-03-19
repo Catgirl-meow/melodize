@@ -30,18 +30,26 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         // Start playback after 500 ms buffered instead of the default ~2500 ms.
         bufferForPlaybackDuration: const Duration(milliseconds: 500),
         bufferForPlaybackAfterRebufferDuration: const Duration(seconds: 2),
-        minBufferDuration: const Duration(seconds: 15),
-        maxBufferDuration: const Duration(seconds: 45),
+        // Keep 60 s max buffer so ExoPlayer has room to pre-buffer the next
+        // track before the current one ends, enabling gapless transitions.
+        minBufferDuration: const Duration(seconds: 20),
+        maxBufferDuration: const Duration(seconds: 60),
       ),
       darwinLoadControl: DarwinLoadControl(
-        preferredForwardBufferDuration: const Duration(seconds: 10),
+        // AVQueuePlayer buffers automatically; 30 s forward is sufficient.
+        preferredForwardBufferDuration: const Duration(seconds: 30),
       ),
     ),
   );
 
+  // useLazyPreparation: false — ExoPlayer eagerly prepares all sources in the
+  // playlist (lightweight: reads headers / timelines, does not download audio).
+  // This lets ExoPlayer buffer across track boundaries for gapless playback.
+  // With true (default), each source is only prepared when it becomes current,
+  // causing a perceptible gap at every track transition.
   final _playlistSource = ConcatenatingAudioSource(
     children: [],
-    useLazyPreparation: true,
+    useLazyPreparation: false,
   );
 
   SubsonicConfig? _config;
@@ -144,7 +152,6 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       await player.setAudioSource(
         _playlistSource,
         initialIndex: startIndex.clamp(0, songs.length - 1),
-        preload: false,
       );
       await player.play();
     } catch (e) {
