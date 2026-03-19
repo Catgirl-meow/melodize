@@ -16,14 +16,10 @@ API intentionally does not expose: deleting songs from the server, and
 ## 1. Download the service script
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/your-repo/melodize/main/companion/melodize-companion \
+curl -fsSL https://raw.githubusercontent.com/Catgirl-meow/melodize/main/companion/melodize-companion \
   -o /usr/local/bin/melodize-companion
 chmod +x /usr/local/bin/melodize-companion
 ```
-
-> **No GitHub yet?** Copy the script manually — it lives in
-> `companion/melodize-companion` in the Melodize repo. It is a single Python
-> file with zero pip dependencies.
 
 ---
 
@@ -84,7 +80,7 @@ Create `/etc/systemd/system/melodize-companion.service`:
 ```ini
 [Unit]
 Description=Melodize Companion — Navidrome file management sidecar
-Documentation=https://github.com/your-repo/melodize
+Documentation=https://github.com/Catgirl-meow/melodize
 After=network.target navidrome.service
 Wants=navidrome.service
 
@@ -343,7 +339,7 @@ apt install ffmpeg -y
 
 ```bash
 # Download the new version
-curl -fsSL https://raw.githubusercontent.com/your-repo/melodize/main/companion/melodize-companion \
+curl -fsSL https://raw.githubusercontent.com/Catgirl-meow/melodize/main/companion/melodize-companion \
   -o /usr/local/bin/melodize-companion
 chmod +x /usr/local/bin/melodize-companion
 

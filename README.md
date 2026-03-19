@@ -39,7 +39,7 @@ playback, a polished Material 3 UI, and offline support.
 ### Install
 
 Download the latest APK from the
-[Releases](https://github.com/your-username/melodize/releases) page and
+[Releases](https://github.com/Catgirl-meow/melodize/releases) page and
 install it on your device.
 
 On first launch, enter your server URL, username, and password. That's it.
@@ -74,7 +74,7 @@ No Docker, no dependencies, no compilation.
 ### Steps
 
 ```bash
-git clone https://github.com/your-username/melodize.git
+git clone https://github.com/Catgirl-meow/melodize.git
 cd melodize
 flutter pub get
 flutter run            # debug on connected device
