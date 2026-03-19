@@ -149,9 +149,15 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     await _playlistSource.clear();
     await _playlistSource.addAll(songs.map(_songToSource).toList());
     try {
+      // preload: false — setAudioSource returns immediately; sources are
+      // prepared in the background while the first track starts playing.
+      // Without this, setAudioSource blocks until all sources in the
+      // ConcatenatingAudioSource are prepared (useLazyPreparation: false
+      // means all of them), causing a delay proportional to queue length.
       await player.setAudioSource(
         _playlistSource,
         initialIndex: startIndex.clamp(0, songs.length - 1),
+        preload: false,
       );
       await player.play();
     } catch (e) {
