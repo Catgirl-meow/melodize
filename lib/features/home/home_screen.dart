@@ -4,6 +4,7 @@ import '../../core/models/album.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/widgets/cover_art_image.dart';
+import '../../shared/widgets/offline_banner.dart';
 import '../library/album_detail_screen.dart';
 import '../library/playlist_detail_screen.dart';
 
@@ -31,35 +32,36 @@ class HomeScreen extends ConsumerWidget {
     final serverReachable =
         ref.watch(serverReachableProvider).valueOrNull ?? true;
 
-    return RefreshIndicator(
+    return SafeArea(
+      bottom: false,
+      child: RefreshIndicator(
       onRefresh: () => _refresh(ref),
       child: CustomScrollView(
         // Always scrollable so pull-to-refresh works even with little content
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
+        // Offline banner
+        const SliverToBoxAdapter(child: OfflineBanner()),
+
         // Server unreachable chip (only when device is online but server is down)
         if (isOnline && !serverReachable)
           SliverToBoxAdapter(
-            child: SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                child: Row(
-                  children: [
-                    Icon(Icons.cloud_off_rounded,
-                        size: 14,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Server unreachable — pull to retry',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color:
-                            Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Row(
+                children: [
+                  Icon(Icons.cloud_off_rounded,
+                      size: 13,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 5),
+                  Text(
+                    'Server unreachable — pull to retry',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -68,21 +70,19 @@ class HomeScreen extends ConsumerWidget {
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
           sliver: SliverToBoxAdapter(
-            child: SafeArea(
-              bottom: false,
-              child: Text(
-                _greeting(username),
-                style: Theme.of(context)
-                    .textTheme
-                    .headlineMedium
-                    ?.copyWith(fontWeight: FontWeight.bold),
-              ),
+            child: Text(
+              _greeting(username),
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
             ),
           ),
         ),
 
         // Playlists
         playlistsAsync.when(
+          skipLoadingOnRefresh: true,
           loading: () => const SliverToBoxAdapter(child: SizedBox.shrink()),
           error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
           data: (playlists) {
@@ -117,6 +117,8 @@ class HomeScreen extends ConsumerWidget {
 
         // Newly added albums
         newestAsync.when(
+          skipLoadingOnRefresh: true,
+          skipError: true,
           loading: () => const SliverToBoxAdapter(child: SizedBox.shrink()),
           error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
           data: (albums) {
@@ -151,6 +153,8 @@ class HomeScreen extends ConsumerWidget {
 
         // Discover — random songs
         randomAsync.when(
+          skipLoadingOnRefresh: true,
+          skipError: true,
           loading: () => const SliverToBoxAdapter(
             child: Padding(
               padding: EdgeInsets.symmetric(vertical: 48),
@@ -193,6 +197,7 @@ class HomeScreen extends ConsumerWidget {
 
         // Recently played
         recentAsync.when(
+          skipLoadingOnRefresh: true,
           loading: () => const SliverToBoxAdapter(child: SizedBox.shrink()),
           error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
           data: (songs) {
@@ -222,6 +227,7 @@ class HomeScreen extends ConsumerWidget {
         const SliverPadding(padding: EdgeInsets.only(bottom: 16)),
       ],
       ),
+    ),
     );
   }
 

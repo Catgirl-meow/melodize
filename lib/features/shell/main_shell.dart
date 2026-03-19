@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
@@ -179,113 +178,7 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
           ),
 
-        // Connectivity banner — topmost layer, appears on all screens
-        const _ConnectivityBanner(),
       ],
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Connectivity banner
-//
-// • Device offline  → orange bar "No internet connection" slides in from top
-// • Back online     → green bar "Back online" for 2 s, then slides out
-// Manages its own timer state so the outer shell never rebuilds for it.
-
-class _ConnectivityBanner extends ConsumerStatefulWidget {
-  const _ConnectivityBanner();
-
-  @override
-  ConsumerState<_ConnectivityBanner> createState() =>
-      _ConnectivityBannerState();
-}
-
-class _ConnectivityBannerState extends ConsumerState<_ConnectivityBanner> {
-  // null  = hidden
-  // true  = showing "No internet connection"
-  // false = showing "Back online" (briefly)
-  bool? _bannerState; // null=hidden, true=offline, false=reconnected
-  Timer? _hideTimer;
-
-  @override
-  void dispose() {
-    _hideTimer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    ref.listen<AsyncValue<bool>>(isOnlineProvider, (prev, next) {
-      final wasOnline = prev?.valueOrNull ?? true;
-      final isNowOnline = next.valueOrNull ?? true;
-
-      if (!isNowOnline && wasOnline) {
-        // Just went offline
-        _hideTimer?.cancel();
-        setState(() => _bannerState = true);
-      } else if (isNowOnline && wasOnline == false) {
-        // Just came back online — show "Back online" briefly
-        _hideTimer?.cancel();
-        setState(() => _bannerState = false);
-        _hideTimer = Timer(const Duration(seconds: 2), () {
-          if (mounted) setState(() => _bannerState = null);
-        });
-      }
-    });
-
-    final visible = _bannerState != null;
-    final statusBarH = MediaQuery.of(context).padding.top;
-
-    return Positioned(
-      top: statusBarH,
-      left: 0,
-      right: 0,
-      child: AnimatedSlide(
-        offset: visible ? Offset.zero : const Offset(0, -1),
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 200),
-          child: _bannerState == null
-              ? const SizedBox.shrink()
-              : _BannerContent(isOffline: _bannerState!),
-        ),
-      ),
-    );
-  }
-}
-
-class _BannerContent extends StatelessWidget {
-  final bool isOffline;
-  const _BannerContent({required this.isOffline});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      key: ValueKey(isOffline),
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 16),
-      color: isOffline ? const Color(0xFFBF360C) : const Color(0xFF2E7D32),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            isOffline ? Icons.wifi_off_rounded : Icons.wifi_rounded,
-            size: 14,
-            color: Colors.white,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            isOffline ? 'No internet connection' : 'Back online',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

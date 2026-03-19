@@ -4,6 +4,7 @@ import '../../core/models/album.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/widgets/cover_art_image.dart';
+import '../../shared/widgets/offline_banner.dart';
 import '../../shared/widgets/song_tile.dart';
 import 'album_detail_screen.dart';
 
@@ -123,11 +124,18 @@ class LibraryScreen extends ConsumerWidget {
             ],
           ),
         ),
-        body: const TabBarView(
+        body: const Column(
           children: [
-            RepaintBoundary(child: _SongsTab()),
-            RepaintBoundary(child: _AlbumsTab()),
-            RepaintBoundary(child: _ArtistsTab()),
+            OfflineBanner(),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  RepaintBoundary(child: _SongsTab()),
+                  RepaintBoundary(child: _AlbumsTab()),
+                  RepaintBoundary(child: _ArtistsTab()),
+                ],
+              ),
+            ),
           ],
         ),
       ),

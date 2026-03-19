@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:collection';
 import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -220,11 +221,7 @@ final allSongsProvider = StreamProvider<List<Song>>((ref) async* {
 final randomSongsProvider = FutureProvider<List<Song>>((ref) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return [];
-  try {
-    return await client.getRandomSongs(count: 20);
-  } catch (_) {
-    return [];
-  }
+  return await client.getRandomSongs(count: 20);
 });
 
 final downloadedSongsProvider = FutureProvider<List<Song>>((ref) async {
@@ -251,11 +248,7 @@ final recentlyPlayedProvider = FutureProvider<List<Song>>((ref) async {
 final newestAlbumsProvider = FutureProvider<List<Album>>((ref) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return [];
-  try {
-    return await client.getNewestAlbums(size: 20);
-  } catch (_) {
-    return [];
-  }
+  return await client.getNewestAlbums(size: 20);
 });
 
 final allAlbumsProvider = FutureProvider<List<Album>>((ref) async {
@@ -553,6 +546,18 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
       );
       if (!mounted) return;
       await _db.markDownloaded(song.id, savePath);
+      // Pre-cache lyrics so they're available offline. Fire-and-forget:
+      // a lyrics failure must not fail the download.
+      unawaited(LrcLibClient().getLyrics(
+        artist: song.artist,
+        title: song.title,
+        album: song.album,
+        duration: song.duration ?? 0,
+      ).then((result) {
+        if (result != null) {
+          _db.cacheLyrics(song.id, result.plain, result.synced);
+        }
+      }).catchError((_) {}));
       await _db.upsertDownload(DownloadQueueCompanion.insert(
         songId: song.id,
         songTitle: song.title,
