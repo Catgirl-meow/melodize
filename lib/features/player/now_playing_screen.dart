@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -438,8 +439,10 @@ class _PlayerPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final artSize = screenWidth * 0.8;
+    final size = MediaQuery.of(context).size;
+    // Cap by height so the Column never overflows on wide/short desktop windows.
+    // On mobile screenWidth * 0.8 always wins (tall narrow screens).
+    final artSize = math.min(size.width * 0.8, size.height * 0.40);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),

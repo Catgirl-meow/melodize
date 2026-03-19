@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
@@ -42,14 +43,15 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     ),
   );
 
-  // useLazyPreparation: false — ExoPlayer eagerly prepares all sources in the
-  // playlist (lightweight: reads headers / timelines, does not download audio).
-  // This lets ExoPlayer buffer across track boundaries for gapless playback.
-  // With true (default), each source is only prepared when it becomes current,
-  // causing a perceptible gap at every track transition.
+  // useLazyPreparation: false on Android/iOS — ExoPlayer/AVPlayer eagerly
+  // prepares all source timelines (lightweight header reads) so they can
+  // buffer across track boundaries for gapless playback.
+  // Must stay true on Linux: just_audio_mpv (mpv IPC backend) does not
+  // recognise this property and crashes the mpv process with "property not
+  // found" when it receives useLazyPreparation: false in the track list JSON.
   final _playlistSource = ConcatenatingAudioSource(
     children: [],
-    useLazyPreparation: false,
+    useLazyPreparation: Platform.isLinux || Platform.isWindows || Platform.isMacOS,
   );
 
   SubsonicConfig? _config;
