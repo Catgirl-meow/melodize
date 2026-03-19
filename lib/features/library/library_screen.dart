@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/models/album.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/widgets/cover_art_image.dart';
@@ -8,18 +9,26 @@ import 'album_detail_screen.dart';
 import 'playlist_detail_screen.dart';
 
 // ---------------------------------------------------------------------------
+// Song sorting
 
 enum _SongSort { name, artist, recentlyAdded, downloaded }
 
-String _sortLabel(_SongSort s) => switch (s) {
+String _songSortLabel(_SongSort s) => switch (s) {
       _SongSort.name => 'Name',
       _SongSort.artist => 'Artist',
       _SongSort.recentlyAdded => 'Recently added',
       _SongSort.downloaded => 'Downloaded',
     };
 
+IconData _songSortIcon(_SongSort s) => switch (s) {
+      _SongSort.name => Icons.sort_by_alpha_rounded,
+      _SongSort.artist => Icons.person_rounded,
+      _SongSort.recentlyAdded => Icons.schedule_rounded,
+      _SongSort.downloaded => Icons.download_done_rounded,
+    };
+
 List<Song> _applySongSort(
-    List<Song> songs, _SongSort sort, Set<String> downloadedIds) {
+    List<Song> songs, _SongSort sort, bool ascending, Set<String> downloadedIds) {
   final list = List<Song>.from(songs);
   switch (sort) {
     case _SongSort.name:
@@ -34,11 +43,10 @@ List<Song> _applySongSort(
         if (a.created == null && b.created == null) return 0;
         if (a.created == null) return 1;
         if (b.created == null) return -1;
-        return b.created!.compareTo(a.created!); // newest first
+        return b.created!.compareTo(a.created!);
       });
     case _SongSort.downloaded:
       list.sort((a, b) {
-        // Use live downloadedIds to account for auto-downloaded songs
         final aDown = a.isDownloaded || downloadedIds.contains(a.id);
         final bDown = b.isDownloaded || downloadedIds.contains(b.id);
         if (aDown == bDown) {
@@ -47,6 +55,50 @@ List<Song> _applySongSort(
         return aDown ? -1 : 1;
       });
   }
+  if (!ascending) return list.reversed.toList();
+  return list;
+}
+
+// ---------------------------------------------------------------------------
+// Album sorting
+
+enum _AlbumSort { name, artist, year, songCount }
+
+String _albumSortLabel(_AlbumSort s) => switch (s) {
+      _AlbumSort.name => 'Name',
+      _AlbumSort.artist => 'Artist',
+      _AlbumSort.year => 'Year',
+      _AlbumSort.songCount => 'Song count',
+    };
+
+IconData _albumSortIcon(_AlbumSort s) => switch (s) {
+      _AlbumSort.name => Icons.sort_by_alpha_rounded,
+      _AlbumSort.artist => Icons.person_rounded,
+      _AlbumSort.year => Icons.calendar_today_rounded,
+      _AlbumSort.songCount => Icons.music_note_rounded,
+    };
+
+List<Album> _applyAlbumSort(List<Album> albums, _AlbumSort sort, bool ascending) {
+  final list = List<Album>.from(albums);
+  switch (sort) {
+    case _AlbumSort.name:
+      list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    case _AlbumSort.artist:
+      list.sort((a, b) {
+        final c = a.artist.toLowerCase().compareTo(b.artist.toLowerCase());
+        return c != 0 ? c : a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      });
+    case _AlbumSort.year:
+      list.sort((a, b) {
+        if (a.year == null && b.year == null) return 0;
+        if (a.year == null) return 1;
+        if (b.year == null) return -1;
+        return b.year!.compareTo(a.year!); // newest first by default
+      });
+    case _AlbumSort.songCount:
+      list.sort((a, b) => b.songCount.compareTo(a.songCount));
+  }
+  if (!ascending) return list.reversed.toList();
   return list;
 }
 
@@ -57,17 +109,27 @@ class LibraryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
     return DefaultTabController(
       length: 4,
       child: NestedScrollView(
         headerSliverBuilder: (context, __) => [
           SliverAppBar(
             pinned: true,
-            backgroundColor: Theme.of(context).colorScheme.surface,
+            backgroundColor: scheme.surface,
             surfaceTintColor: Colors.transparent,
             title: const Text('Library'),
-            bottom: const TabBar(
-              tabs: [
+            bottom: TabBar(
+              splashBorderRadius: BorderRadius.circular(50),
+              indicatorSize: TabBarIndicatorSize.tab,
+              indicator: BoxDecoration(
+                borderRadius: BorderRadius.circular(50),
+                color: scheme.secondaryContainer,
+              ),
+              labelColor: scheme.onSecondaryContainer,
+              unselectedLabelColor: scheme.onSurfaceVariant,
+              dividerColor: Colors.transparent,
+              tabs: const [
                 Tab(text: 'Songs'),
                 Tab(text: 'Albums'),
                 Tab(text: 'Artists'),
@@ -100,48 +162,58 @@ class _SongsTab extends ConsumerStatefulWidget {
 
 class _SongsTabState extends ConsumerState<_SongsTab> {
   _SongSort _sort = _SongSort.name;
+  bool _ascending = true;
 
   void _showSortSheet(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet<void>(
       context: context,
       builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text('Sort songs',
-                  style: Theme.of(context).textTheme.titleMedium),
-            ),
-            for (final option in _SongSort.values)
-              ListTile(
-                leading: Icon(
-                  _sortIcon(option),
-                  color: _sort == option ? scheme.primary : null,
-                ),
-                title: Text(_sortLabel(option)),
-                trailing: _sort == option
-                    ? Icon(Icons.check_rounded, color: scheme.primary)
-                    : null,
-                onTap: () {
-                  setState(() => _sort = option);
-                  Navigator.pop(context);
-                },
+        child: StatefulBuilder(
+          builder: (ctx, setSheetState) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text('Sort songs',
+                    style: Theme.of(context).textTheme.titleMedium),
               ),
-            const SizedBox(height: 8),
-          ],
+              for (final option in _SongSort.values)
+                ListTile(
+                  leading: Icon(
+                    _songSortIcon(option),
+                    color: _sort == option ? scheme.primary : null,
+                  ),
+                  title: Text(_songSortLabel(option)),
+                  trailing: _sort == option
+                      ? Icon(
+                          _ascending
+                              ? Icons.arrow_upward_rounded
+                              : Icons.arrow_downward_rounded,
+                          color: scheme.primary,
+                          size: 20,
+                        )
+                      : null,
+                  onTap: () {
+                    setSheetState(() {
+                      if (_sort == option) {
+                        _ascending = !_ascending;
+                      } else {
+                        _sort = option;
+                        _ascending = true;
+                      }
+                    });
+                    setState(() {});
+                    Navigator.pop(context);
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );
   }
-
-  IconData _sortIcon(_SongSort s) => switch (s) {
-        _SongSort.name => Icons.sort_by_alpha_rounded,
-        _SongSort.artist => Icons.person_rounded,
-        _SongSort.recentlyAdded => Icons.schedule_rounded,
-        _SongSort.downloaded => Icons.download_done_rounded,
-      };
 
   @override
   Widget build(BuildContext context) {
@@ -156,10 +228,9 @@ class _SongsTabState extends ConsumerState<_SongsTab> {
           return const Center(child: Text('No songs found'));
         }
         final downloadedIds = ref.watch(downloadedSongIdsProvider);
-        final songs = _applySongSort(rawSongs, _sort, downloadedIds);
+        final songs = _applySongSort(rawSongs, _sort, _ascending, downloadedIds);
         return CustomScrollView(
           slivers: [
-            // Sort bar
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 10, 8, 4),
@@ -173,8 +244,13 @@ class _SongsTabState extends ConsumerState<_SongsTab> {
                     const Spacer(),
                     TextButton.icon(
                       onPressed: () => _showSortSheet(context),
-                      icon: const Icon(Icons.sort_rounded, size: 18),
-                      label: Text(_sortLabel(_sort)),
+                      icon: Icon(
+                        _ascending
+                            ? Icons.arrow_upward_rounded
+                            : Icons.arrow_downward_rounded,
+                        size: 16,
+                      ),
+                      label: Text(_songSortLabel(_sort)),
                       style: TextButton.styleFrom(
                         foregroundColor: scheme.primary,
                         textStyle: const TextStyle(fontSize: 13),
@@ -185,7 +261,6 @@ class _SongsTabState extends ConsumerState<_SongsTab> {
                 ),
               ),
             ),
-            // Song list
             SliverList(
               delegate: SliverChildBuilderDelegate(
                 (_, i) => SongTile(
@@ -207,75 +282,183 @@ class _SongsTabState extends ConsumerState<_SongsTab> {
 
 // ---------------------------------------------------------------------------
 
-class _AlbumsTab extends ConsumerWidget {
+class _AlbumsTab extends ConsumerStatefulWidget {
   const _AlbumsTab();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_AlbumsTab> createState() => _AlbumsTabState();
+}
+
+class _AlbumsTabState extends ConsumerState<_AlbumsTab> {
+  _AlbumSort _sort = _AlbumSort.name;
+  bool _ascending = true;
+
+  void _showSortSheet(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: StatefulBuilder(
+          builder: (ctx, setSheetState) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text('Sort albums',
+                    style: Theme.of(context).textTheme.titleMedium),
+              ),
+              for (final option in _AlbumSort.values)
+                ListTile(
+                  leading: Icon(
+                    _albumSortIcon(option),
+                    color: _sort == option ? scheme.primary : null,
+                  ),
+                  title: Text(_albumSortLabel(option)),
+                  trailing: _sort == option
+                      ? Icon(
+                          _ascending
+                              ? Icons.arrow_upward_rounded
+                              : Icons.arrow_downward_rounded,
+                          color: scheme.primary,
+                          size: 20,
+                        )
+                      : null,
+                  onTap: () {
+                    setSheetState(() {
+                      if (_sort == option) {
+                        _ascending = !_ascending;
+                      } else {
+                        _sort = option;
+                        _ascending = true;
+                      }
+                    });
+                    setState(() {});
+                    Navigator.pop(context);
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final albumsAsync = ref.watch(allAlbumsProvider);
+    final scheme = Theme.of(context).colorScheme;
+
     return albumsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(child: Text('$e')),
-      data: (albums) {
-        if (albums.isEmpty) return const Center(child: Text('No albums'));
-        return GridView.builder(
-          padding: const EdgeInsets.all(12),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            childAspectRatio: 0.78,
-            crossAxisSpacing: 8,
-            mainAxisSpacing: 8,
-          ),
-          itemCount: albums.length,
-          itemBuilder: (_, i) {
-            final album = albums[i];
-            final scheme = Theme.of(context).colorScheme;
-            return InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => AlbumDetailScreen(album: album),
+      data: (rawAlbums) {
+        if (rawAlbums.isEmpty) return const Center(child: Text('No albums'));
+        final albums = _applyAlbumSort(rawAlbums, _sort, _ascending);
+        return CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 8, 4),
+                child: Row(
+                  children: [
+                    Text(
+                      '${albums.length} albums',
+                      style: TextStyle(
+                          color: scheme.onSurfaceVariant, fontSize: 13),
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: () => _showSortSheet(context),
+                      icon: Icon(
+                        _ascending
+                            ? Icons.arrow_upward_rounded
+                            : Icons.arrow_downward_rounded,
+                        size: 16,
+                      ),
+                      label: Text(_albumSortLabel(_sort)),
+                      style: TextButton.styleFrom(
+                        foregroundColor: scheme.primary,
+                        textStyle: const TextStyle(fontSize: 13),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: CoverArtImage(
-                      coverArtId: album.coverArt,
-                      size: double.infinity,
-                      borderRadius: 12,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(album.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600, fontSize: 13)),
-                        Text(
-                          album.year != null
-                              ? '${album.artist} · ${album.year}'
-                              : album.artist,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              sliver: SliverGrid(
+                delegate: SliverChildBuilderDelegate(
+                  (_, i) {
+                    final album = albums[i];
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => AlbumDetailScreen(album: album),
                         ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: CoverArtImage(
+                              coverArtId: album.coverArt,
+                              size: double.infinity,
+                              borderRadius: 12,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(album.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13)),
+                                Text(
+                                  album.year != null
+                                      ? '${album.artist} · ${album.year}'
+                                      : album.artist,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: scheme.onSurfaceVariant),
+                                ),
+                                Text(
+                                  '${album.songCount} ${album.songCount == 1 ? 'song' : 'songs'}',
+                                  maxLines: 1,
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: scheme.onSurfaceVariant),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                        ],
+                      ),
+                    );
+                  },
+                  childCount: albums.length,
+                ),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  childAspectRatio: 0.70,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                ),
               ),
-            );
-          },
+            ),
+          ],
         );
       },
     );

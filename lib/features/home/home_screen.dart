@@ -196,7 +196,8 @@ class HomeScreen extends ConsumerWidget {
     } else {
       base = 'Good night';
     }
-    return username != null ? '$base, $username' : base;
+    final isEmail = username != null && username.contains('@');
+    return (username != null && !isEmail) ? '$base, $username' : base;
   }
 }
 

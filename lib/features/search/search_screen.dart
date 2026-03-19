@@ -70,6 +70,18 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                         }
                         return ListView(
                           children: [
+                            if (results.songs.isNotEmpty) ...[
+                              _SectionLabel('Songs'),
+                              ...results.songs.map((s) => SongTile(
+                                    song: s,
+                                    showAlbum: true,
+                                    onTap: () => ref
+                                        .read(audioHandlerNotifierProvider)
+                                        ?.loadQueue(results.songs,
+                                            startIndex:
+                                                results.songs.indexOf(s)),
+                                  )),
+                            ],
                             if (results.artists.isNotEmpty) ...[
                               _SectionLabel('Artists'),
                               ...results.artists.map((a) => ListTile(
@@ -103,18 +115,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                                             AlbumDetailScreen(album: a),
                                       ),
                                     ),
-                                  )),
-                            ],
-                            if (results.songs.isNotEmpty) ...[
-                              _SectionLabel('Songs'),
-                              ...results.songs.map((s) => SongTile(
-                                    song: s,
-                                    showAlbum: true,
-                                    onTap: () => ref
-                                        .read(audioHandlerNotifierProvider)
-                                        ?.loadQueue(results.songs,
-                                            startIndex:
-                                                results.songs.indexOf(s)),
                                   )),
                             ],
                           ],
