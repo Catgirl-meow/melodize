@@ -10,6 +10,16 @@ import '../library/playlist_detail_screen.dart';
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
+  Future<void> _refresh(WidgetRef ref) async {
+    ref.invalidate(newestAlbumsProvider);
+    ref.invalidate(randomSongsProvider);
+    ref.invalidate(recentlyPlayedProvider);
+    ref.invalidate(allSongsProvider);
+    ref.invalidate(serverReachableProvider);
+    // Give providers a moment to start fetching before we declare done
+    await Future.delayed(const Duration(milliseconds: 600));
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final randomAsync = ref.watch(randomSongsProvider);
@@ -17,9 +27,43 @@ class HomeScreen extends ConsumerWidget {
     final newestAsync = ref.watch(newestAlbumsProvider);
     final playlistsAsync = ref.watch(playlistsProvider);
     final username = ref.watch(serverConfigProvider).valueOrNull?.username;
+    final isOnline = ref.watch(isOnlineProvider).valueOrNull ?? true;
+    final serverReachable =
+        ref.watch(serverReachableProvider).valueOrNull ?? true;
 
-    return CustomScrollView(
-      slivers: [
+    return RefreshIndicator(
+      onRefresh: () => _refresh(ref),
+      child: CustomScrollView(
+        // Always scrollable so pull-to-refresh works even with little content
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+        // Server unreachable chip (only when device is online but server is down)
+        if (isOnline && !serverReachable)
+          SliverToBoxAdapter(
+            child: SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: Row(
+                  children: [
+                    Icon(Icons.cloud_off_rounded,
+                        size: 14,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Server unreachable — pull to retry',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color:
+                            Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
         // Header
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
@@ -177,6 +221,7 @@ class HomeScreen extends ConsumerWidget {
 
         const SliverPadding(padding: EdgeInsets.only(bottom: 16)),
       ],
+      ),
     );
   }
 

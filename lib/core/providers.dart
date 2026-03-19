@@ -1,5 +1,6 @@
 import 'dart:collection';
 import 'dart:io';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
@@ -18,6 +19,31 @@ import 'models/search_results.dart';
 
 // --- Database ---
 final databaseProvider = Provider<AppDatabase>((_) => AppDatabase());
+
+// --- Connectivity ---
+// True = device has at least one non-none network interface.
+// This is real device connectivity (Wi-Fi / mobile), NOT server reachability.
+final isOnlineProvider = StreamProvider<bool>((ref) async* {
+  final conn = Connectivity();
+  final initial = await conn.checkConnectivity();
+  yield initial.any((r) => r != ConnectivityResult.none);
+  yield* conn.onConnectivityChanged
+      .map((results) => results.any((r) => r != ConnectivityResult.none));
+});
+
+// True = Navidrome/Subsonic server responded to ping while device is online.
+// Re-runs automatically whenever isOnlineProvider or serverConfig changes.
+final serverReachableProvider = FutureProvider<bool>((ref) async {
+  final isOnline = ref.watch(isOnlineProvider).valueOrNull ?? true;
+  if (!isOnline) return false;
+  final client = ref.watch(subsonicClientProvider);
+  if (client == null) return false;
+  try {
+    return await client.ping();
+  } catch (_) {
+    return false;
+  }
+});
 
 // --- Server Config ---
 final serverConfigProvider = FutureProvider<SubsonicConfig?>((ref) async {

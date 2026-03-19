@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
@@ -51,6 +52,15 @@ class _MainShellState extends ConsumerState<MainShell>
     );
   }
 
+  void _invalidateServerProviders() {
+    ref.invalidate(allSongsProvider);
+    ref.invalidate(newestAlbumsProvider);
+    ref.invalidate(randomSongsProvider);
+    ref.invalidate(allAlbumsProvider);
+    ref.invalidate(allArtistsProvider);
+    ref.invalidate(serverReachableProvider);
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -61,6 +71,15 @@ class _MainShellState extends ConsumerState<MainShell>
     ref.listen(currentSongStreamProvider, (prev, next) {
       if (prev?.valueOrNull != null && next.valueOrNull == null) {
         _playerAnim.value = 0;
+      }
+    });
+
+    // Auto-invalidate all server providers when device comes back online
+    ref.listen<AsyncValue<bool>>(isOnlineProvider, (prev, next) {
+      final wasOnline = prev?.valueOrNull ?? true;
+      final isNowOnline = next.valueOrNull ?? true;
+      if (!wasOnline && isNowOnline) {
+        _invalidateServerProviders();
       }
     });
 
@@ -132,37 +151,141 @@ class _MainShellState extends ConsumerState<MainShell>
       ),
     );
 
-    if (!hasSong) return scaffold;
-
-    // Outer Stack so the full player can cover the entire screen (including
-    // the navigation bar area) without fighting Scaffold layout constraints.
+    // Always use outer Stack so the connectivity banner overlays everything
+    // (including the full player) regardless of hasSong state.
     return Stack(
       children: [
         scaffold,
 
-        // Full player — GPU-composited translation via Transform.translate.
-        // RepaintBoundary gives the player its own render layer; the layer is
-        // simply shifted each frame with zero re-rasterisation cost.
-        AnimatedBuilder(
-          animation: _playerAnim,
-          builder: (_, child) {
-            final t = _playerAnim.value;
-            return IgnorePointer(
-              ignoring: t < 0.01,
-              child: Transform.translate(
-                offset: Offset(0, screenH * (1 - t)),
-                child: child,
+        // Full player — only when a song is active
+        if (hasSong)
+          AnimatedBuilder(
+            animation: _playerAnim,
+            builder: (_, child) {
+              final t = _playerAnim.value;
+              return IgnorePointer(
+                ignoring: t < 0.01,
+                child: Transform.translate(
+                  offset: Offset(0, screenH * (1 - t)),
+                  child: child,
+                ),
+              );
+            },
+            child: RepaintBoundary(
+              child: NowPlayingScreen(
+                controller: _playerAnim,
+                onClose: _closePlayer,
               ),
-            );
-          },
-          child: RepaintBoundary(
-            child: NowPlayingScreen(
-              controller: _playerAnim,
-              onClose: _closePlayer,
             ),
           ),
-        ),
+
+        // Connectivity banner — topmost layer, appears on all screens
+        const _ConnectivityBanner(),
       ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Connectivity banner
+//
+// • Device offline  → orange bar "No internet connection" slides in from top
+// • Back online     → green bar "Back online" for 2 s, then slides out
+// Manages its own timer state so the outer shell never rebuilds for it.
+
+class _ConnectivityBanner extends ConsumerStatefulWidget {
+  const _ConnectivityBanner();
+
+  @override
+  ConsumerState<_ConnectivityBanner> createState() =>
+      _ConnectivityBannerState();
+}
+
+class _ConnectivityBannerState extends ConsumerState<_ConnectivityBanner> {
+  // null  = hidden
+  // true  = showing "No internet connection"
+  // false = showing "Back online" (briefly)
+  bool? _bannerState; // null=hidden, true=offline, false=reconnected
+  Timer? _hideTimer;
+
+  @override
+  void dispose() {
+    _hideTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen<AsyncValue<bool>>(isOnlineProvider, (prev, next) {
+      final wasOnline = prev?.valueOrNull ?? true;
+      final isNowOnline = next.valueOrNull ?? true;
+
+      if (!isNowOnline && wasOnline) {
+        // Just went offline
+        _hideTimer?.cancel();
+        setState(() => _bannerState = true);
+      } else if (isNowOnline && wasOnline == false) {
+        // Just came back online — show "Back online" briefly
+        _hideTimer?.cancel();
+        setState(() => _bannerState = false);
+        _hideTimer = Timer(const Duration(seconds: 2), () {
+          if (mounted) setState(() => _bannerState = null);
+        });
+      }
+    });
+
+    final visible = _bannerState != null;
+    final statusBarH = MediaQuery.of(context).padding.top;
+
+    return Positioned(
+      top: statusBarH,
+      left: 0,
+      right: 0,
+      child: AnimatedSlide(
+        offset: visible ? Offset.zero : const Offset(0, -1),
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 200),
+          child: _bannerState == null
+              ? const SizedBox.shrink()
+              : _BannerContent(isOffline: _bannerState!),
+        ),
+      ),
+    );
+  }
+}
+
+class _BannerContent extends StatelessWidget {
+  final bool isOffline;
+  const _BannerContent({required this.isOffline});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: ValueKey(isOffline),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 16),
+      color: isOffline ? const Color(0xFFBF360C) : const Color(0xFF2E7D32),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            isOffline ? Icons.wifi_off_rounded : Icons.wifi_rounded,
+            size: 14,
+            color: Colors.white,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            isOffline ? 'No internet connection' : 'Back online',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
