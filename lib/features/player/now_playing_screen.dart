@@ -214,7 +214,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.transparent,
-      builder: (_) => const QueueScreen(),
+      builder: (_) => const RepaintBoundary(child: QueueScreen()),
     );
   }
 

@@ -8,10 +8,16 @@ class QueueScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final seqStateAsync = ref.watch(sequenceStateStreamProvider);
-    final seqState = seqStateAsync.valueOrNull;
-    final currentIndex = seqState?.currentIndex ?? 0;
-    final queue = seqState?.effectiveSequence ?? [];
+    // Use select so QueueScreen only rebuilds when the sequence or current
+    // index changes — not on every stream emission (loop mode, shuffle, etc.)
+    final queue = ref.watch(
+      sequenceStateStreamProvider
+          .select((s) => s.valueOrNull?.effectiveSequence ?? const []),
+    );
+    final currentIndex = ref.watch(
+      sequenceStateStreamProvider
+          .select((s) => s.valueOrNull?.currentIndex ?? 0),
+    );
     final handler = ref.read(audioHandlerNotifierProvider);
     final scheme = Theme.of(context).colorScheme;
 
@@ -60,6 +66,9 @@ class QueueScreen extends ConsumerWidget {
                   )
                 : ReorderableListView.builder(
                     padding: EdgeInsets.zero,
+                    // Limit pre-building of off-screen items
+                    cacheExtent: 200,
+                    proxyDecorator: (child, index, animation) => child,
                     itemCount: queue.length,
                     onReorder: (oldIndex, newIndex) {
                       if (newIndex > oldIndex) newIndex--;
@@ -68,51 +77,53 @@ class QueueScreen extends ConsumerWidget {
                     itemBuilder: (_, i) {
                       final song = queue[i].tag;
                       final isCurrent = i == currentIndex;
-                      return ListTile(
+                      return RepaintBoundary(
                         key: ValueKey(queue[i].sequence.hashCode + i),
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 2),
-                        leading: CoverArtImage(
-                          coverArtId: song?.coverArt,
-                          size: 44,
-                        ),
-                        title: Text(
-                          song?.title ?? '',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: isCurrent
-                                ? FontWeight.bold
-                                : FontWeight.normal,
-                            color: isCurrent ? scheme.primary : null,
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 2),
+                          leading: CoverArtImage(
+                            coverArtId: song?.coverArt,
+                            size: 44,
                           ),
-                        ),
-                        subtitle: Text(
-                          song?.artist ?? '',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: scheme.onSurfaceVariant,
-                              fontSize: 12),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (isCurrent)
-                              Icon(Icons.equalizer_rounded,
-                                  size: 20, color: scheme.primary),
-                            IconButton(
-                              icon: const Icon(Icons.close_rounded,
-                                  size: 18),
-                              onPressed: () =>
-                                  handler?.removeFromQueue(i),
-                              visualDensity: VisualDensity.compact,
+                          title: Text(
+                            song?.title ?? '',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight: isCurrent
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                              color: isCurrent ? scheme.primary : null,
                             ),
-                            const Icon(Icons.drag_handle_rounded,
-                                size: 20),
-                          ],
+                          ),
+                          subtitle: Text(
+                            song?.artist ?? '',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                color: scheme.onSurfaceVariant,
+                                fontSize: 12),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (isCurrent)
+                                Icon(Icons.equalizer_rounded,
+                                    size: 20, color: scheme.primary),
+                              IconButton(
+                                icon: const Icon(Icons.close_rounded,
+                                    size: 18),
+                                onPressed: () =>
+                                    handler?.removeFromQueue(i),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              const Icon(Icons.drag_handle_rounded,
+                                  size: 20),
+                            ],
+                          ),
+                          onTap: () => handler?.skipToIndex(i),
                         ),
-                        onTap: () => handler?.skipToIndex(i),
                       );
                     },
                   ),

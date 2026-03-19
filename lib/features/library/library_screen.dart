@@ -6,7 +6,6 @@ import '../../core/providers.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/song_tile.dart';
 import 'album_detail_screen.dart';
-import 'playlist_detail_screen.dart';
 
 // ---------------------------------------------------------------------------
 // Song sorting
@@ -93,7 +92,7 @@ List<Album> _applyAlbumSort(List<Album> albums, _AlbumSort sort, bool ascending)
         if (a.year == null && b.year == null) return 0;
         if (a.year == null) return 1;
         if (b.year == null) return -1;
-        return b.year!.compareTo(a.year!); // newest first by default
+        return b.year!.compareTo(a.year!);
       });
     case _AlbumSort.songCount:
       list.sort((a, b) => b.songCount.compareTo(a.songCount));
@@ -109,41 +108,26 @@ class LibraryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
+    // Plain Scaffold + AppBar is much lighter than NestedScrollView +
+    // SliverAppBar when the app bar is always pinned anyway.
     return DefaultTabController(
-      length: 4,
-      child: NestedScrollView(
-        headerSliverBuilder: (context, __) => [
-          SliverAppBar(
-            pinned: true,
-            backgroundColor: scheme.surface,
-            surfaceTintColor: Colors.transparent,
-            title: const Text('Library'),
-            bottom: TabBar(
-              splashBorderRadius: BorderRadius.circular(50),
-              indicatorSize: TabBarIndicatorSize.tab,
-              indicator: BoxDecoration(
-                borderRadius: BorderRadius.circular(50),
-                color: scheme.secondaryContainer,
-              ),
-              labelColor: scheme.onSecondaryContainer,
-              unselectedLabelColor: scheme.onSurfaceVariant,
-              dividerColor: Colors.transparent,
-              tabs: const [
-                Tab(text: 'Songs'),
-                Tab(text: 'Albums'),
-                Tab(text: 'Artists'),
-                Tab(text: 'Playlists'),
-              ],
-            ),
+      length: 3,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Library'),
+          bottom: const TabBar(
+            tabs: [
+              Tab(text: 'Songs'),
+              Tab(text: 'Albums'),
+              Tab(text: 'Artists'),
+            ],
           ),
-        ],
+        ),
         body: const TabBarView(
           children: [
-            _SongsTab(),
-            _AlbumsTab(),
-            _ArtistsTab(),
-            _PlaylistsTab(),
+            RepaintBoundary(child: _SongsTab()),
+            RepaintBoundary(child: _AlbumsTab()),
+            RepaintBoundary(child: _ArtistsTab()),
           ],
         ),
       ),
@@ -160,9 +144,13 @@ class _SongsTab extends ConsumerStatefulWidget {
   ConsumerState<_SongsTab> createState() => _SongsTabState();
 }
 
-class _SongsTabState extends ConsumerState<_SongsTab> {
+class _SongsTabState extends ConsumerState<_SongsTab>
+    with AutomaticKeepAliveClientMixin {
   _SongSort _sort = _SongSort.name;
   bool _ascending = true;
+
+  @override
+  bool get wantKeepAlive => true;
 
   void _showSortSheet(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -217,6 +205,7 @@ class _SongsTabState extends ConsumerState<_SongsTab> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // required by AutomaticKeepAliveClientMixin
     final songsAsync = ref.watch(allSongsProvider);
     final scheme = Theme.of(context).colorScheme;
 
@@ -263,12 +252,14 @@ class _SongsTabState extends ConsumerState<_SongsTab> {
             ),
             SliverList(
               delegate: SliverChildBuilderDelegate(
-                (_, i) => SongTile(
-                  song: songs[i],
-                  showAlbum: true,
-                  onTap: () => ref
-                      .read(audioHandlerNotifierProvider)
-                      ?.loadQueue(songs, startIndex: i),
+                (_, i) => RepaintBoundary(
+                  child: SongTile(
+                    song: songs[i],
+                    showAlbum: true,
+                    onTap: () => ref
+                        .read(audioHandlerNotifierProvider)
+                        ?.loadQueue(songs, startIndex: i),
+                  ),
                 ),
                 childCount: songs.length,
               ),
@@ -289,9 +280,13 @@ class _AlbumsTab extends ConsumerStatefulWidget {
   ConsumerState<_AlbumsTab> createState() => _AlbumsTabState();
 }
 
-class _AlbumsTabState extends ConsumerState<_AlbumsTab> {
+class _AlbumsTabState extends ConsumerState<_AlbumsTab>
+    with AutomaticKeepAliveClientMixin {
   _AlbumSort _sort = _AlbumSort.name;
   bool _ascending = true;
+
+  @override
+  bool get wantKeepAlive => true;
 
   void _showSortSheet(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -346,6 +341,7 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final albumsAsync = ref.watch(allAlbumsProvider);
     final scheme = Theme.of(context).colorScheme;
 
@@ -393,58 +389,60 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> {
                 delegate: SliverChildBuilderDelegate(
                   (_, i) {
                     final album = albums[i];
-                    return InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => AlbumDetailScreen(album: album),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: CoverArtImage(
-                              coverArtId: album.coverArt,
-                              size: double.infinity,
-                              borderRadius: 12,
-                            ),
+                    return RepaintBoundary(
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => AlbumDetailScreen(album: album),
                           ),
-                          const SizedBox(height: 6),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(album.name,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: CoverArtImage(
+                                coverArtId: album.coverArt,
+                                size: double.infinity,
+                                borderRadius: 12,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 4),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(album.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 13)),
+                                  Text(
+                                    album.year != null
+                                        ? '${album.artist} · ${album.year}'
+                                        : album.artist,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 13)),
-                                Text(
-                                  album.year != null
-                                      ? '${album.artist} · ${album.year}'
-                                      : album.artist,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      color: scheme.onSurfaceVariant),
-                                ),
-                                Text(
-                                  '${album.songCount} ${album.songCount == 1 ? 'song' : 'songs'}',
-                                  maxLines: 1,
-                                  style: TextStyle(
-                                      fontSize: 11,
-                                      color: scheme.onSurfaceVariant),
-                                ),
-                              ],
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: scheme.onSurfaceVariant),
+                                  ),
+                                  Text(
+                                    '${album.songCount} ${album.songCount == 1 ? 'song' : 'songs'}',
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        color: scheme.onSurfaceVariant),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 4),
-                        ],
+                            const SizedBox(height: 4),
+                          ],
+                        ),
                       ),
                     );
                   },
@@ -467,11 +465,21 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab> {
 
 // ---------------------------------------------------------------------------
 
-class _ArtistsTab extends ConsumerWidget {
+class _ArtistsTab extends ConsumerStatefulWidget {
   const _ArtistsTab();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ArtistsTab> createState() => _ArtistsTabState();
+}
+
+class _ArtistsTabState extends ConsumerState<_ArtistsTab>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
     final artistsAsync = ref.watch(allArtistsProvider);
     return artistsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
@@ -484,22 +492,24 @@ class _ArtistsTab extends ConsumerWidget {
           itemBuilder: (_, i) {
             final artist = artists[i];
             final scheme = Theme.of(context).colorScheme;
-            return ListTile(
-              leading: CoverArtImage(
-                coverArtId: artist.coverArt,
-                size: 48,
-                borderRadius: 24,
-              ),
-              title: Text(artist.name),
-              subtitle: Text(
-                '${artist.albumCount} ${artist.albumCount == 1 ? 'album' : 'albums'}',
-                style: TextStyle(color: scheme.onSurfaceVariant),
-              ),
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => _ArtistDetailScreen(
-                      artistId: artist.id, artistName: artist.name),
+            return RepaintBoundary(
+              child: ListTile(
+                leading: CoverArtImage(
+                  coverArtId: artist.coverArt,
+                  size: 48,
+                  borderRadius: 24,
+                ),
+                title: Text(artist.name),
+                subtitle: Text(
+                  '${artist.albumCount} ${artist.albumCount == 1 ? 'album' : 'albums'}',
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                ),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => _ArtistDetailScreen(
+                        artistId: artist.id, artistName: artist.name),
+                  ),
                 ),
               ),
             );
@@ -536,90 +546,52 @@ class _ArtistDetailScreen extends ConsumerWidget {
           itemBuilder: (_, i) {
             final album = albums[i];
             final scheme = Theme.of(context).colorScheme;
-            return InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => AlbumDetailScreen(album: album),
+            return RepaintBoundary(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AlbumDetailScreen(album: album),
+                  ),
                 ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: CoverArtImage(
-                      coverArtId: album.coverArt,
-                      size: double.infinity,
-                      borderRadius: 12,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: CoverArtImage(
+                        coverArtId: album.coverArt,
+                        size: double.infinity,
+                        borderRadius: 12,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(album.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600, fontSize: 13)),
-                        if (album.year != null)
-                          Text('${album.year}',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  color: scheme.onSurfaceVariant)),
-                      ],
+                    const SizedBox(height: 6),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(album.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600, fontSize: 13)),
+                          if (album.year != null)
+                            Text('${album.year}',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: scheme.onSurfaceVariant)),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                ],
+                    const SizedBox(height: 4),
+                  ],
+                ),
               ),
             );
           },
         ),
       ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-
-class _PlaylistsTab extends ConsumerWidget {
-  const _PlaylistsTab();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final playlistsAsync = ref.watch(playlistsProvider);
-    return playlistsAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('$e')),
-      data: (playlists) {
-        if (playlists.isEmpty) {
-          return const Center(child: Text('No playlists'));
-        }
-        return ListView.builder(
-          padding: EdgeInsets.zero,
-          itemCount: playlists.length,
-          itemBuilder: (_, i) {
-            final p = playlists[i];
-            final scheme = Theme.of(context).colorScheme;
-            return ListTile(
-              leading: CoverArtImage(coverArtId: p.coverArt, size: 56),
-              title: Text(p.name),
-              subtitle: Text('${p.songCount} songs',
-                  style: TextStyle(color: scheme.onSurfaceVariant)),
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => PlaylistDetailScreen(playlist: p),
-                ),
-              ),
-            );
-          },
-        );
-      },
     );
   }
 }
