@@ -1,4 +1,4 @@
-package com.catgirl.melodize
+package com.hiby.music
 
 import android.Manifest
 import android.content.pm.PackageManager
