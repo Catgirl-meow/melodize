@@ -40,24 +40,25 @@ Download the latest APK from the [Releases](https://github.com/Catgirl-meow/melo
 
 ### Linux
 
-**Requirements:** a running Navidrome instance and **mpv** installed.
+**Requirements:** a running Navidrome instance and **libmpv** installed.
 
-Audio playback on Linux uses [mpv](https://mpv.io) via [just_audio_mpv](https://pub.dev/packages/just_audio_mpv).
+Audio playback on Linux uses [media_kit](https://pub.dev/packages/media_kit) (libmpv FFI) via [just_audio_media_kit](https://pub.dev/packages/just_audio_media_kit).
 
-#### Install mpv
+#### Install libmpv
 
 ```bash
 # Gentoo
 emerge media-video/mpv
 
 # Ubuntu / Debian
-apt install mpv
+apt install libmpv2   # Ubuntu 22.04+
+# or: apt install libmpv1  (older releases)
 
 # Arch / Manjaro
 pacman -S mpv
 
 # Fedora
-dnf install mpv
+dnf install mpv-libs
 ```
 
 #### Install Melodize
@@ -108,11 +109,11 @@ No Docker, no dependencies, no compilation.
 
 - Flutter 3.x (`flutter --version`)
 - **Android:** Android SDK / Android Studio + a physical device or emulator
-- **Linux:** GTK 3 dev headers + mpv + standard build tools
+- **Linux:** GTK 3 dev headers + libmpv + standard build tools
 
 ```bash
 # Ubuntu/Debian Linux build deps
-apt install libgtk-3-dev ninja-build cmake clang mpv
+apt install libgtk-3-dev ninja-build cmake clang libmpv-dev
 
 # Gentoo
 emerge dev-libs/glib x11-libs/gtk+ media-video/mpv
