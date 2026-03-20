@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -447,6 +448,13 @@ class _RecommendationCard extends ConsumerStatefulWidget {
 
 class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
   bool _loading = false;
+  Timer? _pollTimer;
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
 
   Future<void> _play() async {
     if (_loading) return;
@@ -467,25 +475,56 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
     }
   }
 
-  void _addToLibrary() {
+  Future<void> _addToLibrary() async {
     final companion = ref.read(companionClientProvider);
     if (companion == null) return;
     final prefs = ref.read(preferencesNotifierProvider);
     final url = 'https://www.deezer.com/track/${widget.rec.deezerId}';
-    companion
-        .startDownload(
-          url,
-          deezerArl: prefs.hasDeezerArl ? prefs.deezerArl : null,
-        )
-        .catchError((_) {});
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
+    try {
+      final jobId = await companion.startDownload(
+        url,
+        deezerArl: prefs.hasDeezerArl ? prefs.deezerArl : null,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(prefs.hasDeezerArl
-            ? 'Downloading FLAC to server — appears in library after next Navidrome scan'
-            : 'Queued — connect Deezer account in Settings for lossless quality'),
-        duration: const Duration(seconds: 4),
-      ),
-    );
+            ? 'Downloading FLAC to Navidrome server…'
+            : 'Downloading to Navidrome server (add Deezer ARL in Settings for lossless)'),
+      ));
+      _startPolling(companion, jobId);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not start download: $e')));
+    }
+  }
+
+  void _startPolling(dynamic companion, String jobId) {
+    var attempts = 0;
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 15), (timer) async {
+      if (!mounted) { timer.cancel(); return; }
+      if (++attempts >= 24) { timer.cancel(); return; }
+      try {
+        final status = await companion.getDownloadStatus(jobId) as Map<String, dynamic>;
+        final s = status['status'] as String?;
+        if (s == 'done') {
+          timer.cancel();
+          ref.read(subsonicClientProvider)?.startScan();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Added to Navidrome server — library scan started')));
+          }
+        } else if (s == 'error') {
+          timer.cancel();
+          if (mounted) {
+            final err = (status['error'] as String?) ?? 'unknown error';
+            ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Download failed: $err')));
+          }
+        }
+      } catch (_) {}
+    });
   }
 
   @override
@@ -517,7 +556,7 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
           onTap: _play,
-          onLongPress: canSave ? _addToLibrary : null,
+          onLongPress: canSave ? () { _addToLibrary(); } : null,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

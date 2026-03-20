@@ -236,21 +236,34 @@ final recommendationsProvider =
   final db = ref.watch(databaseProvider);
   final deezer = ref.watch(deezerClientProvider);
 
-  final history = await db.getRecentHistory(limit: 5);
+  final history = await db.getRecentHistory(limit: 30);
   if (history.isEmpty) return [];
+
+  // Shuffle so different seeds are picked on every refresh.
+  final shuffled = history.toList()..shuffle();
 
   final seen = <int>{};
   final recs = <RecommendedTrack>[];
 
-  for (final h in history.take(3)) {
+  for (final h in shuffled.take(3)) {
     final batch = await deezer.getRecommendations(h.artist, h.songTitle);
-    for (final t in batch) {
+    // Shuffle radio results too so we don't always get the same front-of-list tracks.
+    final shuffledBatch = batch.toList()..shuffle();
+    for (final t in shuffledBatch) {
       if (seen.add(t.deezerId)) recs.add(t);
     }
     if (recs.length >= 20) break;
   }
 
   return recs.take(20).toList();
+});
+
+// Deezer catalog search — powers the "From Deezer" section in the search tab.
+final deezerSearchProvider =
+    FutureProvider.autoDispose<List<RecommendedTrack>>((ref) async {
+  final query = ref.watch(searchQueryProvider);
+  if (query.trim().length < 2) return [];
+  return ref.watch(deezerClientProvider).search(query);
 });
 
 final downloadedSongsProvider = FutureProvider<List<Song>>((ref) async {

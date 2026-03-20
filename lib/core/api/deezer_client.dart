@@ -56,4 +56,21 @@ class DeezerClient {
       return [];
     }
   }
+
+  /// Direct Deezer catalog search — used by the search tab.
+  Future<List<RecommendedTrack>> search(String query, {int limit = 12}) async {
+    if (query.trim().isEmpty) return [];
+    try {
+      final q = Uri.encodeQueryComponent(query.trim());
+      final resp = await _dio.get('/search?q=$q&limit=$limit');
+      final data = resp.data as Map<String, dynamic>?;
+      final tracks = data?['data'] as List? ?? [];
+      return tracks
+          .map((t) => RecommendedTrack.fromDeezerJson(t as Map<String, dynamic>))
+          .where((t) => t.previewUrl != null)
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
 }
