@@ -79,6 +79,13 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         mediaItem.add(null);
         return;
       }
+      Uri? artUri;
+      if (_config != null && (song.coverArt?.isNotEmpty ?? false)) {
+        artUri = Uri.tryParse(
+            SubsonicClient(_config!).coverArtUrl(song.coverArt!));
+      } else if (song.externalCoverUrl != null) {
+        artUri = Uri.tryParse(song.externalCoverUrl!);
+      }
       mediaItem.add(MediaItem(
         id: song.id,
         title: song.title,
@@ -87,10 +94,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         duration: song.duration != null
             ? Duration(seconds: song.duration!)
             : null,
-        artUri: _config != null && (song.coverArt?.isNotEmpty ?? false)
-            ? Uri.tryParse(
-                SubsonicClient(_config!).coverArtUrl(song.coverArt!))
-            : null,
+        artUri: artUri,
       ));
     });
   }
@@ -306,7 +310,9 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   AudioSource _songToSource(Song song) {
     final Uri uri;
-    if (song.isDownloaded && song.localPath != null) {
+    if (song.externalStreamUrl != null) {
+      uri = Uri.parse(song.externalStreamUrl!);
+    } else if (song.isDownloaded && song.localPath != null) {
       uri = Uri.file(song.localPath!);
     } else if (_config != null) {
       uri = Uri.parse(

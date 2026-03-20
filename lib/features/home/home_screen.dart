@@ -1,6 +1,8 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/album.dart';
+import '../../core/models/recommended_track.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/widgets/cover_art_image.dart';
@@ -197,13 +199,13 @@ class HomeScreen extends ConsumerWidget {
           ),
         ),
 
-        // Recommended for You — seeded from recently played, similarity via Last.fm
+        // Recommended for You — Deezer artist-radio, songs NOT in the library
         recsAsync.when(
           skipLoadingOnRefresh: true,
           loading: () => const SliverToBoxAdapter(child: SizedBox.shrink()),
           error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
-          data: (songs) {
-            if (songs.isEmpty) {
+          data: (recs) {
+            if (recs.isEmpty) {
               return const SliverToBoxAdapter(child: SizedBox.shrink());
             }
             return SliverToBoxAdapter(
@@ -214,11 +216,8 @@ class HomeScreen extends ConsumerWidget {
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: songs.length,
-                    itemBuilder: (_, i) => _SongCard(
-                      song: songs[i],
-                      onTap: () => _playSongs(ref, songs, i),
-                    ),
+                    itemCount: recs.length,
+                    itemBuilder: (_, i) => _RecommendationCard(rec: recs[i]),
                   ),
                 ),
               ),
@@ -433,4 +432,149 @@ class _PlaylistCard extends ConsumerWidget {
       ),
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+
+class _RecommendationCard extends ConsumerStatefulWidget {
+  final RecommendedTrack rec;
+  const _RecommendationCard({required this.rec});
+
+  @override
+  ConsumerState<_RecommendationCard> createState() =>
+      _RecommendationCardState();
+}
+
+class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
+  bool _loading = false;
+
+  Future<void> _play() async {
+    if (_loading) return;
+    setState(() => _loading = true);
+    try {
+      final song = Song.fromRecommendation(
+        deezerId: widget.rec.deezerId,
+        title: widget.rec.title,
+        artist: widget.rec.artist,
+        album: widget.rec.album,
+        durationSeconds: widget.rec.durationSeconds,
+        previewUrl: widget.rec.previewUrl,
+        coverUrl: widget.rec.coverUrl,
+      );
+      ref.read(audioHandlerNotifierProvider)?.loadQueue([song]);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _addToLibrary() {
+    final companion = ref.read(companionClientProvider);
+    if (companion == null) return;
+    final query = 'ytsearch1:${widget.rec.title} ${widget.rec.artist}';
+    companion.startDownload(query).catchError((_) {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Queued for server download — check back in a few minutes'),
+        duration: Duration(seconds: 3),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final canSave = ref.watch(canDeleteFromServerProvider);
+
+    Widget cover;
+    if (widget.rec.coverUrl != null) {
+      cover = ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: CachedNetworkImage(
+          imageUrl: widget.rec.coverUrl!,
+          width: 130,
+          height: 130,
+          fit: BoxFit.cover,
+          placeholder: (_, __) => _coverPlaceholder(scheme),
+          errorWidget: (_, __, ___) => _coverPlaceholder(scheme),
+        ),
+      );
+    } else {
+      cover = _coverPlaceholder(scheme);
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: SizedBox(
+        width: 130,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: _play,
+          onLongPress: canSave ? _addToLibrary : null,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Stack(
+                children: [
+                  cover,
+                  // "PREVIEW" badge
+                  Positioned(
+                    bottom: 6,
+                    right: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text(
+                        'PREVIEW',
+                        style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white),
+                      ),
+                    ),
+                  ),
+                  if (_loading)
+                    Positioned.fill(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          color: Colors.black45,
+                          child: const Center(
+                              child: CircularProgressIndicator(strokeWidth: 2)),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(widget.rec.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600)),
+              Text(widget.rec.artist,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 12, color: scheme.onSurfaceVariant)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _coverPlaceholder(ColorScheme scheme) => ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: 130,
+          height: 130,
+          color: scheme.surfaceContainerHigh,
+          child: Icon(Icons.music_note_rounded,
+              size: 52, color: scheme.onSurfaceVariant),
+        ),
+      );
 }

@@ -98,7 +98,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
     if (song == null) return const SizedBox.shrink();
 
     final coverUrl =
-        ref.watch(coverArtUrlProvider(song.coverArt ?? '')) ?? '';
+        ref.watch(coverArtUrlProvider(song.coverArt ?? '')) ??
+        song.externalCoverUrl ??
+        '';
     final dominantColor =
         ref.watch(dominantColorProvider(coverUrl)).valueOrNull ??
             const Color(0xFF1A1A2E);

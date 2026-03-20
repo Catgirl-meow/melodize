@@ -77,6 +77,7 @@ class _MiniPlayerShell extends StatelessWidget {
                       children: [
                         CoverArtImage(
                             coverArtId: song.coverArt,
+                            externalUrl: song.externalCoverUrl,
                             size: 44,
                             borderRadius: 6),
                         const SizedBox(width: 12),

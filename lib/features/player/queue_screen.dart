@@ -84,6 +84,7 @@ class QueueScreen extends ConsumerWidget {
                               horizontal: 16, vertical: 2),
                           leading: CoverArtImage(
                             coverArtId: song?.coverArt,
+                            externalUrl: song?.externalCoverUrl,
                             size: 44,
                           ),
                           title: Text(

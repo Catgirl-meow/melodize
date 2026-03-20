@@ -5,6 +5,8 @@ import '../../core/providers.dart';
 
 class CoverArtImage extends ConsumerWidget {
   final String? coverArtId;
+  /// Direct HTTPS URL used when [coverArtId] is absent (e.g. external tracks).
+  final String? externalUrl;
   final double size;
   final double borderRadius;
   final BoxFit fit;
@@ -12,6 +14,7 @@ class CoverArtImage extends ConsumerWidget {
   const CoverArtImage({
     super.key,
     required this.coverArtId,
+    this.externalUrl,
     required this.size,
     this.borderRadius = 8,
     this.fit = BoxFit.cover,
@@ -20,9 +23,10 @@ class CoverArtImage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final url = coverArtId != null && coverArtId!.isNotEmpty
+    final subsonicUrl = coverArtId != null && coverArtId!.isNotEmpty
         ? ref.watch(coverArtUrlProvider(coverArtId!))
         : null;
+    final url = subsonicUrl ?? externalUrl;
 
     Widget child;
     if (url != null) {

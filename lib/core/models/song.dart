@@ -18,6 +18,10 @@ class Song {
   final String? localPath;
   final DateTime? created; // When the song was added to the server library
 
+  // Non-null only for external (e.g. Deezer preview) tracks — never stored in DB.
+  final String? externalStreamUrl;
+  final String? externalCoverUrl;
+
   const Song({
     required this.id,
     required this.title,
@@ -37,6 +41,8 @@ class Song {
     this.isDownloaded = false,
     this.localPath,
     this.created,
+    this.externalStreamUrl,
+    this.externalCoverUrl,
   });
 
   factory Song.fromSubsonicJson(Map<String, dynamic> json) {
@@ -82,6 +88,29 @@ class Song {
       isDownloaded: isDownloaded ?? this.isDownloaded,
       localPath: localPath ?? this.localPath,
       created: created,
+      externalStreamUrl: externalStreamUrl,
+      externalCoverUrl: externalCoverUrl,
+    );
+  }
+
+  /// Build a transient Song from a Deezer recommendation for preview playback.
+  factory Song.fromRecommendation({
+    required int deezerId,
+    required String title,
+    required String artist,
+    required String album,
+    required int durationSeconds,
+    String? previewUrl,
+    String? coverUrl,
+  }) {
+    return Song(
+      id: 'deezer:$deezerId',
+      title: title,
+      artist: artist,
+      album: album,
+      duration: durationSeconds,
+      externalStreamUrl: previewUrl,
+      externalCoverUrl: coverUrl,
     );
   }
 

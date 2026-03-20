@@ -8,7 +8,9 @@ import 'package:just_audio/just_audio.dart';
 import 'package:path/path.dart' as p;
 import 'api/subsonic_client.dart';
 import 'api/navidrome_client.dart' show CompanionClient;
+import 'api/deezer_client.dart';
 import 'api/lrclib_client.dart';
+import 'models/recommended_track.dart';
 import 'audio/audio_handler.dart';
 import 'db/database.dart';
 import 'models/app_preferences.dart';
@@ -224,24 +226,26 @@ final randomSongsProvider = FutureProvider<List<Song>>((ref) async {
   return await client.getRandomSongs(count: 20);
 });
 
-// Seeded from recently played songs; uses Navidrome's getSimilarSongs
-// which queries Last.fm similarity data server-side (no extra config needed).
+final deezerClientProvider = Provider<DeezerClient>((_) => DeezerClient());
+
+// Seeded from recently played songs; uses Deezer's artist radio to surface
+// tracks NOT already in the user's library.
 // Returns [] silently on any failure so a missing feature never breaks the home screen.
-final recommendationsProvider = FutureProvider<List<Song>>((ref) async {
-  final client = ref.watch(subsonicClientProvider);
-  if (client == null) return [];
+final recommendationsProvider =
+    FutureProvider<List<RecommendedTrack>>((ref) async {
   final db = ref.watch(databaseProvider);
+  final deezer = ref.watch(deezerClientProvider);
 
   final history = await db.getRecentHistory(limit: 5);
   if (history.isEmpty) return [];
 
-  final seen = <String>{};
-  final recs = <Song>[];
+  final seen = <int>{};
+  final recs = <RecommendedTrack>[];
 
   for (final h in history.take(3)) {
-    final similar = await client.getSimilarSongs(h.songId, count: 15);
-    for (final s in similar) {
-      if (seen.add(s.id)) recs.add(s);
+    final batch = await deezer.getRecommendations(h.artist, h.songTitle);
+    for (final t in batch) {
+      if (seen.add(t.deezerId)) recs.add(t);
     }
     if (recs.length >= 20) break;
   }
