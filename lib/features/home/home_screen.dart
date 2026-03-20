@@ -17,6 +17,7 @@ class HomeScreen extends ConsumerWidget {
     ref.invalidate(recentlyPlayedProvider);
     ref.invalidate(allSongsProvider);
     ref.invalidate(serverReachableProvider);
+    ref.invalidate(recommendationsProvider);
     // Give providers a moment to start fetching before we declare done
     await Future.delayed(const Duration(milliseconds: 600));
   }
@@ -27,6 +28,7 @@ class HomeScreen extends ConsumerWidget {
     final recentAsync = ref.watch(recentlyPlayedProvider);
     final newestAsync = ref.watch(newestAlbumsProvider);
     final playlistsAsync = ref.watch(playlistsProvider);
+    final recsAsync = ref.watch(recommendationsProvider);
     final username = ref.watch(serverConfigProvider).valueOrNull?.username;
     final isOnline = ref.watch(isOnlineProvider).valueOrNull ?? true;
     final serverReachable =
@@ -193,6 +195,35 @@ class HomeScreen extends ConsumerWidget {
               ),
             ),
           ),
+        ),
+
+        // Recommended for You — seeded from recently played, similarity via Last.fm
+        recsAsync.when(
+          skipLoadingOnRefresh: true,
+          loading: () => const SliverToBoxAdapter(child: SizedBox.shrink()),
+          error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
+          data: (songs) {
+            if (songs.isEmpty) {
+              return const SliverToBoxAdapter(child: SizedBox.shrink());
+            }
+            return SliverToBoxAdapter(
+              child: _Section(
+                title: 'Recommended for You',
+                child: SizedBox(
+                  height: 176,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: songs.length,
+                    itemBuilder: (_, i) => _SongCard(
+                      song: songs[i],
+                      onTap: () => _playSongs(ref, songs, i),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
         ),
 
         // Recently played

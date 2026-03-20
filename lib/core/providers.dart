@@ -224,6 +224,31 @@ final randomSongsProvider = FutureProvider<List<Song>>((ref) async {
   return await client.getRandomSongs(count: 20);
 });
 
+// Seeded from recently played songs; uses Navidrome's getSimilarSongs
+// which queries Last.fm similarity data server-side (no extra config needed).
+// Returns [] silently on any failure so a missing feature never breaks the home screen.
+final recommendationsProvider = FutureProvider<List<Song>>((ref) async {
+  final client = ref.watch(subsonicClientProvider);
+  if (client == null) return [];
+  final db = ref.watch(databaseProvider);
+
+  final history = await db.getRecentHistory(limit: 5);
+  if (history.isEmpty) return [];
+
+  final seen = <String>{};
+  final recs = <Song>[];
+
+  for (final h in history.take(3)) {
+    final similar = await client.getSimilarSongs(h.songId, count: 15);
+    for (final s in similar) {
+      if (seen.add(s.id)) recs.add(s);
+    }
+    if (recs.length >= 20) break;
+  }
+
+  return recs.take(20).toList();
+});
+
 final downloadedSongsProvider = FutureProvider<List<Song>>((ref) async {
   final db = ref.watch(databaseProvider);
   final rows = await db.getDownloadedSongs();
