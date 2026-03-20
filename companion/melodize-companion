@@ -55,44 +55,60 @@ def _update_job(job_id: str, **kwargs) -> None:
         _jobs[job_id].update(kwargs)
 
 
+_DEEMIX_CONFIG_DIR = pathlib.Path("/root/.config/deemix")
+
+
+def _write_deemix_arl(arl: str) -> None:
+    """Persist ARL so the deemix CLI picks it up on next run."""
+    _DEEMIX_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    (_DEEMIX_CONFIG_DIR / ".arl").write_text(arl.strip(), encoding="utf-8")
+
+
 def _run_download(job_id: str, url: str, cfg: dict, deezer_arl: str = "") -> None:
     _update_job(job_id, status="downloading")
     music_dir = cfg["music_dir"]
-    ytdlp = cfg.get("ytdlp_path", "yt-dlp")
     is_deezer = "deezer.com" in url
-    # Output template: Artist - Title.ext  (same flat layout as existing files)
-    output_tmpl = os.path.join(music_dir, "%(artist,uploader)s - %(title)s.%(ext)s")
-    cmd = [
-        ytdlp,
-        "--extract-audio",
-        "--audio-format", cfg.get("download_format", "flac"),
-        "--audio-quality", "0",
-        "--output", output_tmpl,
-        "--no-playlist",
-        "--no-progress",
-        "--add-metadata",
-    ]
-    # Inject Deezer ARL for authenticated FLAC downloads (HiFi subscription required).
-    # ARL can come from the request body (sent by the app) or fall back to config.
     effective_arl = deezer_arl or cfg.get("deezer_arl", "")
-    if is_deezer and effective_arl:
-        cmd += ["--extractor-args", f"deezer:arl={effective_arl}"]
-    cmd.append(url)
+
+    if is_deezer:
+        # deemix handles Deezer natively (including HiFi FLAC via ARL).
+        # yt-dlp hard-blocks Deezer due to DRM detection.
+        if not effective_arl:
+            _update_job(job_id, status="error",
+                        error="Deezer ARL not configured — add it in app Settings")
+            return
+        _write_deemix_arl(effective_arl)
+        deemix = cfg.get("deemix_path", "deemix")
+        cmd = [deemix, "-b", "FLAC", "-p", music_dir, url]
+        err_label = "deemix"
+    else:
+        ytdlp = cfg.get("ytdlp_path", "yt-dlp")
+        output_tmpl = os.path.join(music_dir, "%(artist,uploader)s - %(title)s.%(ext)s")
+        cmd = [
+            ytdlp,
+            "--extract-audio",
+            "--audio-format", cfg.get("download_format", "flac"),
+            "--audio-quality", "0",
+            "--output", output_tmpl,
+            "--no-playlist",
+            "--no-progress",
+            "--add-metadata",
+            url,
+        ]
+        err_label = "yt-dlp"
+
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True, text=True, timeout=600,
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         if result.returncode != 0:
             _update_job(job_id, status="error", error=result.stderr[-800:])
-            log.error(f"[job {job_id}] yt-dlp failed: {result.stderr[-200:]}")
+            log.error(f"[job {job_id}] {err_label} failed: {result.stderr[-200:]}")
         else:
             _update_job(job_id, status="done")
             log.info(f"[job {job_id}] download complete")
     except subprocess.TimeoutExpired:
         _update_job(job_id, status="error", error="download timed out after 600s")
     except FileNotFoundError:
-        _update_job(job_id, status="error", error="yt-dlp not installed on server")
+        _update_job(job_id, status="error", error=f"{err_label} not installed on server")
     except Exception as e:
         _update_job(job_id, status="error", error=str(e))
 
