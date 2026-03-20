@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import '../models/song.dart';
 import '../api/subsonic_client.dart';
@@ -23,6 +24,9 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   MelodizeAudioHandler() {
     _initStateSync();
     _initScrobbling();
+    if (Platform.isLinux) {
+      HardwareKeyboard.instance.addHandler(_handleMediaKey);
+    }
   }
 
   final AudioPlayer player = AudioPlayer(
@@ -46,9 +50,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   // useLazyPreparation: false on Android/iOS — ExoPlayer/AVPlayer eagerly
   // prepares all source timelines (lightweight header reads) so they can
   // buffer across track boundaries for gapless playback.
-  // Must stay true on Linux: just_audio_mpv (mpv IPC backend) does not
-  // recognise this property and crashes the mpv process with "property not
-  // found" when it receives useLazyPreparation: false in the track list JSON.
+  // Set to true on Linux/desktop (just_audio_media_kit / libmpv backend).
   final _playlistSource = ConcatenatingAudioSource(
     children: [],
     useLazyPreparation: Platform.isLinux || Platform.isWindows || Platform.isMacOS,
@@ -315,7 +317,42 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     return AudioSource.uri(uri, tag: song);
   }
 
+  // ---------------------------------------------------------------------------
+  // Linux media key handling via HardwareKeyboard
+  //
+  // On Wayland (niri), the compositor forwards XF86 media keys to the focused
+  // window as standard key events. MPRIS (via audio_service) handles the
+  // unfocused case; this covers when the app window is in focus.
+
+  bool _handleMediaKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    switch (event.logicalKey) {
+      case LogicalKeyboardKey.mediaPlay:
+      case LogicalKeyboardKey.mediaPlayPause:
+        player.playing ? player.pause() : player.play();
+        return true;
+      case LogicalKeyboardKey.mediaPause:
+        player.pause();
+        return true;
+      case LogicalKeyboardKey.mediaTrackNext:
+        player.seekToNext();
+        return true;
+      case LogicalKeyboardKey.mediaTrackPrevious:
+        skipToPrevious();
+        return true;
+      case LogicalKeyboardKey.mediaStop:
+        player.stop();
+        return true;
+    }
+    return false;
+  }
+
+  // ---------------------------------------------------------------------------
+
   void dispose() {
+    if (Platform.isLinux) {
+      HardwareKeyboard.instance.removeHandler(_handleMediaKey);
+    }
     _sleepTimer?.cancel();
     _historyController.close();
     player.dispose();
