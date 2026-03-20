@@ -2,8 +2,8 @@
 
 The companion is a small Python HTTP service that runs alongside Navidrome and
 gives the Melodize app file-management capabilities that the Subsonic/Navidrome
-API intentionally does not expose: deleting songs from the server, and
-(future) downloading songs from external sources directly onto the server.
+API does not expose: deleting songs from the server and downloading songs from
+the Deezer catalog directly onto the server.
 
 **Requirements**
 - Linux server with systemd (Debian 12+ / Ubuntu 22.04+ / any modern distro)
@@ -48,18 +48,18 @@ Create `/etc/melodize-companion/config.json`:
   "music_dir":    "/opt/navidrome/music",
   "navidrome_db": "/var/lib/navidrome/navidrome.db",
   "download_format": "flac",
-  "ytdlp_path":   "yt-dlp"
+  "deezer_arl":   ""
 }
 ```
 
 | Key | Description |
 |-----|-------------|
 | `api_key` | Secret that the app sends with every request. Must match the key entered in app Settings. |
-| `port` | Port the companion listens on. Default `8765`. Only relevant if you expose it directly — behind a reverse proxy any port works. |
+| `port` | Port the companion listens on. Default `8765`. |
 | `music_dir` | **Absolute path** to the folder Navidrome scans for music. Find it in `/etc/navidrome/navidrome.toml` (`MusicFolder =`). |
 | `navidrome_db` | Path to Navidrome's SQLite database. Usually `/var/lib/navidrome/navidrome.db`. |
-| `download_format` | Audio format for server-side downloads (future feature). `flac`, `opus`, `mp3`. |
-| `ytdlp_path` | Path or command name for yt-dlp. Install it with `pip install yt-dlp` or `pipx install yt-dlp`. Only required for the download feature. |
+| `download_format` | Audio format for non-Deezer downloads. `flac`, `opus`, `mp3`. |
+| `deezer_arl` | Optional Deezer ARL cookie for FLAC downloads (HiFi subscription required). The app can also send this per-request from Settings. |
 
 ### Finding your paths
 
@@ -96,6 +96,7 @@ SyslogIdentifier=melodize-companion
 # Security hardening
 ProtectSystem=strict
 ReadWritePaths=/opt/navidrome/music
+ReadWritePaths=/var/lib/melodize-companion
 ReadOnlyPaths=/var/lib/navidrome
 ProtectHome=true
 NoNewPrivileges=true
@@ -105,12 +106,13 @@ PrivateTmp=true
 WantedBy=multi-user.target
 ```
 
-> **Important:** `ReadWritePaths` must match your `music_dir`. If they differ,
-> the service will fail with a permission error when trying to delete files.
+> **Important:** `ReadWritePaths` must match your `music_dir`. `/var/lib/melodize-companion`
+> is the companion's state directory (used for deemix config) — it must also be writable.
 
-Enable and start:
+Create the state directory and enable the service:
 
 ```bash
+mkdir -p /var/lib/melodize-companion
 systemctl daemon-reload
 systemctl enable --now melodize-companion
 
@@ -126,17 +128,57 @@ journalctl -u melodize-companion -f
 
 ---
 
-## 5. Expose via reverse proxy (recommended)
+## 5. Install download backends
+
+Two tools are required for server-side downloads. **deemix** handles Deezer
+URLs (including HiFi FLAC via ARL). **yt-dlp** handles all other URLs.
+
+### deemix (required for Deezer downloads)
+
+```bash
+# Install pip if not already present
+curl -sS https://bootstrap.pypa.io/get-pip.py | python3
+
+# Install deemix
+python3 -m pip install deemix
+
+# Verify
+deemix --help
+```
+
+### yt-dlp (required for non-Deezer downloads)
+
+```bash
+# Recommended: standalone binary (no Python deps)
+curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+  -o /usr/local/bin/yt-dlp
+chmod +x /usr/local/bin/yt-dlp
+
+# Verify
+yt-dlp --version
+```
+
+yt-dlp also requires **ffmpeg** for audio format conversion:
+
+```bash
+apt install ffmpeg -y
+```
+
+If either tool is at a non-standard path, set it in config:
+
+```json
+"ytdlp_path":  "/usr/local/bin/yt-dlp",
+"deemix_path": "/usr/local/bin/deemix"
+```
+
+---
+
+## 6. Expose via reverse proxy (recommended)
 
 Running behind your existing reverse proxy gives you HTTPS for free and avoids
 opening extra ports. Choose the option that matches your setup.
 
 ### Option A — Nginx Proxy Manager (GUI)
-
-The easiest option if you already use NPM.
-
-NPM supports custom nginx snippets per-host without touching the database.
-The file is included at the bottom of every server block for that host.
 
 1. Create the custom config directory if it doesn't exist:
    ```bash
@@ -172,9 +214,6 @@ The file is included at the bottom of every server block for that host.
 ---
 
 ### Option B — Plain nginx (conf.d)
-
-Add a `location` block inside your existing Navidrome server block, or create
-a dedicated server block.
 
 **Sub-path on the same domain** (simplest):
 
@@ -256,7 +295,7 @@ The app companion URL would then be `http://YOUR_SERVER_IP:8765`.
 
 ---
 
-## 6. Configure the Melodize app
+## 7. Configure the Melodize app
 
 In the app: **Settings → Melodize Companion**
 
@@ -268,9 +307,11 @@ In the app: **Settings → Melodize Companion**
 Tap the refresh icon next to the status indicator. It should turn green and
 show **"Server management available"**.
 
+For Deezer FLAC downloads, also configure your ARL in **Settings → Deezer → Connect account**.
+
 ---
 
-## 7. Verify the installation
+## 8. Verify the installation
 
 From any machine:
 
@@ -295,46 +336,6 @@ curl -X DELETE https://music.your-domain.com/companion/api/songs/nonexistent \
 
 ---
 
-## 8. Install yt-dlp (for future download feature)
-
-When the in-app "Download to server" feature ships, you will need yt-dlp on
-the server.
-
-```bash
-# Recommended: pipx (isolated, easy to update)
-apt install pipx -y
-pipx install yt-dlp
-pipx ensurepath
-
-# Or directly with pip
-pip install yt-dlp
-
-# Verify
-yt-dlp --version
-```
-
-Update yt-dlp periodically (sites change their APIs):
-
-```bash
-yt-dlp -U
-# or
-pipx upgrade yt-dlp
-```
-
-If yt-dlp is not at `/usr/local/bin/yt-dlp`, set the full path in config:
-
-```json
-"ytdlp_path": "/root/.local/bin/yt-dlp"
-```
-
-ffmpeg is required by yt-dlp for audio conversion:
-
-```bash
-apt install ffmpeg -y
-```
-
----
-
 ## 9. Updating the companion
 
 ```bash
@@ -346,7 +347,7 @@ chmod +x /usr/local/bin/melodize-companion
 # Restart
 systemctl restart melodize-companion
 
-# Confirm the new version
+# Confirm
 curl http://localhost:8765/health
 ```
 
@@ -367,6 +368,25 @@ Common causes:
 - `music_dir` or `navidrome_db` path is wrong → check with `ls` first
 - Port 8765 already in use → change `port` in config or kill the other process
 - Python version too old → `python3 --version` must be 3.10+
+- `/var/lib/melodize-companion` doesn't exist → run `mkdir -p /var/lib/melodize-companion`
+
+### Download fails: "DRM protection"
+
+This means yt-dlp was used for a Deezer URL. Ensure deemix is installed
+(`deemix --help`) and the companion was restarted after installation.
+
+### Download fails: "Deezer ARL not configured"
+
+Set your ARL in **Settings → Deezer → Connect account** in the app, or add
+`"deezer_arl": "YOUR_ARL"` to the config file.
+
+### Download job stuck, no error shown
+
+Check the companion log for thread exceptions:
+
+```bash
+journalctl -u melodize-companion -n 100 --no-pager | grep -E "error|Error|Exception"
+```
 
 ### "Song not found in database" on delete
 
@@ -388,7 +408,7 @@ chown -R melodize:melodize /opt/navidrome/music
 ### App shows "Cannot reach companion"
 
 1. Check the companion is running: `systemctl status melodize-companion`
-2. Verify the URL with curl from another device (see Section 7)
+2. Verify the URL with curl from another device (see Section 8)
 3. Check for typo in the URL — no trailing slash, correct path prefix
 4. If using Nginx Proxy Manager, run `nginx -t` on the NPM host to confirm
    the custom config loaded without errors
@@ -410,7 +430,14 @@ All endpoints require the `X-API-Key` header except `/health`.
 |--------|------|-------------|
 | `GET` | `/health` | Liveness probe. Returns `{"status":"ok","version":"..."}` |
 | `DELETE` | `/api/songs/{id}` | Delete a song by its Navidrome ID. Removes the file from disk. |
-| `POST` | `/api/songs/download` | Start a background download job. Body: `{"url":"..."}`. Returns `{"job_id":"..."}` |
+| `POST` | `/api/songs/download` | Start a background download job. Body: `{"url":"...", "deezer_arl":"..."}`. Returns `{"job_id":"..."}` |
 | `GET` | `/api/songs/download/{job_id}` | Poll a download job. Returns `{"status":"queued\|downloading\|done\|error", ...}` |
 
 Responses are always JSON. Non-2xx responses include an `"error"` field.
+
+### Download routing
+
+| URL pattern | Tool used | Notes |
+|-------------|-----------|-------|
+| `deezer.com/*` | deemix | Requires ARL for FLAC; falls back to error without ARL |
+| anything else | yt-dlp | Requires yt-dlp + ffmpeg on the server |

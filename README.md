@@ -15,6 +15,8 @@ on lossless playback, a polished Material 3 UI, and offline support.
 - **Queue management** — drag to reorder, play next, add to queue
 - **Library sorting** — sort by name, artist, recently added, downloaded
 - **Home screen** — time-aware greeting, recently added albums, random picks
+- **Recommendations** — Deezer-powered "Recommended for You" based on your listening history; tap to play a 30s preview, long-press to download the full FLAC to your Navidrome server
+- **Deezer search** — search the Deezer catalog from the Search tab; play previews or save to server
 - **Sleep timer**
 - **Scrobbling** — submits plays to the server (Navidrome tracks history)
 - **Delete from server** — remove songs directly from your Navidrome library via the companion service
@@ -94,12 +96,30 @@ unlocks server-management features in the app:
 | Feature | Without companion | With companion |
 |---------|-------------------|----------------|
 | Delete song from server | ✗ | ✓ |
-| Download from recommendation to server | ✗ (coming soon) | ✓ (coming soon) |
+| Download recommended song to server | ✗ | ✓ |
+| Download Deezer search result to server | ✗ | ✓ |
 
 → **[Full installation guide](COMPANION.md)**
 
 Quick summary: it's a single Python file, a config JSON, and a systemd unit.
-No Docker, no dependencies, no compilation.
+Requires **yt-dlp** and **deemix** on the server for downloads.
+
+---
+
+## Deezer integration
+
+Melodize uses the free Deezer public API (no account needed) to power
+recommendations and search with 30-second previews.
+
+**For full FLAC downloads** (requires a Deezer HiFi subscription):
+
+1. Log in to [deezer.com](https://www.deezer.com) in your browser
+2. Open DevTools → Application → Cookies → find the `arl` cookie
+3. Copy its value and paste it into **Settings → Deezer → Connect account**
+
+With the ARL configured, long-pressing a recommendation or tapping the download
+icon in search will save the full lossless FLAC to your Navidrome server via
+the companion.
 
 ---
 
@@ -141,16 +161,16 @@ flutter build linux    # release build → build/linux/x64/release/bundle/
 ```
 lib/
 ├── core/
-│   ├── api/           # SubsonicClient, CompanionClient, LrcLibClient
+│   ├── api/           # SubsonicClient, NavidromeClient, CompanionClient, DeezerClient, LrcLibClient
 │   ├── audio/         # MelodizeAudioHandler (just_audio + audio_service)
 │   ├── db/            # Drift SQLite database (songs, downloads, queue, lyrics cache)
-│   ├── models/        # Song, Album, Artist, Playlist, AppPreferences, ...
+│   ├── models/        # Song, Album, Artist, Playlist, AppPreferences, RecommendedTrack, ...
 │   └── providers.dart # All Riverpod providers
 ├── features/
-│   ├── home/          # Home screen
+│   ├── home/          # Home screen (incl. Deezer recommendations)
 │   ├── library/       # Library (songs, albums, artists, playlists)
 │   ├── player/        # Now Playing screen, Mini Player, Queue, Lyrics
-│   ├── search/        # Search screen
+│   ├── search/        # Search screen (library + Deezer catalog)
 │   ├── settings/      # Settings, Downloaded Songs
 │   └── shell/         # Root scaffold, bottom nav, player slide-up
 └── shared/
@@ -170,7 +190,7 @@ lib/
 
 ```
 companion/
-└── melodize-companion    # Single Python 3 script, zero pip dependencies
+└── melodize-companion    # Single Python 3 script
 ```
 
 See [COMPANION.md](COMPANION.md) for full installation and API documentation.
@@ -179,8 +199,9 @@ See [COMPANION.md](COMPANION.md) for full installation and API documentation.
 
 ## Roadmap
 
-- [ ] Recommendations tab (Last.fm / similar APIs)
-- [ ] Download recommended songs to server via companion
+- [x] Recommendations tab (Deezer-powered)
+- [x] Download recommended songs to server via companion
+- [x] Deezer catalog search with previews
 - [ ] Playlist creation / editing
 - [ ] Star / favourite songs
 - [ ] CarPlay / Android Auto

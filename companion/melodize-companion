@@ -55,7 +55,10 @@ def _update_job(job_id: str, **kwargs) -> None:
         _jobs[job_id].update(kwargs)
 
 
-_DEEMIX_CONFIG_DIR = pathlib.Path("/root/.config/deemix")
+# Writable state dir — matches StateDirectory=melodize-companion in the systemd unit.
+# ProtectSystem=strict makes /root/.config read-only, so we use this instead.
+_STATE_DIR = pathlib.Path("/var/lib/melodize-companion")
+_DEEMIX_CONFIG_DIR = _STATE_DIR / "deemix"
 
 
 def _write_deemix_arl(arl: str) -> None:
@@ -65,6 +68,15 @@ def _write_deemix_arl(arl: str) -> None:
 
 
 def _run_download(job_id: str, url: str, cfg: dict, deezer_arl: str = "") -> None:
+    try:
+        _run_download_inner(job_id, url, cfg, deezer_arl)
+    except Exception as e:
+        # Safety net: ensure the job never gets stuck in "downloading" forever.
+        log.exception(f"[job {job_id}] unexpected error")
+        _update_job(job_id, status="error", error=str(e))
+
+
+def _run_download_inner(job_id: str, url: str, cfg: dict, deezer_arl: str = "") -> None:
     _update_job(job_id, status="downloading")
     music_dir = cfg["music_dir"]
     is_deezer = "deezer.com" in url
@@ -79,6 +91,7 @@ def _run_download(job_id: str, url: str, cfg: dict, deezer_arl: str = "") -> Non
             return
         _write_deemix_arl(effective_arl)
         deemix = cfg.get("deemix_path", "deemix")
+        # Pass the config dir so deemix finds the .arl file we just wrote.
         cmd = [deemix, "-b", "FLAC", "-p", music_dir, url]
         err_label = "deemix"
     else:
@@ -97,8 +110,12 @@ def _run_download(job_id: str, url: str, cfg: dict, deezer_arl: str = "") -> Non
         ]
         err_label = "yt-dlp"
 
+    env = os.environ.copy()
+    if is_deezer:
+        env["DEEMIX_DATA_DIR"] = str(_DEEMIX_CONFIG_DIR)
+
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
         if result.returncode != 0:
             _update_job(job_id, status="error", error=result.stderr[-800:])
             log.error(f"[job {job_id}] {err_label} failed: {result.stderr[-200:]}")
