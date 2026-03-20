@@ -8,6 +8,7 @@ class AppPreferences {
   final String downloadQuality; // 'lossless' | '320' | '192' | '128'
   final String companionUrl;    // e.g. 'http://100.73.73.73:8765'  (empty = disabled)
   final String companionApiKey; // X-API-Key value
+  final String deezerArl;       // Deezer ARL cookie — enables FLAC downloads via companion
 
   const AppPreferences({
     this.streamQuality = 'lossless',
@@ -15,9 +16,11 @@ class AppPreferences {
     this.downloadQuality = 'lossless',
     this.companionUrl = '',
     this.companionApiKey = '',
+    this.deezerArl = '',
   });
 
   bool get hasCompanion => companionUrl.isNotEmpty && companionApiKey.isNotEmpty;
+  bool get hasDeezerArl => deezerArl.isNotEmpty;
 
   AppPreferences copyWith({
     String? streamQuality,
@@ -25,6 +28,7 @@ class AppPreferences {
     String? downloadQuality,
     String? companionUrl,
     String? companionApiKey,
+    String? deezerArl,
   }) =>
       AppPreferences(
         streamQuality: streamQuality ?? this.streamQuality,
@@ -32,6 +36,7 @@ class AppPreferences {
         downloadQuality: downloadQuality ?? this.downloadQuality,
         companionUrl: companionUrl ?? this.companionUrl,
         companionApiKey: companionApiKey ?? this.companionApiKey,
+        deezerArl: deezerArl ?? this.deezerArl,
       );
 
   factory AppPreferences.fromJson(Map<String, dynamic> j) => AppPreferences(
@@ -40,6 +45,7 @@ class AppPreferences {
         downloadQuality: j['downloadQuality'] as String? ?? 'lossless',
         companionUrl: j['companionUrl'] as String? ?? '',
         companionApiKey: j['companionApiKey'] as String? ?? '',
+        deezerArl: j['deezerArl'] as String? ?? '',
       );
 
   Map<String, dynamic> toJson() => {
@@ -48,6 +54,7 @@ class AppPreferences {
         'downloadQuality': downloadQuality,
         'companionUrl': companionUrl,
         'companionApiKey': companionApiKey,
+        'deezerArl': deezerArl,
       };
 
   static Future<File> get _file async {

@@ -55,24 +55,32 @@ def _update_job(job_id: str, **kwargs) -> None:
         _jobs[job_id].update(kwargs)
 
 
-def _run_download(job_id: str, url: str, cfg: dict) -> None:
+def _run_download(job_id: str, url: str, cfg: dict, deezer_arl: str = "") -> None:
     _update_job(job_id, status="downloading")
     music_dir = cfg["music_dir"]
     ytdlp = cfg.get("ytdlp_path", "yt-dlp")
+    is_deezer = "deezer.com" in url
     # Output template: Artist - Title.ext  (same flat layout as existing files)
-    output_tmpl = os.path.join(music_dir, "%(uploader)s - %(title)s.%(ext)s")
+    output_tmpl = os.path.join(music_dir, "%(artist,uploader)s - %(title)s.%(ext)s")
+    cmd = [
+        ytdlp,
+        "--extract-audio",
+        "--audio-format", cfg.get("download_format", "flac"),
+        "--audio-quality", "0",
+        "--output", output_tmpl,
+        "--no-playlist",
+        "--no-progress",
+        "--add-metadata",
+    ]
+    # Inject Deezer ARL for authenticated FLAC downloads (HiFi subscription required).
+    # ARL can come from the request body (sent by the app) or fall back to config.
+    effective_arl = deezer_arl or cfg.get("deezer_arl", "")
+    if is_deezer and effective_arl:
+        cmd += ["--extractor-args", f"deezer:arl={effective_arl}"]
+    cmd.append(url)
     try:
         result = subprocess.run(
-            [
-                ytdlp,
-                "--extract-audio",
-                "--audio-format", cfg.get("download_format", "flac"),
-                "--audio-quality", "0",
-                "--output", output_tmpl,
-                "--no-playlist",
-                "--no-progress",
-                url,
-            ],
+            cmd,
             capture_output=True, text=True, timeout=600,
         )
         if result.returncode != 0:
@@ -207,12 +215,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not url:
             self._send(400, {"error": "'url' is required"})
             return
+        deezer_arl = (body.get("deezer_arl") or "").strip()
 
         import secrets
         job_id = secrets.token_urlsafe(12)
         _new_job(job_id, url)
         t = threading.Thread(
-            target=_run_download, args=(job_id, url, self.server.cfg), daemon=True
+            target=_run_download,
+            args=(job_id, url, self.server.cfg, deezer_arl),
+            daemon=True,
         )
         t.start()
         self._send(202, {"job_id": job_id, "status": "queued"})

@@ -151,6 +151,28 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => _changeServer(context, ref),
           ),
 
+          // --- Deezer ---
+          _SectionHeader('Deezer'),
+          ListTile(
+            leading: const Icon(Icons.account_circle_rounded),
+            title: const Text('Deezer Account'),
+            subtitle: Text(
+              prefs.hasDeezerArl
+                  ? 'Connected — FLAC downloads enabled'
+                  : 'Not connected — 30s previews only',
+            ),
+            trailing: prefs.hasDeezerArl
+                ? Icon(Icons.check_circle_rounded, color: Colors.green)
+                : null,
+            onTap: () => _editDeezerArl(context, ref, prefs),
+          ),
+          ListTile(
+            leading: const Icon(Icons.help_outline_rounded),
+            title: const Text('How to connect'),
+            subtitle: const Text('Step-by-step instructions'),
+            onTap: () => _showDeezerInstructions(context),
+          ),
+
           // --- Companion ---
           _SectionHeader('Melodize Companion'),
           ListTile(
@@ -247,6 +269,105 @@ class SettingsScreen extends ConsumerWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _editDeezerArl(
+      BuildContext context, WidgetRef ref, AppPreferences prefs) {
+    final ctrl = TextEditingController(text: prefs.deezerArl);
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Deezer ARL Cookie'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: ctrl,
+              decoration: const InputDecoration(
+                hintText: 'Paste your ARL cookie here',
+                border: OutlineInputBorder(),
+              ),
+              autocorrect: false,
+              obscureText: true,
+              maxLines: 1,
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: () => _showDeezerInstructions(context),
+              icon: const Icon(Icons.help_outline_rounded, size: 16),
+              label: const Text('How to get your ARL'),
+            ),
+          ],
+        ),
+        actions: [
+          if (prefs.hasDeezerArl)
+            TextButton(
+              onPressed: () {
+                ref.read(preferencesNotifierProvider.notifier)
+                    .update(prefs.copyWith(deezerArl: ''));
+                Navigator.pop(context);
+              },
+              style: TextButton.styleFrom(
+                  foregroundColor: Theme.of(context).colorScheme.error),
+              child: const Text('Disconnect'),
+            ),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
+          TextButton(
+            onPressed: () {
+              ref.read(preferencesNotifierProvider.notifier)
+                  .update(prefs.copyWith(deezerArl: ctrl.text.trim()));
+              Navigator.pop(context);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDeezerInstructions(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('How to get your Deezer ARL'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              Text(
+                'The ARL is a session cookie that lets Melodize download '
+                'lossless FLAC tracks via your Deezer HiFi subscription.',
+                style: TextStyle(fontSize: 13),
+              ),
+              SizedBox(height: 16),
+              _Step(n: 1, text: 'Open deezer.com in a desktop browser and log in.'),
+              _Step(n: 2, text: 'Press F12 to open Developer Tools.'),
+              _Step(n: 3, text: 'Go to the Application tab (Chrome/Edge) or Storage tab (Firefox).'),
+              _Step(n: 4, text: 'Expand Cookies → click on https://www.deezer.com'),
+              _Step(n: 5, text: 'Find the cookie named "arl" and copy its Value (a long hex string).'),
+              _Step(n: 6, text: 'Paste it in the ARL field in Settings → Deezer Account.'),
+              SizedBox(height: 12),
+              Text(
+                'The ARL is valid as long as your session is active (typically months). '
+                'It is stored locally on this device and sent only to your own '
+                'Melodize Companion server when downloading songs.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Got it'),
+          ),
+        ],
       ),
     );
   }
@@ -394,6 +515,44 @@ class _CompanionStatusTile extends ConsumerWidget {
       trailing: IconButton(
         icon: const Icon(Icons.refresh_rounded),
         onPressed: () => ref.invalidate(companionAvailableProvider),
+      ),
+    );
+  }
+}
+
+class _Step extends StatelessWidget {
+  final int n;
+  final String text;
+  const _Step({required this.n, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 22,
+            height: 22,
+            margin: const EdgeInsets.only(right: 10, top: 1),
+            decoration: BoxDecoration(
+              color: scheme.primary,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                '$n',
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: scheme.onPrimary),
+              ),
+            ),
+          ),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 13))),
+        ],
       ),
     );
   }

@@ -26,7 +26,7 @@ class RecommendedTrack {
       artist: (artist['name'] as String?) ?? 'Unknown Artist',
       album: (album['title'] as String?) ?? '',
       durationSeconds: (json['duration'] as int?) ?? 0,
-      previewUrl: json['preview'] as String?,
+      previewUrl: (json['preview'] ?? json['preview_url']) as String?,
       coverUrl: (album['cover_medium'] as String?) ??
           (album['cover_big'] as String?),
     );

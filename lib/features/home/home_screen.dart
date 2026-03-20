@@ -470,12 +470,20 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
   void _addToLibrary() {
     final companion = ref.read(companionClientProvider);
     if (companion == null) return;
-    final query = 'ytsearch1:${widget.rec.title} ${widget.rec.artist}';
-    companion.startDownload(query).catchError((_) {});
+    final prefs = ref.read(preferencesNotifierProvider);
+    final url = 'https://www.deezer.com/track/${widget.rec.deezerId}';
+    companion
+        .startDownload(
+          url,
+          deezerArl: prefs.hasDeezerArl ? prefs.deezerArl : null,
+        )
+        .catchError((_) {});
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Queued for server download — check back in a few minutes'),
-        duration: Duration(seconds: 3),
+      SnackBar(
+        content: Text(prefs.hasDeezerArl
+            ? 'Downloading FLAC to server — appears in library after next Navidrome scan'
+            : 'Queued — connect Deezer account in Settings for lossless quality'),
+        duration: const Duration(seconds: 4),
       ),
     );
   }

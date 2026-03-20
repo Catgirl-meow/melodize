@@ -39,9 +39,14 @@ class CompanionClient {
   }
 
   /// Start a background download job on the server.
+  /// [deezerArl] is forwarded to yt-dlp for authenticated Deezer FLAC downloads.
   /// Returns the job ID — poll [getDownloadStatus] to track progress.
-  Future<String> startDownload(String url) async {
-    final resp = await _dio.post('/api/songs/download', data: {'url': url});
+  Future<String> startDownload(String url, {String? deezerArl}) async {
+    final body = <String, dynamic>{'url': url};
+    if (deezerArl != null && deezerArl.isNotEmpty) {
+      body['deezer_arl'] = deezerArl;
+    }
+    final resp = await _dio.post('/api/songs/download', data: body);
     return (resp.data as Map<String, dynamic>)['job_id'] as String;
   }
 
