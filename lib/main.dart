@@ -35,12 +35,11 @@ void main() {
     ),
   );
 
-  // Phase 2: connect to audio_service after the first frame is rendered.
-  // Waiting for the post-frame callback ensures the platform channels and
-  // the Activity are fully ready before we try to register the MediaSession.
-  // Failures are logged and ignored — playback still works without it.
+  // Phase 2: connect audio_service (Android MediaSession + lock-screen) and
+  // register MPRIS on Linux so that playerctl / niri XF86 keybindings work.
   WidgetsBinding.instance.addPostFrameCallback((_) {
     connectAudioService(audioHandler);
+    audioHandler.setupMpris();
   });
 }
 

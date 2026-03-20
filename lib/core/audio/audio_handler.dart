@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import '../models/song.dart';
 import '../api/subsonic_client.dart';
+import '../linux/linux_mpris.dart';
 
 // ---------------------------------------------------------------------------
 // MelodizeAudioHandler
@@ -61,6 +62,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   Timer? _sleepTimer;
   bool _nowPlayingReported = false;
   bool _scrobbled = false;
+  LinuxMprisService? _mpris;
 
   // ---------------------------------------------------------------------------
   // MediaSession sync — keeps audio_service's playbackState + mediaItem current
@@ -318,6 +320,19 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   }
 
   // ---------------------------------------------------------------------------
+  // Linux MPRIS (playerctl / niri XF86 keybindings)
+
+  Future<void> setupMpris() async {
+    if (!Platform.isLinux) return;
+    _mpris = LinuxMprisService(
+      player: player,
+      getCurrentSong: () => currentSong,
+      skipToPrevious: skipToPrevious,
+    );
+    await _mpris!.start();
+  }
+
+  // ---------------------------------------------------------------------------
   // Linux media key handling via HardwareKeyboard
   //
   // On Wayland (niri), the compositor forwards XF86 media keys to the focused
@@ -326,6 +341,11 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   bool _handleMediaKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
+
+    // Debug: print all key-down events so we can see if XF86 keys reach Flutter
+    // and what their logical key ID is. Remove once media keys are confirmed working.
+    debugPrint('[media] key: ${event.logicalKey.debugName} id:0x${event.logicalKey.keyId.toRadixString(16)}');
+
     switch (event.logicalKey) {
       case LogicalKeyboardKey.mediaPlay:
       case LogicalKeyboardKey.mediaPlayPause:
@@ -352,6 +372,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   void dispose() {
     if (Platform.isLinux) {
       HardwareKeyboard.instance.removeHandler(_handleMediaKey);
+      _mpris?.dispose();
     }
     _sleepTimer?.cancel();
     _historyController.close();
@@ -390,7 +411,7 @@ Future<void> connectAudioService(MelodizeAudioHandler handler) async {
         androidNotificationIcon: 'mipmap/ic_launcher',
       ),
     );
-  } catch (e) {
-    debugPrint('MediaSession setup failed (headphone buttons unavailable): $e');
+  } catch (e, st) {
+    debugPrint('AudioService.init failed: $e\n$st');
   }
 }
