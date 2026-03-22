@@ -692,6 +692,7 @@ Song _rowToSong(CachedSong row) => Song(
       size: row.size,
       isDownloaded: row.isDownloaded,
       localPath: row.localPath,
+      created: row.created,
     );
 
 // Intentionally omits isDownloaded and localPath so server syncs
@@ -712,4 +713,5 @@ CachedSongsCompanion _songToCompanion(Song s) => CachedSongsCompanion(
       contentType: Value(s.contentType),
       bitRate: Value(s.bitRate),
       size: Value(s.size),
+      created: Value(s.created),
     );

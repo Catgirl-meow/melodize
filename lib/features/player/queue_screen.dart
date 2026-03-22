@@ -8,16 +8,21 @@ class QueueScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Use select so QueueScreen only rebuilds when the sequence or current
-    // index changes — not on every stream emission (loop mode, shuffle, etc.)
-    final queue = ref.watch(
-      sequenceStateStreamProvider
-          .select((s) => s.valueOrNull?.effectiveSequence ?? const []),
+    // Use a (length, currentIndex) record for the select — Dart records compare
+    // by value, so this rebuilds only when the queue length or playing position
+    // actually changes (not on every sequenceStateStream emission where List
+    // identity would incorrectly appear as a change every time).
+    final (queueLength, currentIndex) = ref.watch(
+      sequenceStateStreamProvider.select((s) {
+        final seq = s.valueOrNull;
+        return (seq?.effectiveSequence.length ?? 0, seq?.currentIndex ?? 0);
+      }),
     );
-    final currentIndex = ref.watch(
-      sequenceStateStreamProvider
-          .select((s) => s.valueOrNull?.currentIndex ?? 0),
-    );
+    // Non-reactive read — runs only after the select above triggers a rebuild.
+    final sequence = ref.read(sequenceStateStreamProvider).valueOrNull
+            ?.effectiveSequence ??
+        const [];
+    final queue = sequence;
     final handler = ref.read(audioHandlerNotifierProvider);
     final scheme = Theme.of(context).colorScheme;
 
@@ -53,7 +58,7 @@ class QueueScreen extends ConsumerWidget {
                         .titleMedium
                         ?.copyWith(fontWeight: FontWeight.bold)),
                 const SizedBox(width: 8),
-                Text('${queue.length} songs',
+                Text('$queueLength songs',
                     style: TextStyle(
                         color: scheme.onSurfaceVariant, fontSize: 13)),
               ],

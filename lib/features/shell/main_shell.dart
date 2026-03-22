@@ -63,7 +63,9 @@ class _MainShellState extends ConsumerState<MainShell>
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final hasSong = ref.watch(currentSongStreamProvider).valueOrNull != null;
+    final hasSong = ref.watch(
+      currentSongStreamProvider.select((s) => s.valueOrNull != null),
+    );
     final screenH = MediaQuery.of(context).size.height;
 
     // Collapse player when the queue runs out

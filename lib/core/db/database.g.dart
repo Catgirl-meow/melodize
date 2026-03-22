@@ -106,6 +106,12 @@ class $CachedSongsTable extends CachedSongs
   late final GeneratedColumn<String> localPath = GeneratedColumn<String>(
       'local_path', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _createdMeta =
+      const VerificationMeta('created');
+  @override
+  late final GeneratedColumn<DateTime> created = GeneratedColumn<DateTime>(
+      'created', aliasedName, true,
+      type: DriftSqlType.dateTime, requiredDuringInsert: false);
   static const VerificationMeta _cachedAtMeta =
       const VerificationMeta('cachedAt');
   @override
@@ -133,6 +139,7 @@ class $CachedSongsTable extends CachedSongs
         size,
         isDownloaded,
         localPath,
+        created,
         cachedAt
       ];
   @override
@@ -224,6 +231,10 @@ class $CachedSongsTable extends CachedSongs
       context.handle(_localPathMeta,
           localPath.isAcceptableOrUnknown(data['local_path']!, _localPathMeta));
     }
+    if (data.containsKey('created')) {
+      context.handle(_createdMeta,
+          created.isAcceptableOrUnknown(data['created']!, _createdMeta));
+    }
     if (data.containsKey('cached_at')) {
       context.handle(_cachedAtMeta,
           cachedAt.isAcceptableOrUnknown(data['cached_at']!, _cachedAtMeta));
@@ -271,6 +282,8 @@ class $CachedSongsTable extends CachedSongs
           .read(DriftSqlType.bool, data['${effectivePrefix}is_downloaded'])!,
       localPath: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}local_path']),
+      created: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}created']),
       cachedAt: attachedDatabase.typeMapping
           .read(DriftSqlType.dateTime, data['${effectivePrefix}cached_at'])!,
     );
@@ -300,6 +313,7 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
   final int? size;
   final bool isDownloaded;
   final String? localPath;
+  final DateTime? created;
   final DateTime cachedAt;
   const CachedSong(
       {required this.id,
@@ -319,6 +333,7 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
       this.size,
       required this.isDownloaded,
       this.localPath,
+      this.created,
       required this.cachedAt});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -364,6 +379,9 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
     if (!nullToAbsent || localPath != null) {
       map['local_path'] = Variable<String>(localPath);
     }
+    if (!nullToAbsent || created != null) {
+      map['created'] = Variable<DateTime>(created);
+    }
     map['cached_at'] = Variable<DateTime>(cachedAt);
     return map;
   }
@@ -404,6 +422,9 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
       localPath: localPath == null && nullToAbsent
           ? const Value.absent()
           : Value(localPath),
+      created: created == null && nullToAbsent
+          ? const Value.absent()
+          : Value(created),
       cachedAt: Value(cachedAt),
     );
   }
@@ -429,6 +450,7 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
       size: serializer.fromJson<int?>(json['size']),
       isDownloaded: serializer.fromJson<bool>(json['isDownloaded']),
       localPath: serializer.fromJson<String?>(json['localPath']),
+      created: serializer.fromJson<DateTime?>(json['created']),
       cachedAt: serializer.fromJson<DateTime>(json['cachedAt']),
     );
   }
@@ -453,6 +475,7 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
       'size': serializer.toJson<int?>(size),
       'isDownloaded': serializer.toJson<bool>(isDownloaded),
       'localPath': serializer.toJson<String?>(localPath),
+      'created': serializer.toJson<DateTime?>(created),
       'cachedAt': serializer.toJson<DateTime>(cachedAt),
     };
   }
@@ -475,6 +498,7 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
           Value<int?> size = const Value.absent(),
           bool? isDownloaded,
           Value<String?> localPath = const Value.absent(),
+          Value<DateTime?> created = const Value.absent(),
           DateTime? cachedAt}) =>
       CachedSong(
         id: id ?? this.id,
@@ -494,6 +518,7 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
         size: size.present ? size.value : this.size,
         isDownloaded: isDownloaded ?? this.isDownloaded,
         localPath: localPath.present ? localPath.value : this.localPath,
+        created: created.present ? created.value : this.created,
         cachedAt: cachedAt ?? this.cachedAt,
       );
   CachedSong copyWithCompanion(CachedSongsCompanion data) {
@@ -518,6 +543,7 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
           ? data.isDownloaded.value
           : this.isDownloaded,
       localPath: data.localPath.present ? data.localPath.value : this.localPath,
+      created: data.created.present ? data.created.value : this.created,
       cachedAt: data.cachedAt.present ? data.cachedAt.value : this.cachedAt,
     );
   }
@@ -542,6 +568,7 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
           ..write('size: $size, ')
           ..write('isDownloaded: $isDownloaded, ')
           ..write('localPath: $localPath, ')
+          ..write('created: $created, ')
           ..write('cachedAt: $cachedAt')
           ..write(')'))
         .toString();
@@ -566,6 +593,7 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
       size,
       isDownloaded,
       localPath,
+      created,
       cachedAt);
   @override
   bool operator ==(Object other) =>
@@ -588,6 +616,7 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
           other.size == this.size &&
           other.isDownloaded == this.isDownloaded &&
           other.localPath == this.localPath &&
+          other.created == this.created &&
           other.cachedAt == this.cachedAt);
 }
 
@@ -609,6 +638,7 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
   final Value<int?> size;
   final Value<bool> isDownloaded;
   final Value<String?> localPath;
+  final Value<DateTime?> created;
   final Value<DateTime> cachedAt;
   final Value<int> rowid;
   const CachedSongsCompanion({
@@ -629,6 +659,7 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
     this.size = const Value.absent(),
     this.isDownloaded = const Value.absent(),
     this.localPath = const Value.absent(),
+    this.created = const Value.absent(),
     this.cachedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -650,6 +681,7 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
     this.size = const Value.absent(),
     this.isDownloaded = const Value.absent(),
     this.localPath = const Value.absent(),
+    this.created = const Value.absent(),
     this.cachedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
@@ -674,6 +706,7 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
     Expression<int>? size,
     Expression<bool>? isDownloaded,
     Expression<String>? localPath,
+    Expression<DateTime>? created,
     Expression<DateTime>? cachedAt,
     Expression<int>? rowid,
   }) {
@@ -695,6 +728,7 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
       if (size != null) 'size': size,
       if (isDownloaded != null) 'is_downloaded': isDownloaded,
       if (localPath != null) 'local_path': localPath,
+      if (created != null) 'created': created,
       if (cachedAt != null) 'cached_at': cachedAt,
       if (rowid != null) 'rowid': rowid,
     });
@@ -718,6 +752,7 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
       Value<int?>? size,
       Value<bool>? isDownloaded,
       Value<String?>? localPath,
+      Value<DateTime?>? created,
       Value<DateTime>? cachedAt,
       Value<int>? rowid}) {
     return CachedSongsCompanion(
@@ -738,6 +773,7 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
       size: size ?? this.size,
       isDownloaded: isDownloaded ?? this.isDownloaded,
       localPath: localPath ?? this.localPath,
+      created: created ?? this.created,
       cachedAt: cachedAt ?? this.cachedAt,
       rowid: rowid ?? this.rowid,
     );
@@ -797,6 +833,9 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
     if (localPath.present) {
       map['local_path'] = Variable<String>(localPath.value);
     }
+    if (created.present) {
+      map['created'] = Variable<DateTime>(created.value);
+    }
     if (cachedAt.present) {
       map['cached_at'] = Variable<DateTime>(cachedAt.value);
     }
@@ -826,6 +865,7 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
           ..write('size: $size, ')
           ..write('isDownloaded: $isDownloaded, ')
           ..write('localPath: $localPath, ')
+          ..write('created: $created, ')
           ..write('cachedAt: $cachedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -2888,6 +2928,7 @@ typedef $$CachedSongsTableCreateCompanionBuilder = CachedSongsCompanion
   Value<int?> size,
   Value<bool> isDownloaded,
   Value<String?> localPath,
+  Value<DateTime?> created,
   Value<DateTime> cachedAt,
   Value<int> rowid,
 });
@@ -2910,6 +2951,7 @@ typedef $$CachedSongsTableUpdateCompanionBuilder = CachedSongsCompanion
   Value<int?> size,
   Value<bool> isDownloaded,
   Value<String?> localPath,
+  Value<DateTime?> created,
   Value<DateTime> cachedAt,
   Value<int> rowid,
 });
@@ -2973,6 +3015,9 @@ class $$CachedSongsTableFilterComposer
 
   ColumnFilters<String> get localPath => $composableBuilder(
       column: $table.localPath, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get created => $composableBuilder(
+      column: $table.created, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<DateTime> get cachedAt => $composableBuilder(
       column: $table.cachedAt, builder: (column) => ColumnFilters(column));
@@ -3039,6 +3084,9 @@ class $$CachedSongsTableOrderingComposer
   ColumnOrderings<String> get localPath => $composableBuilder(
       column: $table.localPath, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<DateTime> get created => $composableBuilder(
+      column: $table.created, builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<DateTime> get cachedAt => $composableBuilder(
       column: $table.cachedAt, builder: (column) => ColumnOrderings(column));
 }
@@ -3103,6 +3151,9 @@ class $$CachedSongsTableAnnotationComposer
   GeneratedColumn<String> get localPath =>
       $composableBuilder(column: $table.localPath, builder: (column) => column);
 
+  GeneratedColumn<DateTime> get created =>
+      $composableBuilder(column: $table.created, builder: (column) => column);
+
   GeneratedColumn<DateTime> get cachedAt =>
       $composableBuilder(column: $table.cachedAt, builder: (column) => column);
 }
@@ -3147,6 +3198,7 @@ class $$CachedSongsTableTableManager extends RootTableManager<
             Value<int?> size = const Value.absent(),
             Value<bool> isDownloaded = const Value.absent(),
             Value<String?> localPath = const Value.absent(),
+            Value<DateTime?> created = const Value.absent(),
             Value<DateTime> cachedAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
@@ -3168,6 +3220,7 @@ class $$CachedSongsTableTableManager extends RootTableManager<
             size: size,
             isDownloaded: isDownloaded,
             localPath: localPath,
+            created: created,
             cachedAt: cachedAt,
             rowid: rowid,
           ),
@@ -3189,6 +3242,7 @@ class $$CachedSongsTableTableManager extends RootTableManager<
             Value<int?> size = const Value.absent(),
             Value<bool> isDownloaded = const Value.absent(),
             Value<String?> localPath = const Value.absent(),
+            Value<DateTime?> created = const Value.absent(),
             Value<DateTime> cachedAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
@@ -3210,6 +3264,7 @@ class $$CachedSongsTableTableManager extends RootTableManager<
             size: size,
             isDownloaded: isDownloaded,
             localPath: localPath,
+            created: created,
             cachedAt: cachedAt,
             rowid: rowid,
           ),

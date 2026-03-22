@@ -188,14 +188,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
                                 curve: Curves.easeInOut,
                               ),
                             ),
-                            _LyricsPage(
-                              song: song,
-                              onBack: () => _pageController.animateToPage(
-                                0,
-                                duration: const Duration(milliseconds: 300),
-                                curve: Curves.easeInOut,
-                              ),
-                            ),
+                            _LyricsPage(song: song),
                           ],
                         ),
                       ),
@@ -503,8 +496,9 @@ class _AlbumArt extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isPlaying =
-        ref.watch(playerStateStreamProvider).valueOrNull?.playing ?? false;
+    final isPlaying = ref.watch(
+      playerStateStreamProvider.select((s) => s.valueOrNull?.playing ?? false),
+    );
     final w = isPlaying ? artSize : artSize * 0.85;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
@@ -611,9 +605,12 @@ class _SeekSliderState extends ConsumerState<_SeekSlider> {
 
   @override
   Widget build(BuildContext context) {
-    final position =
-        ref.watch(positionStreamProvider).valueOrNull ?? Duration.zero;
-    final duration = ref.watch(durationStreamProvider).valueOrNull;
+    final position = ref.watch(
+      positionStreamProvider.select((s) => s.valueOrNull ?? Duration.zero),
+    );
+    final duration = ref.watch(
+      durationStreamProvider.select((s) => s.valueOrNull),
+    );
 
     final progress = (duration != null && duration.inMilliseconds > 0)
         ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
@@ -849,8 +846,7 @@ class _ActionButton extends StatelessWidget {
 
 class _LyricsPage extends ConsumerStatefulWidget {
   final Song song;
-  final VoidCallback onBack;
-  const _LyricsPage({required this.song, required this.onBack});
+  const _LyricsPage({required this.song});
 
   @override
   ConsumerState<_LyricsPage> createState() => _LyricsPageState();
@@ -914,9 +910,7 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
     ref.listen(positionStreamProvider,
         (_, next) => _onPosition(next.valueOrNull ?? Duration.zero));
 
-    return Stack(
-      children: [
-        lyricsAsync.when(
+    return lyricsAsync.when(
       loading: () =>
           const Center(child: CircularProgressIndicator(color: Colors.white)),
       error: (_, __) => const Center(
@@ -965,19 +959,6 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
           ),
         );
       },
-        ),
-        // Back button — visible on desktop where swipe is unavailable
-        Positioned(
-          top: 8,
-          left: 8,
-          child: IconButton(
-            icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                color: Colors.white70, size: 20),
-            tooltip: 'Back to player',
-            onPressed: widget.onBack,
-          ),
-        ),
-      ],
     );
   }
 }

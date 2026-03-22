@@ -26,6 +26,7 @@ class CachedSongs extends Table {
   IntColumn get size => integer().nullable()();
   BoolColumn get isDownloaded => boolean().withDefault(const Constant(false))();
   TextColumn get localPath => text().nullable()();
+  DateTimeColumn get created => dateTime().nullable()();
   DateTimeColumn get cachedAt => dateTime().withDefault(currentDateAndTime)();
 
   @override
@@ -109,7 +110,7 @@ class AppDatabase extends _$AppDatabase {
   factory AppDatabase() => _instance;
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -117,6 +118,9 @@ class AppDatabase extends _$AppDatabase {
           if (from < 2) {
             await m.createTable(queueEntries);
             await m.createTable(lyricsCache);
+          }
+          if (from < 3) {
+            await m.addColumn(cachedSongs, cachedSongs.created);
           }
         },
       );
