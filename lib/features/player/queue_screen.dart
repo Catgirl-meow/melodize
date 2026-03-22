@@ -24,7 +24,9 @@ class QueueScreen extends ConsumerWidget {
     return Material(
       color: scheme.surface,
       borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      clipBehavior: Clip.antiAlias,
+      // Clip.hardEdge avoids a GPU save layer (Clip.antiAlias forces one),
+      // which makes the modal dismiss animation smooth.
+      clipBehavior: Clip.hardEdge,
       child: SizedBox(
       height: MediaQuery.of(context).size.height * 0.75,
       child: Column(
@@ -78,7 +80,7 @@ class QueueScreen extends ConsumerWidget {
                       final song = queue[i].tag;
                       final isCurrent = i == currentIndex;
                       return RepaintBoundary(
-                        key: ValueKey(queue[i].sequence.hashCode + i),
+                        key: ValueKey(song?.id ?? i),
                         child: ListTile(
                           contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 2),

@@ -859,6 +859,37 @@ class _LyricsPage extends ConsumerStatefulWidget {
 class _LyricsPageState extends ConsumerState<_LyricsPage> {
   final _scrollCtrl = ScrollController();
   int _currentLine = 0;
+  // Cache synced lines so the position listener can binary-search without
+  // touching the lyrics provider again. Updated inside build when data arrives.
+  List<dynamic> _syncedLines = [];
+
+  void _onPosition(Duration position) {
+    if (_syncedLines.isEmpty) return;
+    int lo = 0, hi = _syncedLines.length - 1, current = 0;
+    while (lo <= hi) {
+      final mid = (lo + hi) >> 1;
+      if (_syncedLines[mid].timestamp <= position) {
+        current = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    if (current == _currentLine) return;
+    setState(() => _currentLine = current);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollCtrl.hasClients) return;
+      const itemH = 48.0;
+      final target = (current * itemH -
+              MediaQuery.of(context).size.height * 0.35)
+          .clamp(0.0, _scrollCtrl.position.maxScrollExtent);
+      _scrollCtrl.animateTo(
+        target,
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
 
   @override
   void dispose() {
@@ -876,8 +907,12 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
       duration: widget.song.duration ?? 0,
     );
     final lyricsAsync = ref.watch(lyricsProvider(query));
-    final position =
-        ref.watch(positionStreamProvider).valueOrNull ?? Duration.zero;
+
+    // Listen (not watch) — position updates many times/sec so we must NOT
+    // let them trigger a full rebuild. _onPosition calls setState only when
+    // the active lyric line actually changes.
+    ref.listen(positionStreamProvider,
+        (_, next) => _onPosition(next.valueOrNull ?? Duration.zero));
 
     return Stack(
       children: [
@@ -904,33 +939,9 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
 
         if (result.hasSynced) {
           final lines = result.syncedLines;
-          // Binary search for current lyric line — O(log n) vs O(n)
-          int lo = 0, hi = lines.length - 1, current = 0;
-          while (lo <= hi) {
-            final mid = (lo + hi) >> 1;
-            if (lines[mid].timestamp <= position) {
-              current = mid;
-              lo = mid + 1;
-            } else {
-              hi = mid - 1;
-            }
-          }
-          if (current != _currentLine) {
-            _currentLine = current;
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (_scrollCtrl.hasClients) {
-                const itemH = 48.0;
-                final target = (current * itemH -
-                        MediaQuery.of(context).size.height * 0.35)
-                    .clamp(0.0, _scrollCtrl.position.maxScrollExtent);
-                _scrollCtrl.animateTo(
-                  target,
-                  duration: const Duration(milliseconds: 450),
-                  curve: Curves.easeOutCubic,
-                );
-              }
-            });
-          }
+          // Keep cached lines up-to-date for the position listener.
+          // This runs only when lyrics data changes, not on every position tick.
+          _syncedLines = lines;
 
           return ListView.builder(
             controller: _scrollCtrl,
@@ -940,7 +951,7 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
             itemBuilder: (_, i) => _LyricLine(
               key: ValueKey(i),
               text: lines[i].text,
-              isActive: i == current,
+              isActive: i == _currentLine,
             ),
           );
         }
