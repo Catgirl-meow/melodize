@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/gestures.dart';
@@ -470,6 +471,10 @@ class _PlayerPage extends StatelessWidget {
           _SongInfoRow(song: song),
           const SizedBox(height: 16),
           RepaintBoundary(child: _SeekSlider()),
+          if (Platform.isLinux) ...[
+            const SizedBox(height: 8),
+            const RepaintBoundary(child: _VolumeSlider()),
+          ],
           const SizedBox(height: 4),
           RepaintBoundary(child: _PlayControls()),
           const SizedBox(height: 12),
@@ -837,6 +842,83 @@ class _ActionButton extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Volume slider — desktop only
+
+class _VolumeSlider extends ConsumerStatefulWidget {
+  const _VolumeSlider();
+
+  @override
+  ConsumerState<_VolumeSlider> createState() => _VolumeSliderState();
+}
+
+class _VolumeSliderState extends ConsumerState<_VolumeSlider> {
+  double _volume = 1.0;
+  StreamSubscription<double>? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    final handler = ref.read(audioHandlerNotifierProvider);
+    if (handler != null) {
+      _volume = handler.player.volume;
+      _sub = handler.player.volumeStream.listen((v) {
+        if (mounted && v != _volume) setState(() => _volume = v);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final handler = ref.read(audioHandlerNotifierProvider);
+    return Row(
+      children: [
+        IconButton(
+          icon: Icon(
+            _volume == 0
+                ? Icons.volume_off_rounded
+                : _volume < 0.5
+                    ? Icons.volume_down_rounded
+                    : Icons.volume_up_rounded,
+            color: Colors.white70,
+            size: 18,
+          ),
+          padding: EdgeInsets.zero,
+          visualDensity: VisualDensity.compact,
+          onPressed: () =>
+              handler?.player.setVolume(_volume > 0 ? 0.0 : 1.0),
+        ),
+        Expanded(
+          child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+              trackHeight: 2,
+              activeTrackColor: Colors.white,
+              inactiveTrackColor: Colors.white24,
+              thumbColor: Colors.white,
+              overlayShape: SliderComponentShape.noOverlay,
+            ),
+            child: Slider(
+              value: _volume,
+              onChanged: (v) {
+                setState(() => _volume = v);
+                handler?.player.setVolume(v);
+              },
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+      ],
     );
   }
 }
