@@ -196,7 +196,7 @@ final allSongsProvider = StreamProvider<List<Song>>((ref) async* {
   List<Song> _filter(List<Song> songs) =>
       deletedIds.isEmpty ? songs : songs.where((s) => !deletedIds.contains(s.id)).toList();
 
-  // Always emit cached songs immediately
+  // Always emit cached songs immediately (with correct isDownloaded from DB)
   final cached = await db.getAllCachedSongs();
   yield _filter(cached.map(_rowToSong).toList());
 
@@ -204,16 +204,28 @@ final allSongsProvider = StreamProvider<List<Song>>((ref) async* {
     try {
       final fresh = await client.getAllSongs();
       await db.upsertSongs(fresh.map(_songToCompanion).toList());
-      final filtered = _filter(fresh);
-      // If the server no longer returns deleted songs, clear them from the set
-      if (deletedIds.isNotEmpty) {
-        final stillPresent = deletedIds.intersection(fresh.map((s) => s.id).toSet());
-        if (stillPresent.length < deletedIds.length) {
-          ref.read(_pendingDeleteIdsProvider.notifier).update(
-              (s) => s.intersection(fresh.map((e) => e.id).toSet()));
+
+      // Prune songs that are no longer on the server (fixes stale cache and
+      // downloaded-count > library-count).  Keep locally-downloaded songs so
+      // the user can still play offline files that were removed from the server.
+      final freshIds = fresh.map((s) => s.id).toSet();
+      for (final row in cached) {
+        if (!freshIds.contains(row.id) && !row.isDownloaded) {
+          await db.deleteSongCompletely(row.id);
         }
       }
-      yield filtered;
+
+      // Re-read from DB so isDownloaded / localPath are preserved — avoids
+      // downloadBatch seeing all songs as not-downloaded on app restart.
+      final updated = await db.getAllCachedSongs();
+      final updatedSongs = updated.map(_rowToSong).toList();
+
+      // If the server no longer returns pending-delete songs, clear them from the set.
+      if (deletedIds.isNotEmpty) {
+        ref.read(_pendingDeleteIdsProvider.notifier).update(
+            (s) => s.intersection(freshIds));
+      }
+      yield _filter(updatedSongs);
     } catch (_) {
       // Offline or server error — keep showing cached data, no rethrow
     }
@@ -232,7 +244,7 @@ final deezerClientProvider = Provider<DeezerClient>((_) => DeezerClient());
 // tracks NOT already in the user's library.
 // Returns [] silently on any failure so a missing feature never breaks the home screen.
 final recommendationsProvider =
-    FutureProvider<List<RecommendedTrack>>((ref) async {
+    FutureProvider.autoDispose<List<RecommendedTrack>>((ref) async {
   final db = ref.watch(databaseProvider);
   final deezer = ref.watch(deezerClientProvider);
 

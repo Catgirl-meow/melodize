@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -159,26 +160,44 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
                       onClose: widget.onClose,
                     ),
                     Expanded(
-                      child: PageView(
-                        controller: _pageController,
-                        onPageChanged: (p) =>
-                            setState(() => _currentPage = p),
-                        children: [
-                          _PlayerPage(
-                            song: song,
-                            coverUrl: coverUrl,
-                            sleepNotifier: _sleepNotifier,
-                            onSleepTimer: () =>
-                                _showSleepTimerDialog(context),
-                            onQueueOpen: () => _openQueue(context),
-                            onLyricsOpen: () => _pageController.animateToPage(
-                              1,
-                              duration: const Duration(milliseconds: 300),
-                              curve: Curves.easeInOut,
+                      child: ScrollConfiguration(
+                        // Allow mouse/trackpad to swipe between player and lyrics
+                        behavior: ScrollConfiguration.of(context).copyWith(
+                          dragDevices: {
+                            PointerDeviceKind.touch,
+                            PointerDeviceKind.mouse,
+                            PointerDeviceKind.trackpad,
+                            PointerDeviceKind.stylus,
+                          },
+                        ),
+                        child: PageView(
+                          controller: _pageController,
+                          onPageChanged: (p) =>
+                              setState(() => _currentPage = p),
+                          children: [
+                            _PlayerPage(
+                              song: song,
+                              coverUrl: coverUrl,
+                              sleepNotifier: _sleepNotifier,
+                              onSleepTimer: () =>
+                                  _showSleepTimerDialog(context),
+                              onQueueOpen: () => _openQueue(context),
+                              onLyricsOpen: () => _pageController.animateToPage(
+                                1,
+                                duration: const Duration(milliseconds: 300),
+                                curve: Curves.easeInOut,
+                              ),
                             ),
-                          ),
-                          _LyricsPage(song: song),
-                        ],
+                            _LyricsPage(
+                              song: song,
+                              onBack: () => _pageController.animateToPage(
+                                0,
+                                duration: const Duration(milliseconds: 300),
+                                curve: Curves.easeInOut,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                     // Page indicator
@@ -830,7 +849,8 @@ class _ActionButton extends StatelessWidget {
 
 class _LyricsPage extends ConsumerStatefulWidget {
   final Song song;
-  const _LyricsPage({required this.song});
+  final VoidCallback onBack;
+  const _LyricsPage({required this.song, required this.onBack});
 
   @override
   ConsumerState<_LyricsPage> createState() => _LyricsPageState();
@@ -859,7 +879,9 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
     final position =
         ref.watch(positionStreamProvider).valueOrNull ?? Duration.zero;
 
-    return lyricsAsync.when(
+    return Stack(
+      children: [
+        lyricsAsync.when(
       loading: () =>
           const Center(child: CircularProgressIndicator(color: Colors.white)),
       error: (_, __) => const Center(
@@ -932,6 +954,19 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
           ),
         );
       },
+        ),
+        // Back button — visible on desktop where swipe is unavailable
+        Positioned(
+          top: 8,
+          left: 8,
+          child: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                color: Colors.white70, size: 20),
+            tooltip: 'Back to player',
+            onPressed: widget.onBack,
+          ),
+        ),
+      ],
     );
   }
 }

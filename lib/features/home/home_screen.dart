@@ -212,6 +212,21 @@ class HomeScreen extends ConsumerWidget {
             return SliverToBoxAdapter(
               child: _Section(
                 title: 'Recommended for You',
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: 'Play all',
+                      icon: const Icon(Icons.play_arrow_rounded),
+                      onPressed: () => _playRecommendations(ref, recs, shuffle: false),
+                    ),
+                    IconButton(
+                      tooltip: 'Shuffle',
+                      icon: const Icon(Icons.shuffle_rounded),
+                      onPressed: () => _playRecommendations(ref, recs, shuffle: true),
+                    ),
+                  ],
+                ),
                 child: SizedBox(
                   height: 176,
                   child: ListView.builder(
@@ -266,6 +281,20 @@ class HomeScreen extends ConsumerWidget {
     ref.read(audioHandlerNotifierProvider)?.loadQueue(songs, startIndex: index);
   }
 
+  void _playRecommendations(WidgetRef ref, List<RecommendedTrack> recs, {required bool shuffle}) {
+    final songs = recs.map((r) => Song.fromRecommendation(
+      deezerId: r.deezerId,
+      title: r.title,
+      artist: r.artist,
+      album: r.album,
+      durationSeconds: r.durationSeconds,
+      previewUrl: r.previewUrl,
+      coverUrl: r.coverUrl,
+    )).toList();
+    if (shuffle) songs.shuffle();
+    ref.read(audioHandlerNotifierProvider)?.loadQueue(songs, startIndex: 0);
+  }
+
   String _greeting(String? username) {
     final h = DateTime.now().hour;
     final String base;
@@ -288,8 +317,9 @@ class HomeScreen extends ConsumerWidget {
 class _Section extends StatelessWidget {
   final String title;
   final Widget child;
+  final Widget? trailing;
 
-  const _Section({required this.title, required this.child});
+  const _Section({required this.title, required this.child, this.trailing});
 
   @override
   Widget build(BuildContext context) {
@@ -297,13 +327,20 @@ class _Section extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
-          child: Text(
-            title,
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(fontWeight: FontWeight.bold),
+          padding: const EdgeInsets.fromLTRB(20, 24, 8, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ),
+              if (trailing != null) trailing!,
+            ],
           ),
         ),
         child,
