@@ -64,6 +64,13 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   bool _scrobbled = false;
   LinuxMprisService? _mpris;
 
+  // Shuffle playback history — tracks the actual sequence of songs heard so
+  // that skipToPrevious goes back to the song the user really listened to last,
+  // not just the adjacent position in the (fixed) shuffled order.
+  final _shuffleHistory = <int>[];  // original-sequence indices
+  int? _lastHistoryIndex;
+  bool _seekingBack = false;
+
   // ---------------------------------------------------------------------------
   // MediaSession sync — keeps audio_service's playbackState + mediaItem current
   // so the notification, lock screen, and Bluetooth display show correct info.
@@ -71,6 +78,21 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   void _initStateSync() {
     // Update MediaSession playback state on play/pause/processing changes.
     player.playerStateStream.listen((_) => _broadcastState());
+
+    // Track shuffle playback history so skipToPrevious works correctly.
+    player.currentIndexStream.listen((index) {
+      if (_seekingBack || index == null) return;
+      if (!player.shuffleModeEnabled) {
+        _shuffleHistory.clear();
+        _lastHistoryIndex = null;
+        return;
+      }
+      if (_lastHistoryIndex != null && _lastHistoryIndex != index) {
+        _shuffleHistory.add(_lastHistoryIndex!);
+        if (_shuffleHistory.length > 100) _shuffleHistory.removeAt(0);
+      }
+      _lastHistoryIndex = index;
+    });
 
     // Update MediaSession media item when the current song changes.
     player.sequenceStateStream.listen((seqState) {
@@ -156,6 +178,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   Future<void> loadQueue(List<Song> songs, {int startIndex = 0}) async {
     if (_config == null || songs.isEmpty) return;
+    _shuffleHistory.clear();
+    _lastHistoryIndex = null;
     await _playlistSource.clear();
     await _playlistSource.addAll(songs.map(_songToSource).toList());
     try {
@@ -225,6 +249,14 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   Future<void> skipToPrevious() async {
     if (player.position.inSeconds > 3) {
       await player.seek(Duration.zero);
+      return;
+    }
+    if (player.shuffleModeEnabled && _shuffleHistory.isNotEmpty) {
+      final prevIndex = _shuffleHistory.removeLast();
+      _seekingBack = true;
+      _lastHistoryIndex = prevIndex;
+      await player.seek(Duration.zero, index: prevIndex);
+      _seekingBack = false;
     } else {
       await player.seekToPrevious();
     }
@@ -233,8 +265,14 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   Future<void> skipToIndex(int index) =>
       player.seek(Duration.zero, index: index);
 
-  Future<void> toggleShuffle() =>
-      player.setShuffleModeEnabled(!player.shuffleModeEnabled);
+  Future<void> toggleShuffle() {
+    if (player.shuffleModeEnabled) {
+      // Turning shuffle off — clear history so back works normally.
+      _shuffleHistory.clear();
+      _lastHistoryIndex = null;
+    }
+    return player.setShuffleModeEnabled(!player.shuffleModeEnabled);
+  }
 
   Future<void> resetPlaybackModes() async {
     await player.setShuffleModeEnabled(false);

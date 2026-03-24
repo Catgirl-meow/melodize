@@ -3,12 +3,14 @@ import 'dart:io';
 import '../utils/platform_dirs.dart';
 
 class AppPreferences {
-  final String streamQuality;   // 'lossless' | '320' | '192' | '128'
-  final String autoDownload;    // 'never' | 'on_play' | 'all'
-  final String downloadQuality; // 'lossless' | '320' | '192' | '128'
-  final String companionUrl;    // e.g. 'http://100.73.73.73:8765'  (empty = disabled)
-  final String companionApiKey; // X-API-Key value
-  final String deezerArl;       // Deezer ARL cookie — enables FLAC downloads via companion
+  final String streamQuality;      // 'lossless' | '320' | '192' | '128'
+  final String autoDownload;       // 'never' | 'on_play' | 'all'
+  final String downloadQuality;    // 'lossless' | '320' | '192' | '128'
+  final String companionUrl;       // e.g. 'http://100.73.73.73:8765'  (empty = disabled)
+  final String companionApiKey;    // X-API-Key value
+  final String deezerArl;          // Deezer ARL cookie — enables FLAC downloads via companion
+  final String librarySongSort;    // 'name' | 'artist' | 'recentlyAdded' | 'downloaded'
+  final bool librarySongAscending;
 
   const AppPreferences({
     this.streamQuality = 'lossless',
@@ -17,6 +19,8 @@ class AppPreferences {
     this.companionUrl = '',
     this.companionApiKey = '',
     this.deezerArl = '',
+    this.librarySongSort = 'name',
+    this.librarySongAscending = true,
   });
 
   bool get hasCompanion => companionUrl.isNotEmpty && companionApiKey.isNotEmpty;
@@ -29,6 +33,8 @@ class AppPreferences {
     String? companionUrl,
     String? companionApiKey,
     String? deezerArl,
+    String? librarySongSort,
+    bool? librarySongAscending,
   }) =>
       AppPreferences(
         streamQuality: streamQuality ?? this.streamQuality,
@@ -37,6 +43,8 @@ class AppPreferences {
         companionUrl: companionUrl ?? this.companionUrl,
         companionApiKey: companionApiKey ?? this.companionApiKey,
         deezerArl: deezerArl ?? this.deezerArl,
+        librarySongSort: librarySongSort ?? this.librarySongSort,
+        librarySongAscending: librarySongAscending ?? this.librarySongAscending,
       );
 
   factory AppPreferences.fromJson(Map<String, dynamic> j) => AppPreferences(
@@ -46,6 +54,8 @@ class AppPreferences {
         companionUrl: j['companionUrl'] as String? ?? '',
         companionApiKey: j['companionApiKey'] as String? ?? '',
         deezerArl: j['deezerArl'] as String? ?? '',
+        librarySongSort: j['librarySongSort'] as String? ?? 'name',
+        librarySongAscending: j['librarySongAscending'] as bool? ?? true,
       );
 
   Map<String, dynamic> toJson() => {
@@ -55,6 +65,8 @@ class AppPreferences {
         'companionUrl': companionUrl,
         'companionApiKey': companionApiKey,
         'deezerArl': deezerArl,
+        'librarySongSort': librarySongSort,
+        'librarySongAscending': librarySongAscending,
       };
 
   static Future<File> get _file async {

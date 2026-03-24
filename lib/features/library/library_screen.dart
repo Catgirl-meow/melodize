@@ -154,58 +154,63 @@ class _SongsTab extends ConsumerStatefulWidget {
 
 class _SongsTabState extends ConsumerState<_SongsTab>
     with AutomaticKeepAliveClientMixin {
-  _SongSort _sort = _SongSort.name;
-  bool _ascending = true;
-
   @override
   bool get wantKeepAlive => true;
 
-  void _showSortSheet(BuildContext context) {
+  void _showSortSheet(BuildContext context, _SongSort currentSort, bool currentAscending) {
     final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet<void>(
       context: context,
       builder: (_) => SafeArea(
         child: StatefulBuilder(
-          builder: (ctx, setSheetState) => Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                child: Text('Sort songs',
-                    style: Theme.of(context).textTheme.titleMedium),
-              ),
-              for (final option in _SongSort.values)
-                ListTile(
-                  leading: Icon(
-                    _songSortIcon(option),
-                    color: _sort == option ? scheme.primary : null,
-                  ),
-                  title: Text(_songSortLabel(option)),
-                  trailing: _sort == option
-                      ? Icon(
-                          _ascending
-                              ? Icons.arrow_upward_rounded
-                              : Icons.arrow_downward_rounded,
-                          color: scheme.primary,
-                          size: 20,
-                        )
-                      : null,
-                  onTap: () {
-                    setSheetState(() {
-                      if (_sort == option) {
-                        _ascending = !_ascending;
-                      } else {
-                        _sort = option;
-                        _ascending = true;
-                      }
-                    });
-                    setState(() {});
-                    Navigator.pop(context);
-                  },
+          builder: (ctx, setSheetState) {
+            var sheetSort = currentSort;
+            var sheetAscending = currentAscending;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Text('Sort songs',
+                      style: Theme.of(context).textTheme.titleMedium),
                 ),
-              const SizedBox(height: 8),
-            ],
-          ),
+                for (final option in _SongSort.values)
+                  ListTile(
+                    leading: Icon(
+                      _songSortIcon(option),
+                      color: sheetSort == option ? scheme.primary : null,
+                    ),
+                    title: Text(_songSortLabel(option)),
+                    trailing: sheetSort == option
+                        ? Icon(
+                            sheetAscending
+                                ? Icons.arrow_upward_rounded
+                                : Icons.arrow_downward_rounded,
+                            color: scheme.primary,
+                            size: 20,
+                          )
+                        : null,
+                    onTap: () {
+                      if (sheetSort == option) {
+                        sheetAscending = !sheetAscending;
+                      } else {
+                        sheetSort = option;
+                        sheetAscending = true;
+                      }
+                      setSheetState(() {});
+                      ref.read(preferencesNotifierProvider.notifier).update(
+                        ref.read(preferencesNotifierProvider).copyWith(
+                          librarySongSort: sheetSort.name,
+                          librarySongAscending: sheetAscending,
+                        ),
+                      );
+                      Navigator.pop(context);
+                    },
+                  ),
+                const SizedBox(height: 8),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -214,6 +219,14 @@ class _SongsTabState extends ConsumerState<_SongsTab>
   @override
   Widget build(BuildContext context) {
     super.build(context); // required by AutomaticKeepAliveClientMixin
+
+    final prefs = ref.watch(preferencesNotifierProvider);
+    final sort = _SongSort.values.firstWhere(
+      (s) => s.name == prefs.librarySongSort,
+      orElse: () => _SongSort.name,
+    );
+    final ascending = prefs.librarySongAscending;
+
     final songsAsync = ref.watch(allSongsProvider);
     final scheme = Theme.of(context).colorScheme;
 
@@ -225,7 +238,7 @@ class _SongsTabState extends ConsumerState<_SongsTab>
           return const Center(child: Text('No songs found'));
         }
         final downloadedIds = ref.watch(downloadedSongIdsProvider);
-        final songs = _applySongSort(rawSongs, _sort, _ascending, downloadedIds);
+        final songs = _applySongSort(rawSongs, sort, ascending, downloadedIds);
         return CustomScrollView(
           slivers: [
             SliverToBoxAdapter(
@@ -240,14 +253,14 @@ class _SongsTabState extends ConsumerState<_SongsTab>
                     ),
                     const Spacer(),
                     TextButton.icon(
-                      onPressed: () => _showSortSheet(context),
+                      onPressed: () => _showSortSheet(context, sort, ascending),
                       icon: Icon(
-                        _ascending
+                        ascending
                             ? Icons.arrow_upward_rounded
                             : Icons.arrow_downward_rounded,
                         size: 16,
                       ),
-                      label: Text(_songSortLabel(_sort)),
+                      label: Text(_songSortLabel(sort)),
                       style: TextButton.styleFrom(
                         foregroundColor: scheme.primary,
                         textStyle: const TextStyle(fontSize: 13),

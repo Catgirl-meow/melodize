@@ -75,7 +75,12 @@ class QueueScreen extends ConsumerWidget {
                     padding: EdgeInsets.zero,
                     // Limit pre-building of off-screen items
                     cacheExtent: 200,
-                    proxyDecorator: (child, index, animation) => child,
+                    proxyDecorator: (child, index, animation) => Material(
+                      color: scheme.surfaceContainerHighest,
+                      elevation: 4,
+                      shadowColor: Colors.black38,
+                      child: child,
+                    ),
                     itemCount: queue.length,
                     onReorder: (oldIndex, newIndex) {
                       if (newIndex > oldIndex) newIndex--;

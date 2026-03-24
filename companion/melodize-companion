@@ -62,9 +62,20 @@ _DEEMIX_CONFIG_DIR = _STATE_DIR / "deemix"
 
 
 def _write_deemix_arl(arl: str) -> None:
-    """Persist ARL so the deemix CLI picks it up on next run."""
+    """Persist ARL and high-quality artwork config so deemix picks them up."""
     _DEEMIX_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     (_DEEMIX_CONFIG_DIR / ".arl").write_text(arl.strip(), encoding="utf-8")
+
+    # Write/update config.json — only set artwork quality, leave everything else
+    # at deemix defaults so we don't stomp on user-configured preferences.
+    config_path = _DEEMIX_CONFIG_DIR / "config.json"
+    try:
+        existing = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+    except Exception:
+        existing = {}
+    existing["embeddedArtworkSize"] = 1000  # XL (1000×1000) — default is 800→500px
+    existing["localArtworkSize"] = 1000
+    config_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
 
 
 def _run_download(job_id: str, url: str, cfg: dict, deezer_arl: str = "") -> None:
