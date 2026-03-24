@@ -250,12 +250,15 @@ class SubsonicClient {
     return '$_baseUrl/rest/download?${_encodeParams(params)}';
   }
 
-  String coverArtUrl(String coverArtId, {int size = 300}) {
-    final params = {
+  // size=0 → Navidrome returns the original embedded image at full resolution.
+  // Use 0 for high-quality contexts (now-playing, album grids); list tiles can
+  // pass a smaller value if needed, but 0 is fine everywhere given image caching.
+  String coverArtUrl(String coverArtId, {int size = 0}) {
+    final params = <String, String>{
       ..._stableAuthParams(),
       'id': coverArtId,
-      'size': size.toString(),
     };
+    if (size > 0) params['size'] = size.toString();
     return '$_baseUrl/rest/getCoverArt?${_encodeParams(params)}';
   }
 
