@@ -77,6 +77,18 @@ class SettingsScreen extends ConsumerWidget {
       ),
       body: ListView(
         children: [
+          // --- Appearance ---
+          _SectionHeader('Appearance'),
+          SwitchListTile(
+            title: const Text('Floating navigation bar'),
+            subtitle: const Text('Pill-shaped dock at the bottom'),
+            secondary: const Icon(Icons.dock_rounded),
+            value: prefs.floatingNavBar,
+            onChanged: (v) => ref
+                .read(preferencesNotifierProvider.notifier)
+                .update(prefs.copyWith(floatingNavBar: v)),
+          ),
+
           // --- Playback ---
           _SectionHeader('Playback'),
           ListTile(

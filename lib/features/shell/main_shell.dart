@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
@@ -7,6 +8,14 @@ import '../search/search_screen.dart';
 import '../settings/settings_screen.dart';
 import '../player/mini_player.dart';
 import '../player/now_playing_screen.dart';
+
+// Floating dock geometry constants
+const _kDockHeight = 64.0;
+const _kDockBottom = 12.0;
+const _kDockHorizontal = 16.0;
+const _kDockRadius = 26.0;
+// Total vertical space reserved for the floating dock in the body
+const _kDockBodyPad = _kDockHeight + _kDockBottom;
 
 class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
@@ -19,6 +28,20 @@ class _MainShellState extends ConsumerState<MainShell>
     with SingleTickerProviderStateMixin {
   int _selectedIndex = 0;
   late final AnimationController _playerAnim;
+
+  static const _icons = [
+    Icons.home_outlined,
+    Icons.library_music_outlined,
+    Icons.search_rounded,
+    Icons.settings_outlined,
+  ];
+  static const _selectedIcons = [
+    Icons.home_rounded,
+    Icons.library_music_rounded,
+    Icons.search_rounded,
+    Icons.settings_rounded,
+  ];
+  static const _labels = ['Home', 'Library', 'Search', 'Settings'];
 
   @override
   void initState() {
@@ -60,6 +83,44 @@ class _MainShellState extends ConsumerState<MainShell>
     ref.invalidate(serverReachableProvider);
   }
 
+  Widget _buildFloatingDock(ColorScheme scheme) {
+    return Padding(
+      padding: const EdgeInsets.only(
+        bottom: _kDockBottom,
+        left: _kDockHorizontal,
+        right: _kDockHorizontal,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(_kDockRadius),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+          child: Container(
+            height: _kDockHeight,
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainer.withValues(alpha: 0.88),
+              borderRadius: BorderRadius.circular(_kDockRadius),
+            ),
+            child: Row(
+              children: [
+                for (int i = 0; i < _labels.length; i++)
+                  Expanded(
+                    child: _FloatingNavItem(
+                      icon: _icons[i],
+                      selectedIcon: _selectedIcons[i],
+                      label: _labels[i],
+                      selected: i == _selectedIndex,
+                      scheme: scheme,
+                      onTap: () => setState(() => _selectedIndex = i),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -67,6 +128,9 @@ class _MainShellState extends ConsumerState<MainShell>
       currentSongStreamProvider.select((s) => s.valueOrNull != null),
     );
     final screenH = MediaQuery.of(context).size.height;
+    final floatingNav = ref.watch(
+      preferencesNotifierProvider.select((p) => p.floatingNavBar),
+    );
 
     // Collapse player when the queue runs out
     ref.listen(currentSongStreamProvider, (prev, next) {
@@ -84,14 +148,19 @@ class _MainShellState extends ConsumerState<MainShell>
       }
     });
 
+    // Extra bottom padding reserved for the floating dock (when enabled)
+    final dockBodyPad = floatingNav ? _kDockBodyPad : 0.0;
+
     final scaffold = Scaffold(
       body: Stack(
         children: [
-          // Main content — pad bottom only when mini player is visible
+          // Main content — pad bottom for mini player + dock (when floating)
           AnimatedPadding(
             duration: const Duration(milliseconds: 250),
             curve: Curves.easeOut,
-            padding: EdgeInsets.only(bottom: hasSong ? 72 : 0),
+            padding: EdgeInsets.only(
+              bottom: (hasSong ? 72.0 : 0.0) + dockBodyPad,
+            ),
             child: IndexedStack(
               index: _selectedIndex,
               children: const [
@@ -103,11 +172,11 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
           ),
 
-          // Mini player — fades out in first 20 % of the open animation
+          // Mini player — positioned above the dock when floating
           Positioned(
             left: 0,
             right: 0,
-            bottom: 0,
+            bottom: dockBodyPad,
             child: AnimatedBuilder(
               animation: _playerAnim,
               builder: (_, child) => IgnorePointer(
@@ -122,41 +191,64 @@ class _MainShellState extends ConsumerState<MainShell>
           ),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (i) => setState(() => _selectedIndex = i),
-        backgroundColor: scheme.surface,
-        elevation: 0,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home_rounded),
-            label: 'Home',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.library_music_outlined),
-            selectedIcon: Icon(Icons.library_music_rounded),
-            label: 'Library',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.search_rounded),
-            selectedIcon: Icon(Icons.search_rounded),
-            label: 'Search',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings_rounded),
-            label: 'Settings',
-          ),
-        ],
-      ),
+      // Classic nav bar when floating is off; spacer when floating is on
+      // so the Scaffold body correctly reserves bottom space.
+      bottomNavigationBar: floatingNav
+          ? const SizedBox(height: _kDockBodyPad)
+          : NavigationBar(
+              selectedIndex: _selectedIndex,
+              onDestinationSelected: (i) =>
+                  setState(() => _selectedIndex = i),
+              backgroundColor: scheme.surface,
+              elevation: 0,
+              height: 62,
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.home_outlined),
+                  selectedIcon: Icon(Icons.home_rounded),
+                  label: 'Home',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.library_music_outlined),
+                  selectedIcon: Icon(Icons.library_music_rounded),
+                  label: 'Library',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.search_rounded),
+                  selectedIcon: Icon(Icons.search_rounded),
+                  label: 'Search',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.settings_outlined),
+                  selectedIcon: Icon(Icons.settings_rounded),
+                  label: 'Settings',
+                ),
+              ],
+            ),
     );
 
-    // Always use outer Stack so the connectivity banner overlays everything
-    // (including the full player) regardless of hasSong state.
     return Stack(
       children: [
         scaffold,
+
+        // Floating dock — overlays the SizedBox placeholder, fades with player
+        if (floatingNav)
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: AnimatedBuilder(
+              animation: _playerAnim,
+              builder: (_, child) => IgnorePointer(
+                ignoring: _playerAnim.value > 0.1,
+                child: Opacity(
+                  opacity: (1 - _playerAnim.value * 5).clamp(0.0, 1.0),
+                  child: child,
+                ),
+              ),
+              child: _buildFloatingDock(scheme),
+            ),
+          ),
 
         // Full player — only when a song is active
         if (hasSong)
@@ -179,8 +271,68 @@ class _MainShellState extends ConsumerState<MainShell>
               ),
             ),
           ),
-
       ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+class _FloatingNavItem extends StatelessWidget {
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+  final bool selected;
+  final ColorScheme scheme;
+  final VoidCallback onTap;
+
+  const _FloatingNavItem({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    required this.selected,
+    required this.scheme,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeInOut,
+        margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? scheme.secondaryContainer : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              selected ? selectedIcon : icon,
+              size: 22,
+              color: selected
+                  ? scheme.onSecondaryContainer
+                  : scheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight:
+                    selected ? FontWeight.w600 : FontWeight.normal,
+                color: selected
+                    ? scheme.onSecondaryContainer
+                    : scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -11,6 +11,7 @@ class AppPreferences {
   final String deezerArl;          // Deezer ARL cookie — enables FLAC downloads via companion
   final String librarySongSort;    // 'name' | 'artist' | 'recentlyAdded' | 'downloaded'
   final bool librarySongAscending;
+  final bool floatingNavBar;       // true = floating pill dock, false = classic nav bar
 
   const AppPreferences({
     this.streamQuality = 'lossless',
@@ -21,6 +22,7 @@ class AppPreferences {
     this.deezerArl = '',
     this.librarySongSort = 'name',
     this.librarySongAscending = true,
+    this.floatingNavBar = true,
   });
 
   bool get hasCompanion => companionUrl.isNotEmpty && companionApiKey.isNotEmpty;
@@ -35,6 +37,7 @@ class AppPreferences {
     String? deezerArl,
     String? librarySongSort,
     bool? librarySongAscending,
+    bool? floatingNavBar,
   }) =>
       AppPreferences(
         streamQuality: streamQuality ?? this.streamQuality,
@@ -45,6 +48,7 @@ class AppPreferences {
         deezerArl: deezerArl ?? this.deezerArl,
         librarySongSort: librarySongSort ?? this.librarySongSort,
         librarySongAscending: librarySongAscending ?? this.librarySongAscending,
+        floatingNavBar: floatingNavBar ?? this.floatingNavBar,
       );
 
   factory AppPreferences.fromJson(Map<String, dynamic> j) => AppPreferences(
@@ -56,6 +60,7 @@ class AppPreferences {
         deezerArl: j['deezerArl'] as String? ?? '',
         librarySongSort: j['librarySongSort'] as String? ?? 'name',
         librarySongAscending: j['librarySongAscending'] as bool? ?? true,
+        floatingNavBar: j['floatingNavBar'] as bool? ?? true,
       );
 
   Map<String, dynamic> toJson() => {
@@ -67,6 +72,7 @@ class AppPreferences {
         'deezerArl': deezerArl,
         'librarySongSort': librarySongSort,
         'librarySongAscending': librarySongAscending,
+        'floatingNavBar': floatingNavBar,
       };
 
   static Future<File> get _file async {
