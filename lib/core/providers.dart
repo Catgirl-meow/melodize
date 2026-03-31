@@ -240,34 +240,68 @@ final randomSongsProvider = FutureProvider<List<Song>>((ref) async {
 
 final deezerClientProvider = Provider<DeezerClient>((_) => DeezerClient());
 
-// Seeded from recently played songs; uses Deezer's artist radio to surface
-// tracks NOT already in the user's library.
-// Returns [] silently on any failure so a missing feature never breaks the home screen.
+// Seeded from recently played songs; uses Deezer artist radio to discover
+// tracks NOT already in the user's Navidrome library.
+// Cross-references each Deezer result against the library in parallel:
+// if the track is found (already on server) it is skipped — only true
+// discoveries (30 s previews) are returned.
+// Returns [] silently on any failure so the home screen always loads.
 final recommendationsProvider =
-    FutureProvider.autoDispose<List<RecommendedTrack>>((ref) async {
+    FutureProvider.autoDispose<List<Song>>((ref) async {
   final db = ref.watch(databaseProvider);
+  final client = ref.watch(subsonicClientProvider);
   final deezer = ref.watch(deezerClientProvider);
 
+  if (client == null) return [];
   final history = await db.getRecentHistory(limit: 30);
   if (history.isEmpty) return [];
 
-  // Shuffle so different seeds are picked on every refresh.
   final shuffled = history.toList()..shuffle();
-
   final seen = <int>{};
-  final recs = <RecommendedTrack>[];
+  final deezerTracks = <RecommendedTrack>[];
 
-  for (final h in shuffled.take(3)) {
+  // Collect Deezer artist-radio candidates from up to 10 history seeds.
+  for (final h in shuffled.take(10)) {
     final batch = await deezer.getRecommendations(h.artist, h.songTitle);
-    // Shuffle radio results too so we don't always get the same front-of-list tracks.
-    final shuffledBatch = batch.toList()..shuffle();
-    for (final t in shuffledBatch) {
-      if (seen.add(t.deezerId)) recs.add(t);
+    for (final t in (batch.toList()..shuffle())) {
+      if (seen.add(t.deezerId)) deezerTracks.add(t);
     }
-    if (recs.length >= 20) break;
+    if (deezerTracks.length >= 40) break;
   }
 
-  return recs.take(20).toList();
+  // Check each candidate against the library in parallel.
+  // Tracks already on the server are excluded — recommendations are for
+  // music the user hasn't added yet.
+  final toCheck = deezerTracks.take(30).toList();
+  final searchResults = await Future.wait(
+    toCheck.map((t) => client
+        .search('${t.title} ${t.artist}', songCount: 3)
+        .catchError((_) => SearchResults.empty())),
+  );
+
+  final songs = <Song>[];
+  final seenIds = <String>{};
+  for (int i = 0; i < toCheck.length && songs.length < 20; i++) {
+    final t = toCheck[i];
+    final titleLower = t.title.toLowerCase().trim();
+    final inLibrary = searchResults[i].songs
+        .any((s) => s.title.toLowerCase().trim() == titleLower);
+    if (inLibrary) continue;
+    final id = 'deezer:${t.deezerId}';
+    if (seenIds.add(id)) {
+      songs.add(Song.fromRecommendation(
+        deezerId: t.deezerId,
+        title: t.title,
+        artist: t.artist,
+        album: t.album,
+        durationSeconds: t.durationSeconds,
+        previewUrl: t.previewUrl,
+        coverUrl: t.coverUrl,
+      ));
+    }
+  }
+
+  return songs;
 });
 
 // Deezer catalog search — powers the "From Deezer" section in the search tab.

@@ -9,13 +9,11 @@ import '../settings/settings_screen.dart';
 import '../player/mini_player.dart';
 import '../player/now_playing_screen.dart';
 
-// Floating dock geometry constants
+// Floating dock geometry
 const _kDockHeight = 64.0;
-const _kDockBottom = 12.0;
-const _kDockHorizontal = 16.0;
+const _kDockBottom = 16.0;   // gap between dock and safe area
+const _kDockHorizontal = 20.0;
 const _kDockRadius = 26.0;
-// Total vertical space reserved for the floating dock in the body
-const _kDockBodyPad = _kDockHeight + _kDockBottom;
 
 class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
@@ -58,21 +56,17 @@ class _MainShellState extends ConsumerState<MainShell>
     super.dispose();
   }
 
-  void _openPlayer() {
-    _playerAnim.animateTo(
-      1.0,
-      curve: Curves.easeOutCubic,
-      duration: const Duration(milliseconds: 450),
-    );
-  }
+  void _openPlayer() => _playerAnim.animateTo(
+        1.0,
+        curve: Curves.easeOutCubic,
+        duration: const Duration(milliseconds: 450),
+      );
 
-  void _closePlayer() {
-    _playerAnim.animateTo(
-      0.0,
-      curve: Curves.easeOutCubic,
-      duration: const Duration(milliseconds: 350),
-    );
-  }
+  void _closePlayer() => _playerAnim.animateTo(
+        0.0,
+        curve: Curves.easeOutCubic,
+        duration: const Duration(milliseconds: 350),
+      );
 
   void _invalidateServerProviders() {
     ref.invalidate(allSongsProvider);
@@ -85,35 +79,46 @@ class _MainShellState extends ConsumerState<MainShell>
 
   Widget _buildFloatingDock(ColorScheme scheme) {
     return Padding(
-      padding: const EdgeInsets.only(
-        bottom: _kDockBottom,
-        left: _kDockHorizontal,
-        right: _kDockHorizontal,
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(_kDockRadius),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-          child: Container(
-            height: _kDockHeight,
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainer.withValues(alpha: 0.88),
-              borderRadius: BorderRadius.circular(_kDockRadius),
+      padding: const EdgeInsets.symmetric(horizontal: _kDockHorizontal),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(_kDockRadius),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.45),
+              blurRadius: 28,
+              offset: const Offset(0, 6),
             ),
-            child: Row(
-              children: [
-                for (int i = 0; i < _labels.length; i++)
-                  Expanded(
-                    child: _FloatingNavItem(
-                      icon: _icons[i],
-                      selectedIcon: _selectedIcons[i],
-                      label: _labels[i],
-                      selected: i == _selectedIndex,
-                      scheme: scheme,
-                      onTap: () => setState(() => _selectedIndex = i),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(_kDockRadius),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+            child: Container(
+              height: _kDockHeight,
+              decoration: BoxDecoration(
+                // Use a noticeably elevated surface so the pill stands out
+                color: scheme.brightness == Brightness.dark
+                    ? Colors.grey.shade900.withValues(alpha: 0.92)
+                    : scheme.surfaceContainerHighest.withValues(alpha: 0.94),
+                borderRadius: BorderRadius.circular(_kDockRadius),
+              ),
+              child: Row(
+                children: [
+                  for (int i = 0; i < _labels.length; i++)
+                    Expanded(
+                      child: _FloatingNavItem(
+                        icon: _icons[i],
+                        selectedIcon: _selectedIcons[i],
+                        label: _labels[i],
+                        selected: i == _selectedIndex,
+                        scheme: scheme,
+                        onTap: () => setState(() => _selectedIndex = i),
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -132,69 +137,35 @@ class _MainShellState extends ConsumerState<MainShell>
       preferencesNotifierProvider.select((p) => p.floatingNavBar),
     );
 
-    // Collapse player when the queue runs out
+    // Safe area bottom (home indicator / Android nav bar height).
+    // viewPadding is never modified by Scaffold or any widget — it always
+    // reflects the physical device inset.
+    final safeBottom = MediaQuery.of(context).viewPadding.bottom;
+
+    // Total vertical space the floating dock occupies (dock + gap + safe area).
+    // Used to push the mini player up and pad the scroll content.
+    final dockBodyPad =
+        floatingNav ? _kDockHeight + _kDockBottom + safeBottom : 0.0;
+
+    // Collapse player when the queue runs out.
     ref.listen(currentSongStreamProvider, (prev, next) {
       if (prev?.valueOrNull != null && next.valueOrNull == null) {
         _playerAnim.value = 0;
       }
     });
 
-    // Auto-invalidate all server providers when device comes back online
     ref.listen<AsyncValue<bool>>(isOnlineProvider, (prev, next) {
       final wasOnline = prev?.valueOrNull ?? true;
       final isNowOnline = next.valueOrNull ?? true;
-      if (!wasOnline && isNowOnline) {
-        _invalidateServerProviders();
-      }
+      if (!wasOnline && isNowOnline) _invalidateServerProviders();
     });
 
-    // Extra bottom padding reserved for the floating dock (when enabled)
-    final dockBodyPad = floatingNav ? _kDockBodyPad : 0.0;
-
     final scaffold = Scaffold(
-      body: Stack(
-        children: [
-          // Main content — pad bottom for mini player + dock (when floating)
-          AnimatedPadding(
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeOut,
-            padding: EdgeInsets.only(
-              bottom: (hasSong ? 72.0 : 0.0) + dockBodyPad,
-            ),
-            child: IndexedStack(
-              index: _selectedIndex,
-              children: const [
-                RepaintBoundary(child: HomeScreen()),
-                RepaintBoundary(child: LibraryScreen()),
-                RepaintBoundary(child: SearchScreen()),
-                RepaintBoundary(child: SettingsScreen()),
-              ],
-            ),
-          ),
-
-          // Mini player — positioned above the dock when floating
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: dockBodyPad,
-            child: AnimatedBuilder(
-              animation: _playerAnim,
-              builder: (_, child) => IgnorePointer(
-                ignoring: _playerAnim.value > 0.1,
-                child: Opacity(
-                  opacity: (1 - _playerAnim.value * 5).clamp(0.0, 1.0),
-                  child: child,
-                ),
-              ),
-              child: MiniPlayer(onOpen: _openPlayer),
-            ),
-          ),
-        ],
-      ),
-      // Classic nav bar when floating is off; spacer when floating is on
-      // so the Scaffold body correctly reserves bottom space.
+      // No bottomNavigationBar when floating — the body fills the full screen
+      // so content renders behind the dock, enabling the blur effect.
+      // The classic bar uses explicit height for a tighter look.
       bottomNavigationBar: floatingNav
-          ? const SizedBox(height: _kDockBodyPad)
+          ? null
           : NavigationBar(
               selectedIndex: _selectedIndex,
               onDestinationSelected: (i) =>
@@ -225,16 +196,57 @@ class _MainShellState extends ConsumerState<MainShell>
                 ),
               ],
             ),
+      body: Stack(
+        children: [
+          // Main content — scroll padding keeps last items above the dock/player
+          AnimatedPadding(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOut,
+            padding: EdgeInsets.only(
+              bottom: (hasSong ? 72.0 : 0.0) + dockBodyPad,
+            ),
+            child: IndexedStack(
+              index: _selectedIndex,
+              children: const [
+                RepaintBoundary(child: HomeScreen()),
+                RepaintBoundary(child: LibraryScreen()),
+                RepaintBoundary(child: SearchScreen()),
+                RepaintBoundary(child: SettingsScreen()),
+              ],
+            ),
+          ),
+
+          // Mini player — sits directly above the floating dock
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: dockBodyPad,
+            child: AnimatedBuilder(
+              animation: _playerAnim,
+              builder: (_, child) => IgnorePointer(
+                ignoring: _playerAnim.value > 0.1,
+                child: Opacity(
+                  opacity: (1 - _playerAnim.value * 5).clamp(0.0, 1.0),
+                  child: child,
+                ),
+              ),
+              child: MiniPlayer(onOpen: _openPlayer),
+            ),
+          ),
+        ],
+      ),
     );
 
     return Stack(
       children: [
         scaffold,
 
-        // Floating dock — overlays the SizedBox placeholder, fades with player
+        // Floating dock — rendered above the scaffold so content is visible
+        // behind it (enabling the BackdropFilter blur). Fades when the full
+        // player opens.
         if (floatingNav)
           Positioned(
-            bottom: 0,
+            bottom: safeBottom + _kDockBottom,
             left: 0,
             right: 0,
             child: AnimatedBuilder(
@@ -250,7 +262,7 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
           ),
 
-        // Full player — only when a song is active
+        // Full player
         if (hasSong)
           AnimatedBuilder(
             animation: _playerAnim,
@@ -300,37 +312,42 @@ class _FloatingNavItem extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeInOut,
-        margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected ? scheme.secondaryContainer : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              selected ? selectedIcon : icon,
-              size: 22,
-              color: selected
-                  ? scheme.onSecondaryContainer
-                  : scheme.onSurfaceVariant,
-            ),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight:
-                    selected ? FontWeight.w600 : FontWeight.normal,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          decoration: BoxDecoration(
+            color: selected ? scheme.secondaryContainer : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.max,
+            children: [
+              Icon(
+                selected ? selectedIcon : icon,
+                size: 22,
                 color: selected
                     ? scheme.onSecondaryContainer
                     : scheme.onSurfaceVariant,
               ),
-            ),
-          ],
+              const SizedBox(height: 3),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight:
+                      selected ? FontWeight.w600 : FontWeight.normal,
+                  color: selected
+                      ? scheme.onSecondaryContainer
+                      : scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
