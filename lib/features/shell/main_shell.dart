@@ -10,8 +10,8 @@ import '../player/mini_player.dart';
 import '../player/now_playing_screen.dart';
 
 // Floating dock geometry
-const _kDockHeight = 64.0;
-const _kDockBottom = 16.0;   // gap between dock and safe area
+const _kDockHeight = 52.0;
+const _kDockBottom = 8.0;    // gap between dock and safe area
 const _kDockHorizontal = 20.0;
 const _kDockRadius = 26.0;
 
@@ -100,7 +100,7 @@ class _MainShellState extends ConsumerState<MainShell>
               decoration: BoxDecoration(
                 // Use a noticeably elevated surface so the pill stands out
                 color: scheme.brightness == Brightness.dark
-                    ? Colors.grey.shade900.withValues(alpha: 0.92)
+                    ? const Color(0xFF2C2C2E).withValues(alpha: 0.93)
                     : scheme.surfaceContainerHighest.withValues(alpha: 0.94),
                 borderRadius: BorderRadius.circular(_kDockRadius),
               ),
@@ -203,7 +203,7 @@ class _MainShellState extends ConsumerState<MainShell>
             duration: const Duration(milliseconds: 250),
             curve: Curves.easeOut,
             padding: EdgeInsets.only(
-              bottom: (hasSong ? 72.0 : 0.0) + dockBodyPad,
+              bottom: hasSong ? 72.0 : 0.0,
             ),
             child: IndexedStack(
               index: _selectedIndex,
@@ -344,6 +344,7 @@ class _FloatingNavItem extends StatelessWidget {
                   color: selected
                       ? scheme.onSecondaryContainer
                       : scheme.onSurfaceVariant,
+                  decoration: TextDecoration.none,
                 ),
               ),
             ],
