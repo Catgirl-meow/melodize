@@ -13,7 +13,7 @@ Auth: X-API-Key header.
 Config: /etc/melodize-companion/config.json
 """
 
-import hashlib, http.server, json, logging, os, pathlib, re
+import hashlib, hmac, http.server, json, logging, os, pathlib, re
 import sqlite3, subprocess, sys, threading, time, urllib.parse, urllib.request
 from typing import Optional
 
@@ -165,7 +165,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _auth(self) -> bool:
         key = self.headers.get("X-API-Key", "")
-        if key != self.server.cfg["api_key"]:
+        if not hmac.compare_digest(key, self.server.cfg["api_key"]):
             self._send(403, {"error": "invalid or missing API key"})
             return False
         return True
@@ -223,7 +223,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._send(404, {"error": "song not found in database"})
                 return
 
-            full = pathlib.Path(cfg["music_dir"]) / rel
+            music_root = pathlib.Path(cfg["music_dir"]).resolve()
+            full = (music_root / rel).resolve()
+            if not str(full).startswith(str(music_root) + "/"):
+                log.error(f"Path traversal blocked: {full} not under {music_root}")
+                self._send(403, {"error": "path outside music directory"})
+                return
+
             if not full.exists():
                 # Already gone — treat as success
                 log.warning(f"File already missing: {full}")
