@@ -30,11 +30,19 @@ class CoverArtImage extends ConsumerWidget {
 
     Widget child;
     if (url != null) {
+      // Cap the in-memory decoded size to 2× display pixels so full-resolution
+      // server images (1000 px+) don't inflate the image cache for small tiles.
+      // double.infinity means the container controls size — skip the cap.
+      final cacheSize = size.isFinite
+          ? (size * MediaQuery.devicePixelRatioOf(context) * 1.5).ceil()
+          : null;
       child = CachedNetworkImage(
         imageUrl: url,
         width: size,
         height: size,
         fit: fit,
+        memCacheWidth: cacheSize,
+        memCacheHeight: cacheSize,
         errorWidget: (_, __, ___) => _placeholder(scheme),
         placeholder: (_, __) => _placeholder(scheme),
       );

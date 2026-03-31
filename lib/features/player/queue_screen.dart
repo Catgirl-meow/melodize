@@ -19,10 +19,9 @@ class QueueScreen extends ConsumerWidget {
       }),
     );
     // Non-reactive read — runs only after the select above triggers a rebuild.
-    final sequence = ref.read(sequenceStateStreamProvider).valueOrNull
+    final queue = ref.read(sequenceStateStreamProvider).valueOrNull
             ?.effectiveSequence ??
         const [];
-    final queue = sequence;
     final handler = ref.read(audioHandlerNotifierProvider);
     final scheme = Theme.of(context).colorScheme;
 

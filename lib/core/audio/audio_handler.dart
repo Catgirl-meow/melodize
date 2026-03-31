@@ -255,8 +255,11 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       final prevIndex = _shuffleHistory.removeLast();
       _seekingBack = true;
       _lastHistoryIndex = prevIndex;
-      await player.seek(Duration.zero, index: prevIndex);
-      _seekingBack = false;
+      try {
+        await player.seek(Duration.zero, index: prevIndex);
+      } finally {
+        _seekingBack = false;
+      }
     } else {
       await player.seekToPrevious();
     }

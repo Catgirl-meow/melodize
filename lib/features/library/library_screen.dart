@@ -197,7 +197,6 @@ class _SongsTabState extends ConsumerState<_SongsTab>
                         sheetSort = option;
                         sheetAscending = true;
                       }
-                      setSheetState(() {});
                       ref.read(preferencesNotifierProvider.notifier).update(
                         ref.read(preferencesNotifierProvider).copyWith(
                           librarySongSort: sheetSort.name,
@@ -220,12 +219,15 @@ class _SongsTabState extends ConsumerState<_SongsTab>
   Widget build(BuildContext context) {
     super.build(context); // required by AutomaticKeepAliveClientMixin
 
-    final prefs = ref.watch(preferencesNotifierProvider);
+    final (sortName, ascending) = ref.watch(
+      preferencesNotifierProvider.select(
+        (p) => (p.librarySongSort, p.librarySongAscending),
+      ),
+    );
     final sort = _SongSort.values.firstWhere(
-      (s) => s.name == prefs.librarySongSort,
+      (s) => s.name == sortName,
       orElse: () => _SongSort.name,
     );
-    final ascending = prefs.librarySongAscending;
 
     final songsAsync = ref.watch(allSongsProvider);
     final scheme = Theme.of(context).colorScheme;
