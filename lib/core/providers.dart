@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:io';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift/drift.dart' show Value;
+import 'package:flutter/material.dart' show Color, Size;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:palette_generator/palette_generator.dart';
 import 'package:path/path.dart' as p;
 import 'api/subsonic_client.dart';
 import 'api/navidrome_client.dart' show CompanionClient;
@@ -704,6 +707,35 @@ final downloadNotifierProvider =
 final downloadedSongIdsProvider = Provider<Set<String>>((ref) {
   final songs = ref.watch(downloadedSongsProvider).valueOrNull ?? [];
   return songs.map((s) => s.id).toSet();
+});
+
+// --- Album art dominant color (cached per URL) ---
+// Shared by now_playing_screen, mini_player, and main_shell.
+final dominantColorProvider =
+    FutureProvider.family<Color?, String>((ref, url) async {
+  if (url.isEmpty) return null;
+  try {
+    final palette = await PaletteGenerator.fromImageProvider(
+      CachedNetworkImageProvider(url),
+      size: const Size(112, 112), // downsample before extraction — much faster
+      maximumColorCount: 8,
+    );
+    return palette.dominantColor?.color;
+  } catch (_) {
+    return null;
+  }
+});
+
+// Accent color derived from the current song's album art.
+// Returns null until the color resolves, then updates all watchers.
+final currentAccentColorProvider = Provider<Color?>((ref) {
+  final song = ref.watch(currentSongStreamProvider).valueOrNull;
+  if (song == null) return null;
+  final coverUrl = ref.watch(coverArtUrlProvider(song.coverArt ?? ''))
+      ?? song.externalCoverUrl
+      ?? '';
+  if (coverUrl.isEmpty) return null;
+  return ref.watch(dominantColorProvider(coverUrl)).valueOrNull;
 });
 
 // --- Helpers ---

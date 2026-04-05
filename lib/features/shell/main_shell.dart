@@ -11,9 +11,9 @@ import '../player/now_playing_screen.dart';
 
 // Floating dock geometry
 const _kDockHeight = 52.0;
-const _kDockBottom = 8.0;    // gap between dock and safe area
+const _kDockBottom = 8.0;      // gap between dock bottom and safe area edge
 const _kDockHorizontal = 20.0;
-const _kDockRadius = 18.0;
+const _kDockRadius = 16.0;     // shared by dock corners AND selection pill
 
 class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
@@ -77,7 +77,17 @@ class _MainShellState extends ConsumerState<MainShell>
     ref.invalidate(serverReachableProvider);
   }
 
-  Widget _buildFloatingDock(ColorScheme scheme) {
+  Widget _buildFloatingDock(ColorScheme scheme, Color? accentColor) {
+    final dockBg = accentColor != null
+        ? (scheme.brightness == Brightness.dark
+            ? Color.lerp(accentColor, const Color(0xFF1C1C1E), 0.58)!
+                .withValues(alpha: 0.93)
+            : Color.lerp(accentColor, Colors.white, 0.65)!
+                .withValues(alpha: 0.94))
+        : (scheme.brightness == Brightness.dark
+            ? const Color(0xFF2C2C2E).withValues(alpha: 0.93)
+            : scheme.surfaceContainerHighest.withValues(alpha: 0.94));
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: _kDockHorizontal),
       child: DecoratedBox(
@@ -98,10 +108,7 @@ class _MainShellState extends ConsumerState<MainShell>
             child: Container(
               height: _kDockHeight,
               decoration: BoxDecoration(
-                // Use a noticeably elevated surface so the pill stands out
-                color: scheme.brightness == Brightness.dark
-                    ? const Color(0xFF2C2C2E).withValues(alpha: 0.93)
-                    : scheme.surfaceContainerHighest.withValues(alpha: 0.94),
+                color: dockBg,
                 borderRadius: BorderRadius.circular(_kDockRadius),
               ),
               child: Row(
@@ -114,6 +121,7 @@ class _MainShellState extends ConsumerState<MainShell>
                         label: _labels[i],
                         selected: i == _selectedIndex,
                         scheme: scheme,
+                        accentColor: accentColor,
                         onTap: () => setState(() => _selectedIndex = i),
                       ),
                     ),
@@ -136,14 +144,10 @@ class _MainShellState extends ConsumerState<MainShell>
     final floatingNav = ref.watch(
       preferencesNotifierProvider.select((p) => p.floatingNavBar),
     );
+    // Accent color from album art — null until PaletteGenerator resolves.
+    final accentColor = hasSong ? ref.watch(currentAccentColorProvider) : null;
 
-    // Safe area bottom (home indicator / Android nav bar height).
-    // viewPadding is never modified by Scaffold or any widget — it always
-    // reflects the physical device inset.
     final safeBottom = MediaQuery.of(context).viewPadding.bottom;
-
-    // Total vertical space the floating dock occupies (dock + gap + safe area).
-    // Used to push the mini player up and pad the scroll content.
     final dockBodyPad =
         floatingNav ? _kDockHeight + _kDockBottom + safeBottom : 0.0;
 
@@ -160,17 +164,28 @@ class _MainShellState extends ConsumerState<MainShell>
       if (!wasOnline && isNowOnline) _invalidateServerProviders();
     });
 
+    // Classic dock accent color
+    final navBg = accentColor != null
+        ? Color.lerp(accentColor, scheme.surface, 0.88)!
+        : scheme.surface;
+    final navIndicator = accentColor != null
+        ? accentColor.withValues(alpha: 0.30)
+        : null; // use theme default
+
     final scaffold = Scaffold(
-      // No bottomNavigationBar when floating — the body fills the full screen
-      // so content renders behind the dock, enabling the blur effect.
-      // The classic bar uses explicit height for a tighter look.
+      // extendBody: content reaches behind the system navigation bar so the
+      // floating dock area shows app content through the blur instead of the
+      // scaffold's background colour.
+      extendBody: floatingNav,
+      backgroundColor: floatingNav ? Colors.transparent : null,
       bottomNavigationBar: floatingNav
           ? null
           : NavigationBar(
               selectedIndex: _selectedIndex,
               onDestinationSelected: (i) =>
                   setState(() => _selectedIndex = i),
-              backgroundColor: scheme.surface,
+              backgroundColor: navBg,
+              indicatorColor: navIndicator,
               elevation: 0,
               height: 62,
               destinations: const [
@@ -198,11 +213,10 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
       body: Stack(
         children: [
-          // Main content — scroll padding keeps last items above the dock/player
+          // Main content — static 72 px bottom padding so the last scroll
+          // item is always reachable above the mini player.
           Padding(
-            padding: EdgeInsets.only(
-              bottom: hasSong ? 72.0 : 0.0,
-            ),
+            padding: EdgeInsets.only(bottom: hasSong ? 72.0 : 0.0),
             child: IndexedStack(
               index: _selectedIndex,
               children: const [
@@ -215,8 +229,8 @@ class _MainShellState extends ConsumerState<MainShell>
           ),
 
           // Mini player — sits directly above the floating dock.
-          // Removed from the layer tree once invisible so its backdrop filter
-          // (floating design) doesn't add compositing cost when player is open.
+          // Removed from the layer tree once invisible so its BackdropFilter
+          // doesn't add GPU compositing cost while the full player is open.
           Positioned(
             left: 0,
             right: 0,
@@ -242,9 +256,6 @@ class _MainShellState extends ConsumerState<MainShell>
       children: [
         scaffold,
 
-        // Floating dock — rendered above the scaffold so content is visible
-        // behind it (enabling the BackdropFilter blur). Fades when the full
-        // player opens.
         // Floating dock — removed from the layer tree once invisible so the
         // BackdropFilter doesn't force GPU compositing during player modals.
         if (floatingNav)
@@ -262,12 +273,12 @@ class _MainShellState extends ConsumerState<MainShell>
                   child: Opacity(opacity: opacity, child: child!),
                 );
               },
-              child: _buildFloatingDock(scheme),
+              child: _buildFloatingDock(scheme, accentColor),
             ),
           ),
 
-        // Full player — black underlay prevents the scaffold from showing
-        // through during the slide-up transition on non-AMOLED screens.
+        // Black underlay fades in as the player opens to prevent the scaffold
+        // content from showing through before the player gradient covers it.
         if (hasSong)
           AnimatedBuilder(
             animation: _playerAnim,
@@ -275,10 +286,13 @@ class _MainShellState extends ConsumerState<MainShell>
               ignoring: true,
               child: Opacity(
                 opacity: _playerAnim.value.clamp(0.0, 1.0),
-                child: const ColoredBox(color: Colors.black, child: SizedBox.expand()),
+                child: const ColoredBox(
+                    color: Colors.black, child: SizedBox.expand()),
               ),
             ),
           ),
+
+        // Full player
         if (hasSong)
           AnimatedBuilder(
             animation: _playerAnim,
@@ -312,6 +326,7 @@ class _FloatingNavItem extends StatelessWidget {
   final String label;
   final bool selected;
   final ColorScheme scheme;
+  final Color? accentColor;
   final VoidCallback onTap;
 
   const _FloatingNavItem({
@@ -320,21 +335,37 @@ class _FloatingNavItem extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.scheme,
+    required this.accentColor,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Selection pill colour: accent when available, else system secondary container.
+    final pillColor = selected
+        ? (accentColor != null
+            ? accentColor!.withValues(alpha: 0.42)
+            : scheme.secondaryContainer)
+        : Colors.transparent;
+
+    // Icon/label colour on the pill: white on accent (always dark dock bg),
+    // else the standard onSecondaryContainer token.
+    final activeColor = accentColor != null
+        ? Colors.white
+        : scheme.onSecondaryContainer;
+
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Padding(
+        // vertical: 7 — pill is shorter than dock height, making it pill-like;
+        // same _kDockRadius is used for both dock and pill corners.
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeInOut,
           decoration: BoxDecoration(
-            color: selected ? scheme.secondaryContainer : Colors.transparent,
+            color: pillColor,
             borderRadius: BorderRadius.circular(_kDockRadius),
           ),
           child: Column(
@@ -344,9 +375,7 @@ class _FloatingNavItem extends StatelessWidget {
               Icon(
                 selected ? selectedIcon : icon,
                 size: 22,
-                color: selected
-                    ? scheme.onSecondaryContainer
-                    : scheme.onSurfaceVariant,
+                color: selected ? activeColor : scheme.onSurfaceVariant,
               ),
               const SizedBox(height: 3),
               Text(
@@ -355,11 +384,8 @@ class _FloatingNavItem extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 11,
-                  fontWeight:
-                      selected ? FontWeight.w600 : FontWeight.normal,
-                  color: selected
-                      ? scheme.onSecondaryContainer
-                      : scheme.onSurfaceVariant,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                  color: selected ? activeColor : scheme.onSurfaceVariant,
                   decoration: TextDecoration.none,
                 ),
               ),

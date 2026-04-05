@@ -48,13 +48,11 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     ),
   );
 
-  // useLazyPreparation: true — each source is prepared only when the
-  // preceding one nears completion.  The old `false` setting caused ExoPlayer
-  // to initiate network connections for every item in the queue at once,
-  // freezing the UI for several frames when loading a large library queue.
-  // Gapless transitions are unaffected: ExoPlayer still buffers ahead
-  // automatically; the difference is it waits until actually needed.
-  final _playlistSource = ConcatenatingAudioSource(
+  // Replaced on every loadQueue call — using a fresh instance avoids the
+  // expensive clear() platform-channel round-trip when loading a new queue.
+  // Other queue-mutation methods (playNext, addToQueue, etc.) always operate
+  // on this reference, which points to the currently active playlist.
+  ConcatenatingAudioSource _playlistSource = ConcatenatingAudioSource(
     children: [],
     useLazyPreparation: true,
   );
@@ -195,10 +193,12 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _shuffleHistory.clear();
     _lastHistoryIndex = null;
     final idx = startIndex.clamp(0, songs.length - 1);
-    await _playlistSource.clear();
-    // Phase 1: load only the selected song so the platform-channel call is
-    // tiny (1 item) and playback starts without UI-thread delay.
-    await _playlistSource.add(_songToSource(songs[idx]));
+    // Phase 1: fresh playlist with only the selected song — single
+    // platform-channel call, no expensive clear() of the old queue.
+    _playlistSource = ConcatenatingAudioSource(
+      children: [_songToSource(songs[idx])],
+      useLazyPreparation: true,
+    );
     try {
       await player.setAudioSource(_playlistSource, initialIndex: 0, preload: false);
       await player.play();
@@ -206,8 +206,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       debugPrint('loadQueue error: $e');
       return;
     }
-    // Phase 2: populate the full queue in the background while music plays.
-    // insertAll(0, ...) shifts the playing track from index 0 → idx.
+    // Phase 2: fill the rest of the queue while music plays.
+    // insertAll(0, …) shifts current track from index 0 → idx.
     if (idx > 0) {
       await _playlistSource.insertAll(
           0, songs.sublist(0, idx).map(_songToSource).toList());

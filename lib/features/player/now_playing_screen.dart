@@ -7,29 +7,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:palette_generator/palette_generator.dart';
 import '../../core/utils/platform_dirs.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import 'queue_screen.dart';
-
-// ---------------------------------------------------------------------------
-// Dominant color provider — cached per URL, reused across nav
-
-final dominantColorProvider =
-    FutureProvider.family<Color?, String>((ref, url) async {
-  if (url.isEmpty) return null;
-  try {
-    final palette = await PaletteGenerator.fromImageProvider(
-      CachedNetworkImageProvider(url),
-      size: const Size(112, 112), // downsample before extraction — much faster
-      maximumColorCount: 8,
-    );
-    return palette.dominantColor?.color;
-  } catch (_) {
-    return null;
-  }
-});
 
 // ---------------------------------------------------------------------------
 
@@ -242,6 +223,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
 
     showModalBottomSheet(
       context: context,
+      // Transparent barrier removes the full-screen black54 fade compositing
+      // that was causing the dismiss animation to stutter.
+      barrierColor: Colors.transparent,
       builder: (_) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,

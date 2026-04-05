@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/widgets/cover_art_image.dart';
-import 'now_playing_screen.dart';
 
 // Top-level widget — only rebuilds when the current song identity changes.
 class MiniPlayer extends ConsumerWidget {
@@ -18,18 +17,16 @@ class MiniPlayer extends ConsumerWidget {
     );
     if (song == null) return const SizedBox.shrink();
 
-    // Pre-warm dominant color while mini player is visible so it's already
-    // computed by the time the user opens the full player.
-    final coverUrl = ref.watch(coverArtUrlProvider(song.coverArt ?? '')) ?? '';
-    ref.watch(dominantColorProvider(coverUrl));
-
     final floatingNav = ref.watch(
       preferencesNotifierProvider.select((p) => p.floatingNavBar),
     );
+    // Accent color is already being computed via currentAccentColorProvider;
+    // watching it here triggers the dominantColorProvider pre-warm as well.
+    final accentColor = ref.watch(currentAccentColorProvider);
 
     return floatingNav
-        ? _FloatingMiniPlayer(song: song, onOpen: onOpen)
-        : _ClassicMiniPlayer(song: song, onOpen: onOpen);
+        ? _FloatingMiniPlayer(song: song, onOpen: onOpen, accentColor: accentColor)
+        : _ClassicMiniPlayer(song: song, onOpen: onOpen, accentColor: accentColor);
   }
 }
 
@@ -39,17 +36,16 @@ class MiniPlayer extends ConsumerWidget {
 class _ClassicMiniPlayer extends StatelessWidget {
   final Song song;
   final VoidCallback onOpen;
-  const _ClassicMiniPlayer({required this.song, required this.onOpen});
+  final Color? accentColor;
+  const _ClassicMiniPlayer({required this.song, required this.onOpen, this.accentColor});
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    final bg = Color.lerp(
-      scheme.surfaceContainerHigh,
-      scheme.primaryContainer,
-      0.28,
-    )!;
+    final bg = accentColor != null
+        ? Color.lerp(accentColor!, scheme.surfaceContainerHigh, 0.55)!
+        : Color.lerp(scheme.surfaceContainerHigh, scheme.primaryContainer, 0.28)!;
 
     return GestureDetector(
       onTap: onOpen,
@@ -72,7 +68,7 @@ class _ClassicMiniPlayer extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                RepaintBoundary(child: _MiniPlayerProgress(trackColor: bg)),
+                RepaintBoundary(child: _MiniPlayerProgress()),
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -119,27 +115,31 @@ class _ClassicMiniPlayer extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Floating mini player — glass card with all-rounded corners, inset from
-// edges to match the floating dock aesthetic.
+// Floating mini player — glass card with all-rounded corners, inset to match
+// the floating dock.
 
 class _FloatingMiniPlayer extends StatelessWidget {
   final Song song;
   final VoidCallback onOpen;
-  const _FloatingMiniPlayer({required this.song, required this.onOpen});
+  final Color? accentColor;
+  const _FloatingMiniPlayer({required this.song, required this.onOpen, this.accentColor});
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    const radius = 18.0;
+    const radius = 16.0;
     const cardRadius = BorderRadius.all(Radius.circular(radius));
 
-    final bgColor = scheme.brightness == Brightness.dark
-        ? const Color(0xFF2C2C2E).withValues(alpha: 0.93)
-        : scheme.surfaceContainerHighest.withValues(alpha: 0.94);
+    final bgColor = accentColor != null
+        ? (scheme.brightness == Brightness.dark
+            ? Color.lerp(accentColor!, const Color(0xFF1C1C1E), 0.58)!.withValues(alpha: 0.93)
+            : Color.lerp(accentColor!, Colors.white, 0.65)!.withValues(alpha: 0.94))
+        : (scheme.brightness == Brightness.dark
+            ? const Color(0xFF2C2C2E).withValues(alpha: 0.93)
+            : scheme.surfaceContainerHighest.withValues(alpha: 0.94));
 
     return Padding(
-      // Side inset matches the dock. Bottom gap puts the card 6 px above
-      // the dock's top edge.
+      // Side inset matches the dock. Bottom gap sits 6 px above the dock top.
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
       child: GestureDetector(
         onTap: onOpen,
@@ -197,14 +197,12 @@ class _FloatingMiniPlayer extends StatelessWidget {
                         ],
                       ),
                     ),
-                    // Thin progress bar at bottom — clipped to card corners
+                    // Progress bar — clipped to card corner radius at bottom
                     Positioned(
                       bottom: 0,
                       left: 0,
                       right: 0,
-                      child: RepaintBoundary(
-                        child: _MiniPlayerProgress(trackColor: Colors.transparent),
-                      ),
+                      child: RepaintBoundary(child: _MiniPlayerProgress()),
                     ),
                   ],
                 ),
@@ -219,10 +217,9 @@ class _FloatingMiniPlayer extends StatelessWidget {
 
 // ---------------------------------------------------------------------------
 
-// Rebuilds every ~200ms — only repaints its own 2px slice.
+// Rebuilds every ~200 ms — only repaints its own 2 px slice.
 class _MiniPlayerProgress extends ConsumerWidget {
-  final Color trackColor;
-  const _MiniPlayerProgress({required this.trackColor});
+  const _MiniPlayerProgress();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
