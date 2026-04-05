@@ -259,8 +259,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
                 onTap: () {
                   handler.cancelSleepTimer();
                   _sleepCountdown?.cancel();
-                  _sleepNotifier.value = null;
                   Navigator.pop(context);
+                  _sleepNotifier.value = null;
                 },
               ),
             for (final minutes in [15, 30, 45, 60])
@@ -270,8 +270,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
                 onTap: () {
                   final dur = Duration(minutes: minutes);
                   handler.setSleepTimer(dur);
-                  _startSleepCountdown(dur);
                   Navigator.pop(context);
+                  _startSleepCountdown(dur);
                 },
               ),
           ],
@@ -478,11 +478,13 @@ class _PlayerPage extends StatelessWidget {
           const SizedBox(height: 4),
           RepaintBoundary(child: _PlayControls()),
           const SizedBox(height: 12),
-          _BottomActions(
-            sleepNotifier: sleepNotifier,
-            onSleepTimer: onSleepTimer,
-            onQueueOpen: onQueueOpen,
-            onLyricsOpen: onLyricsOpen,
+          RepaintBoundary(
+            child: _BottomActions(
+              sleepNotifier: sleepNotifier,
+              onSleepTimer: onSleepTimer,
+              onQueueOpen: onQueueOpen,
+              onLyricsOpen: onLyricsOpen,
+            ),
           ),
           const Spacer(flex: 1),
         ],

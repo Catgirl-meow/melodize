@@ -11,6 +11,10 @@ class AppPreferences {
   final String deezerArl;          // Deezer ARL cookie — enables FLAC downloads via companion
   final String librarySongSort;    // 'name' | 'artist' | 'recentlyAdded' | 'downloaded'
   final bool librarySongAscending;
+  final String libraryAlbumSort;   // 'name' | 'artist' | 'year' | 'songCount'
+  final bool libraryAlbumAscending;
+  final String libraryArtistSort;  // 'name' | 'albumCount'
+  final bool libraryArtistAscending;
   final bool floatingNavBar;       // true = floating pill dock, false = classic nav bar
 
   const AppPreferences({
@@ -22,6 +26,10 @@ class AppPreferences {
     this.deezerArl = '',
     this.librarySongSort = 'name',
     this.librarySongAscending = true,
+    this.libraryAlbumSort = 'name',
+    this.libraryAlbumAscending = true,
+    this.libraryArtistSort = 'name',
+    this.libraryArtistAscending = true,
     this.floatingNavBar = true,
   });
 
@@ -37,6 +45,10 @@ class AppPreferences {
     String? deezerArl,
     String? librarySongSort,
     bool? librarySongAscending,
+    String? libraryAlbumSort,
+    bool? libraryAlbumAscending,
+    String? libraryArtistSort,
+    bool? libraryArtistAscending,
     bool? floatingNavBar,
   }) =>
       AppPreferences(
@@ -48,6 +60,10 @@ class AppPreferences {
         deezerArl: deezerArl ?? this.deezerArl,
         librarySongSort: librarySongSort ?? this.librarySongSort,
         librarySongAscending: librarySongAscending ?? this.librarySongAscending,
+        libraryAlbumSort: libraryAlbumSort ?? this.libraryAlbumSort,
+        libraryAlbumAscending: libraryAlbumAscending ?? this.libraryAlbumAscending,
+        libraryArtistSort: libraryArtistSort ?? this.libraryArtistSort,
+        libraryArtistAscending: libraryArtistAscending ?? this.libraryArtistAscending,
         floatingNavBar: floatingNavBar ?? this.floatingNavBar,
       );
 
@@ -60,6 +76,10 @@ class AppPreferences {
         deezerArl: j['deezerArl'] as String? ?? '',
         librarySongSort: j['librarySongSort'] as String? ?? 'name',
         librarySongAscending: j['librarySongAscending'] as bool? ?? true,
+        libraryAlbumSort: j['libraryAlbumSort'] as String? ?? 'name',
+        libraryAlbumAscending: j['libraryAlbumAscending'] as bool? ?? true,
+        libraryArtistSort: j['libraryArtistSort'] as String? ?? 'name',
+        libraryArtistAscending: j['libraryArtistAscending'] as bool? ?? true,
         floatingNavBar: j['floatingNavBar'] as bool? ?? true,
       );
 
@@ -72,6 +92,10 @@ class AppPreferences {
         'deezerArl': deezerArl,
         'librarySongSort': librarySongSort,
         'librarySongAscending': librarySongAscending,
+        'libraryAlbumSort': libraryAlbumSort,
+        'libraryAlbumAscending': libraryAlbumAscending,
+        'libraryArtistSort': libraryArtistSort,
+        'libraryArtistAscending': libraryArtistAscending,
         'floatingNavBar': floatingNavBar,
       };
 

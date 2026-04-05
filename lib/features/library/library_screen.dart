@@ -305,58 +305,62 @@ class _AlbumsTab extends ConsumerStatefulWidget {
 
 class _AlbumsTabState extends ConsumerState<_AlbumsTab>
     with AutomaticKeepAliveClientMixin {
-  _AlbumSort _sort = _AlbumSort.name;
-  bool _ascending = true;
-
   @override
   bool get wantKeepAlive => true;
 
-  void _showSortSheet(BuildContext context) {
+  void _showSortSheet(BuildContext context, _AlbumSort currentSort, bool currentAscending) {
     final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet<void>(
       context: context,
       builder: (_) => SafeArea(
         child: StatefulBuilder(
-          builder: (ctx, setSheetState) => Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                child: Text('Sort albums',
-                    style: Theme.of(context).textTheme.titleMedium),
-              ),
-              for (final option in _AlbumSort.values)
-                ListTile(
-                  leading: Icon(
-                    _albumSortIcon(option),
-                    color: _sort == option ? scheme.primary : null,
-                  ),
-                  title: Text(_albumSortLabel(option)),
-                  trailing: _sort == option
-                      ? Icon(
-                          _ascending
-                              ? Icons.arrow_upward_rounded
-                              : Icons.arrow_downward_rounded,
-                          color: scheme.primary,
-                          size: 20,
-                        )
-                      : null,
-                  onTap: () {
-                    setSheetState(() {
-                      if (_sort == option) {
-                        _ascending = !_ascending;
-                      } else {
-                        _sort = option;
-                        _ascending = true;
-                      }
-                    });
-                    setState(() {});
-                    Navigator.pop(context);
-                  },
+          builder: (ctx, setSheetState) {
+            var sheetSort = currentSort;
+            var sheetAscending = currentAscending;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Text('Sort albums',
+                      style: Theme.of(context).textTheme.titleMedium),
                 ),
-              const SizedBox(height: 8),
-            ],
-          ),
+                for (final option in _AlbumSort.values)
+                  ListTile(
+                    leading: Icon(
+                      _albumSortIcon(option),
+                      color: sheetSort == option ? scheme.primary : null,
+                    ),
+                    title: Text(_albumSortLabel(option)),
+                    trailing: sheetSort == option
+                        ? Icon(
+                            sheetAscending
+                                ? Icons.arrow_upward_rounded
+                                : Icons.arrow_downward_rounded,
+                            color: scheme.primary,
+                            size: 20,
+                          )
+                        : null,
+                    onTap: () {
+                      if (sheetSort == option) {
+                        sheetAscending = !sheetAscending;
+                      } else {
+                        sheetSort = option;
+                        sheetAscending = true;
+                      }
+                      ref.read(preferencesNotifierProvider.notifier).update(
+                        ref.read(preferencesNotifierProvider).copyWith(
+                          libraryAlbumSort: sheetSort.name,
+                          libraryAlbumAscending: sheetAscending,
+                        ),
+                      );
+                      Navigator.pop(context);
+                    },
+                  ),
+                const SizedBox(height: 8),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -365,6 +369,17 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+
+    final (sortName, ascending) = ref.watch(
+      preferencesNotifierProvider.select(
+        (p) => (p.libraryAlbumSort, p.libraryAlbumAscending),
+      ),
+    );
+    final sort = _AlbumSort.values.firstWhere(
+      (s) => s.name == sortName,
+      orElse: () => _AlbumSort.name,
+    );
+
     final albumsAsync = ref.watch(allAlbumsProvider);
     final scheme = Theme.of(context).colorScheme;
 
@@ -373,7 +388,7 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
       error: (e, _) => Center(child: Text('$e')),
       data: (rawAlbums) {
         if (rawAlbums.isEmpty) return const Center(child: Text('No albums'));
-        final albums = _applyAlbumSort(rawAlbums, _sort, _ascending);
+        final albums = _applyAlbumSort(rawAlbums, sort, ascending);
         return CustomScrollView(
           slivers: [
             SliverToBoxAdapter(
@@ -388,14 +403,14 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
                     ),
                     const Spacer(),
                     TextButton.icon(
-                      onPressed: () => _showSortSheet(context),
+                      onPressed: () => _showSortSheet(context, sort, ascending),
                       icon: Icon(
-                        _ascending
+                        ascending
                             ? Icons.arrow_upward_rounded
                             : Icons.arrow_downward_rounded,
                         size: 16,
                       ),
-                      label: Text(_albumSortLabel(_sort)),
+                      label: Text(_albumSortLabel(sort)),
                       style: TextButton.styleFrom(
                         foregroundColor: scheme.primary,
                         textStyle: const TextStyle(fontSize: 13),
@@ -487,6 +502,21 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
 }
 
 // ---------------------------------------------------------------------------
+// Artist sorting
+
+enum _ArtistSort { name, albumCount }
+
+String _artistSortLabel(_ArtistSort s) => switch (s) {
+      _ArtistSort.name => 'Name',
+      _ArtistSort.albumCount => 'Album count',
+    };
+
+IconData _artistSortIcon(_ArtistSort s) => switch (s) {
+      _ArtistSort.name => Icons.sort_by_alpha_rounded,
+      _ArtistSort.albumCount => Icons.album_rounded,
+    };
+
+// ---------------------------------------------------------------------------
 
 class _ArtistsTab extends ConsumerStatefulWidget {
   const _ArtistsTab();
@@ -500,43 +530,154 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab>
   @override
   bool get wantKeepAlive => true;
 
+  void _showSortSheet(BuildContext context, _ArtistSort currentSort, bool currentAscending) {
+    final scheme = Theme.of(context).colorScheme;
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            var sheetSort = currentSort;
+            var sheetAscending = currentAscending;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Text('Sort artists',
+                      style: Theme.of(context).textTheme.titleMedium),
+                ),
+                for (final option in _ArtistSort.values)
+                  ListTile(
+                    leading: Icon(
+                      _artistSortIcon(option),
+                      color: sheetSort == option ? scheme.primary : null,
+                    ),
+                    title: Text(_artistSortLabel(option)),
+                    trailing: sheetSort == option
+                        ? Icon(
+                            sheetAscending
+                                ? Icons.arrow_upward_rounded
+                                : Icons.arrow_downward_rounded,
+                            color: scheme.primary,
+                            size: 20,
+                          )
+                        : null,
+                    onTap: () {
+                      if (sheetSort == option) {
+                        sheetAscending = !sheetAscending;
+                      } else {
+                        sheetSort = option;
+                        sheetAscending = true;
+                      }
+                      ref.read(preferencesNotifierProvider.notifier).update(
+                        ref.read(preferencesNotifierProvider).copyWith(
+                          libraryArtistSort: sheetSort.name,
+                          libraryArtistAscending: sheetAscending,
+                        ),
+                      );
+                      Navigator.pop(context);
+                    },
+                  ),
+                const SizedBox(height: 8),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
+
+    final (sortName, ascending) = ref.watch(
+      preferencesNotifierProvider.select(
+        (p) => (p.libraryArtistSort, p.libraryArtistAscending),
+      ),
+    );
+    final sort = _ArtistSort.values.firstWhere(
+      (s) => s.name == sortName,
+      orElse: () => _ArtistSort.name,
+    );
+
     final artistsAsync = ref.watch(allArtistsProvider);
     return artistsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(child: Text('$e')),
-      data: (artists) {
-        if (artists.isEmpty) return const Center(child: Text('No artists'));
-        return ListView.builder(
-          padding: EdgeInsets.zero,
-          itemCount: artists.length,
-          itemBuilder: (_, i) {
-            final artist = artists[i];
-            final scheme = Theme.of(context).colorScheme;
-            return RepaintBoundary(
-              child: ListTile(
-                leading: CoverArtImage(
-                  coverArtId: artist.coverArt,
-                  size: 48,
-                  borderRadius: 24,
-                ),
-                title: Text(artist.name),
-                subtitle: Text(
-                  '${artist.albumCount} ${artist.albumCount == 1 ? 'album' : 'albums'}',
-                  style: TextStyle(color: scheme.onSurfaceVariant),
-                ),
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => _ArtistDetailScreen(
-                        artistId: artist.id, artistName: artist.name),
-                  ),
+      data: (rawArtists) {
+        if (rawArtists.isEmpty) return const Center(child: Text('No artists'));
+        final artists = rawArtists.toList();
+        switch (sort) {
+          case _ArtistSort.name:
+            artists.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+          case _ArtistSort.albumCount:
+            artists.sort((a, b) => b.albumCount.compareTo(a.albumCount));
+        }
+        if (!ascending) artists.setRange(0, artists.length, artists.reversed.toList());
+        final scheme = Theme.of(context).colorScheme;
+        return CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 8, 4),
+                child: Row(
+                  children: [
+                    Text(
+                      '${artists.length} artists',
+                      style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: () => _showSortSheet(context, sort, ascending),
+                      icon: Icon(
+                        ascending
+                            ? Icons.arrow_upward_rounded
+                            : Icons.arrow_downward_rounded,
+                        size: 16,
+                      ),
+                      label: Text(_artistSortLabel(sort)),
+                      style: TextButton.styleFrom(
+                        foregroundColor: scheme.primary,
+                        textStyle: const TextStyle(fontSize: 13),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            );
-          },
+            ),
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (_, i) {
+                  final artist = artists[i];
+                  return RepaintBoundary(
+                    child: ListTile(
+                      leading: CoverArtImage(
+                        coverArtId: artist.coverArt,
+                        size: 48,
+                        borderRadius: 24,
+                      ),
+                      title: Text(artist.name),
+                      subtitle: Text(
+                        '${artist.albumCount} ${artist.albumCount == 1 ? 'album' : 'albums'}',
+                        style: TextStyle(color: scheme.onSurfaceVariant),
+                      ),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => _ArtistDetailScreen(
+                              artistId: artist.id, artistName: artist.name),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+                childCount: artists.length,
+              ),
+            ),
+          ],
         );
       },
     );

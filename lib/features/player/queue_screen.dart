@@ -73,7 +73,7 @@ class QueueScreen extends ConsumerWidget {
                 : ReorderableListView.builder(
                     padding: EdgeInsets.zero,
                     // Limit pre-building of off-screen items
-                    cacheExtent: 200,
+                    cacheExtent: 50,
                     proxyDecorator: (child, index, animation) => Material(
                       color: scheme.surfaceContainerHighest,
                       elevation: 4,
