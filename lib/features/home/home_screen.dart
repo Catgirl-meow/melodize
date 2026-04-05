@@ -3,7 +3,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/album.dart';
-import '../../core/models/recommended_track.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/widgets/cover_art_image.dart';
@@ -166,16 +165,20 @@ class HomeScreen extends ConsumerWidget {
               child: Center(child: CircularProgressIndicator()),
             ),
           ),
-          error: (e, _) => SliverToBoxAdapter(
+          error: (_, __) => SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.all(32),
               child: Center(
                 child: Column(
                   children: [
-                    const Icon(Icons.wifi_off_rounded, size: 48),
+                    Icon(Icons.wifi_off_rounded,
+                        size: 48,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
                     const SizedBox(height: 8),
-                    Text('$e',
-                        style: Theme.of(context).textTheme.bodySmall),
+                    Text(
+                      'Could not connect to server',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
                   ],
                 ),
               ),
@@ -200,7 +203,8 @@ class HomeScreen extends ConsumerWidget {
           ),
         ),
 
-        // Recommended for You — Deezer artist-radio, songs NOT in the library
+        // Recommended for You — library songs via getSimilarSongs (Last.fm),
+        // falling back to Deezer artist radio with library cross-reference.
         recsAsync.when(
           skipLoadingOnRefresh: true,
           loading: () => const SliverToBoxAdapter(child: SizedBox.shrink()),
@@ -233,7 +237,7 @@ class HomeScreen extends ConsumerWidget {
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     itemCount: recs.length,
-                    itemBuilder: (_, i) => _RecommendationCard(rec: recs[i]),
+                    itemBuilder: (_, i) => _RecommendationCard(song: recs[i]),
                   ),
                 ),
               ),
@@ -281,18 +285,10 @@ class HomeScreen extends ConsumerWidget {
     ref.read(audioHandlerNotifierProvider)?.loadQueue(songs, startIndex: index);
   }
 
-  void _playRecommendations(WidgetRef ref, List<RecommendedTrack> recs, {required bool shuffle}) {
-    final songs = recs.map((r) => Song.fromRecommendation(
-      deezerId: r.deezerId,
-      title: r.title,
-      artist: r.artist,
-      album: r.album,
-      durationSeconds: r.durationSeconds,
-      previewUrl: r.previewUrl,
-      coverUrl: r.coverUrl,
-    )).toList();
-    if (shuffle) songs.shuffle();
-    ref.read(audioHandlerNotifierProvider)?.loadQueue(songs, startIndex: 0);
+  void _playRecommendations(WidgetRef ref, List<Song> songs, {required bool shuffle}) {
+    final list = songs.toList();
+    if (shuffle) list.shuffle();
+    ref.read(audioHandlerNotifierProvider)?.loadQueue(list, startIndex: 0);
   }
 
   String _greeting(String? username) {
@@ -475,8 +471,8 @@ class _PlaylistCard extends ConsumerWidget {
 // ---------------------------------------------------------------------------
 
 class _RecommendationCard extends ConsumerStatefulWidget {
-  final RecommendedTrack rec;
-  const _RecommendationCard({required this.rec});
+  final Song song;
+  const _RecommendationCard({required this.song});
 
   @override
   ConsumerState<_RecommendationCard> createState() =>
@@ -497,16 +493,7 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
     if (_loading) return;
     setState(() => _loading = true);
     try {
-      final song = Song.fromRecommendation(
-        deezerId: widget.rec.deezerId,
-        title: widget.rec.title,
-        artist: widget.rec.artist,
-        album: widget.rec.album,
-        durationSeconds: widget.rec.durationSeconds,
-        previewUrl: widget.rec.previewUrl,
-        coverUrl: widget.rec.coverUrl,
-      );
-      ref.read(audioHandlerNotifierProvider)?.loadQueue([song]);
+      ref.read(audioHandlerNotifierProvider)?.loadQueue([widget.song]);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -516,7 +503,9 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
     final companion = ref.read(companionClientProvider);
     if (companion == null) return;
     final prefs = ref.read(preferencesNotifierProvider);
-    final url = 'https://www.deezer.com/track/${widget.rec.deezerId}';
+    // song.id is 'deezer:TRACKID' for preview-only recommendations.
+    final deezerTrackId = widget.song.id.substring('deezer:'.length);
+    final url = 'https://www.deezer.com/track/$deezerTrackId';
     try {
       final jobId = await companion.startDownload(
         url,
@@ -567,14 +556,15 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final canSave = ref.watch(canDeleteFromServerProvider);
+    final isPreview = widget.song.externalStreamUrl != null;
+    final canDownload = ref.watch(canDeleteFromServerProvider) && isPreview;
 
     Widget cover;
-    if (widget.rec.coverUrl != null) {
+    if (widget.song.externalCoverUrl != null) {
       cover = ClipRRect(
         borderRadius: BorderRadius.circular(12),
         child: CachedNetworkImage(
-          imageUrl: widget.rec.coverUrl!,
+          imageUrl: widget.song.externalCoverUrl!,
           width: 130,
           height: 130,
           fit: BoxFit.cover,
@@ -583,7 +573,11 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
         ),
       );
     } else {
-      cover = _coverPlaceholder(scheme);
+      cover = CoverArtImage(
+        coverArtId: widget.song.coverArt,
+        size: 130,
+        borderRadius: 12,
+      );
     }
 
     return Padding(
@@ -593,33 +587,33 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
           onTap: _play,
-          onLongPress: canSave ? () { _addToLibrary(); } : null,
+          onLongPress: canDownload ? () { _addToLibrary(); } : null,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Stack(
                 children: [
                   cover,
-                  // "PREVIEW" badge
-                  Positioned(
-                    bottom: 6,
-                    right: 6,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 5, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: const Text(
-                        'PREVIEW',
-                        style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white),
+                  if (isPreview)
+                    Positioned(
+                      bottom: 6,
+                      right: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'PREVIEW',
+                          style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white),
+                        ),
                       ),
                     ),
-                  ),
                   if (_loading)
                     Positioned.fill(
                       child: ClipRRect(
@@ -634,12 +628,12 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
                 ],
               ),
               const SizedBox(height: 8),
-              Text(widget.rec.title,
+              Text(widget.song.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                       fontSize: 13, fontWeight: FontWeight.w600)),
-              Text(widget.rec.artist,
+              Text(widget.song.artist ?? '',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(

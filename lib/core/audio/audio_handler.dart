@@ -79,6 +79,15 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     // Update MediaSession playback state on play/pause/processing changes.
     player.playerStateStream.listen((_) => _broadcastState());
 
+    // Clear the MediaSession media item when the player becomes idle (nothing
+    // loaded / player.stop() called).  Without this, OriginOS (vivo) keeps
+    // showing the Island widget with stale song info indefinitely.
+    player.processingStateStream.listen((state) {
+      if (state == ProcessingState.idle) {
+        mediaItem.add(null);
+      }
+    });
+
     // Track shuffle playback history so skipToPrevious works correctly.
     player.currentIndexStream.listen((index) {
       if (_seekingBack || index == null) return;
@@ -324,6 +333,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       if (cfg == null) return;
       final song = currentSong;
       if (song == null) return;
+      // positionStream ticks even when paused — only scrobble while actually playing.
+      if (!player.playing) return;
 
       if (!_nowPlayingReported && position.inSeconds >= 1) {
         _nowPlayingReported = true;
