@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/song.dart';
@@ -20,26 +21,30 @@ class MiniPlayer extends ConsumerWidget {
     // Pre-warm dominant color while mini player is visible so it's already
     // computed by the time the user opens the full player.
     final coverUrl = ref.watch(coverArtUrlProvider(song.coverArt ?? '')) ?? '';
-    // Always watch unconditionally — dominantColorProvider returns null for
-    // empty URLs instantly, and conditional watches are a Riverpod antipattern.
     ref.watch(dominantColorProvider(coverUrl));
 
-    return _MiniPlayerShell(song: song, onOpen: onOpen);
+    final floatingNav = ref.watch(
+      preferencesNotifierProvider.select((p) => p.floatingNavBar),
+    );
+
+    return floatingNav
+        ? _FloatingMiniPlayer(song: song, onOpen: onOpen)
+        : _ClassicMiniPlayer(song: song, onOpen: onOpen);
   }
 }
 
-// Shell: stable background + layout. Only rebuilds when song identity changes.
-class _MiniPlayerShell extends StatelessWidget {
+// ---------------------------------------------------------------------------
+// Classic mini player — full-width bar, rounded top only. Used with old nav.
+
+class _ClassicMiniPlayer extends StatelessWidget {
   final Song song;
   final VoidCallback onOpen;
-  const _MiniPlayerShell({required this.song, required this.onOpen});
+  const _ClassicMiniPlayer({required this.song, required this.onOpen});
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    // Blend primary colour into the surface so the mini player is always
-    // visually distinct from the flat navigation bar underneath it.
     final bg = Color.lerp(
       scheme.surfaceContainerHigh,
       scheme.primaryContainer,
@@ -48,7 +53,6 @@ class _MiniPlayerShell extends StatelessWidget {
 
     return GestureDetector(
       onTap: onOpen,
-      // DecoratedBox outside the clip so the shadow is not cut off.
       child: DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
@@ -68,7 +72,6 @@ class _MiniPlayerShell extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Progress bar — rebuilds every ~200ms independently
                 RepaintBoundary(child: _MiniPlayerProgress(trackColor: bg)),
                 Expanded(
                   child: Padding(
@@ -101,7 +104,6 @@ class _MiniPlayerShell extends StatelessWidget {
                             ],
                           ),
                         ),
-                        // Controls only rebuild on play/pause state change
                         RepaintBoundary(child: _MiniPlayerControls()),
                       ],
                     ),
@@ -115,6 +117,107 @@ class _MiniPlayerShell extends StatelessWidget {
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Floating mini player — glass card with all-rounded corners, inset from
+// edges to match the floating dock aesthetic.
+
+class _FloatingMiniPlayer extends StatelessWidget {
+  final Song song;
+  final VoidCallback onOpen;
+  const _FloatingMiniPlayer({required this.song, required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    const radius = 18.0;
+    const cardRadius = BorderRadius.all(Radius.circular(radius));
+
+    final bgColor = scheme.brightness == Brightness.dark
+        ? const Color(0xFF2C2C2E).withValues(alpha: 0.93)
+        : scheme.surfaceContainerHighest.withValues(alpha: 0.94);
+
+    return Padding(
+      // Side inset matches the dock. Bottom gap puts the card 6 px above
+      // the dock's top edge.
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+      child: GestureDetector(
+        onTap: onOpen,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: cardRadius,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.42),
+                blurRadius: 24,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: cardRadius,
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+              child: Container(
+                height: 62,
+                color: bgColor,
+                child: Stack(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Row(
+                        children: [
+                          CoverArtImage(
+                              coverArtId: song.coverArt,
+                              externalUrl: song.externalCoverUrl,
+                              size: 40,
+                              borderRadius: 10),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(song.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13)),
+                                Text(song.artist,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: scheme.onSurfaceVariant)),
+                              ],
+                            ),
+                          ),
+                          RepaintBoundary(child: _MiniPlayerControls()),
+                        ],
+                      ),
+                    ),
+                    // Thin progress bar at bottom — clipped to card corners
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      child: RepaintBoundary(
+                        child: _MiniPlayerProgress(trackColor: Colors.transparent),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 // Rebuilds every ~200ms — only repaints its own 2px slice.
 class _MiniPlayerProgress extends ConsumerWidget {
@@ -153,7 +256,7 @@ class _MiniPlayerControls extends ConsumerWidget {
       children: [
         IconButton(
           icon: const Icon(Icons.skip_previous_rounded),
-          iconSize: 26,
+          iconSize: 24,
           onPressed: () =>
               ref.read(audioHandlerNotifierProvider)?.skipToPrevious(),
         ),
@@ -161,7 +264,7 @@ class _MiniPlayerControls extends ConsumerWidget {
           icon: Icon(isPlaying
               ? Icons.pause_rounded
               : Icons.play_arrow_rounded),
-          iconSize: 30,
+          iconSize: 28,
           onPressed: () {
             final h = ref.read(audioHandlerNotifierProvider);
             isPlaying ? h?.pause() : h?.play();
@@ -169,7 +272,7 @@ class _MiniPlayerControls extends ConsumerWidget {
         ),
         IconButton(
           icon: const Icon(Icons.skip_next_rounded),
-          iconSize: 26,
+          iconSize: 24,
           onPressed: () =>
               ref.read(audioHandlerNotifierProvider)?.skipToNext(),
         ),

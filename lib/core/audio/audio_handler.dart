@@ -48,13 +48,15 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     ),
   );
 
-  // useLazyPreparation: false on Android/iOS — ExoPlayer/AVPlayer eagerly
-  // prepares all source timelines (lightweight header reads) so they can
-  // buffer across track boundaries for gapless playback.
-  // Set to true on Linux/desktop (just_audio_media_kit / libmpv backend).
+  // useLazyPreparation: true — each source is prepared only when the
+  // preceding one nears completion.  The old `false` setting caused ExoPlayer
+  // to initiate network connections for every item in the queue at once,
+  // freezing the UI for several frames when loading a large library queue.
+  // Gapless transitions are unaffected: ExoPlayer still buffers ahead
+  // automatically; the difference is it waits until actually needed.
   final _playlistSource = ConcatenatingAudioSource(
     children: [],
-    useLazyPreparation: Platform.isLinux || Platform.isWindows || Platform.isMacOS,
+    useLazyPreparation: true,
   );
 
   SubsonicConfig? _config;
@@ -79,11 +81,11 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     // Update MediaSession playback state on play/pause/processing changes.
     player.playerStateStream.listen((_) => _broadcastState());
 
-    // Clear the MediaSession media item when the player becomes idle (nothing
-    // loaded / player.stop() called).  Without this, OriginOS (vivo) keeps
+    // Clear the MediaSession media item when the player becomes idle or the
+    // playlist ends with no loop.  Without this, OriginOS (vivo) keeps
     // showing the Island widget with stale song info indefinitely.
     player.processingStateStream.listen((state) {
-      if (state == ProcessingState.idle) {
+      if (state == ProcessingState.idle || state == ProcessingState.completed) {
         mediaItem.add(null);
       }
     });
@@ -163,7 +165,10 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   void setConfig(SubsonicConfig config) {
     _config = config;
-    // Re-emit mediaItem with artUri now that the server config is available.
+    // Re-emit mediaItem with artUri now that the server config is available,
+    // but only if playback is active — avoids spuriously waking the OriginOS
+    // Island for a paused/idle player when the server config refreshes.
+    if (!player.playing) return;
     final current = mediaItem.valueOrNull;
     final song = currentSong;
     if (current != null && song != null && (song.coverArt?.isNotEmpty ?? false)) {
@@ -189,22 +194,27 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     if (_config == null || songs.isEmpty) return;
     _shuffleHistory.clear();
     _lastHistoryIndex = null;
+    final idx = startIndex.clamp(0, songs.length - 1);
     await _playlistSource.clear();
-    await _playlistSource.addAll(songs.map(_songToSource).toList());
+    // Phase 1: load only the selected song so the platform-channel call is
+    // tiny (1 item) and playback starts without UI-thread delay.
+    await _playlistSource.add(_songToSource(songs[idx]));
     try {
-      // preload: false — setAudioSource returns immediately; sources are
-      // prepared in the background while the first track starts playing.
-      // Without this, setAudioSource blocks until all sources in the
-      // ConcatenatingAudioSource are prepared (useLazyPreparation: false
-      // means all of them), causing a delay proportional to queue length.
-      await player.setAudioSource(
-        _playlistSource,
-        initialIndex: startIndex.clamp(0, songs.length - 1),
-        preload: false,
-      );
+      await player.setAudioSource(_playlistSource, initialIndex: 0, preload: false);
       await player.play();
     } catch (e) {
       debugPrint('loadQueue error: $e');
+      return;
+    }
+    // Phase 2: populate the full queue in the background while music plays.
+    // insertAll(0, ...) shifts the playing track from index 0 → idx.
+    if (idx > 0) {
+      await _playlistSource.insertAll(
+          0, songs.sublist(0, idx).map(_songToSource).toList());
+    }
+    if (idx + 1 < songs.length) {
+      await _playlistSource.addAll(
+          songs.sublist(idx + 1).map(_songToSource).toList());
     }
   }
 

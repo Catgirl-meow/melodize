@@ -13,7 +13,7 @@ import '../player/now_playing_screen.dart';
 const _kDockHeight = 52.0;
 const _kDockBottom = 8.0;    // gap between dock and safe area
 const _kDockHorizontal = 20.0;
-const _kDockRadius = 26.0;
+const _kDockRadius = 18.0;
 
 class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
@@ -199,9 +199,7 @@ class _MainShellState extends ConsumerState<MainShell>
       body: Stack(
         children: [
           // Main content — scroll padding keeps last items above the dock/player
-          AnimatedPadding(
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeOut,
+          Padding(
             padding: EdgeInsets.only(
               bottom: hasSong ? 72.0 : 0.0,
             ),
@@ -216,20 +214,23 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
           ),
 
-          // Mini player — sits directly above the floating dock
+          // Mini player — sits directly above the floating dock.
+          // Removed from the layer tree once invisible so its backdrop filter
+          // (floating design) doesn't add compositing cost when player is open.
           Positioned(
             left: 0,
             right: 0,
             bottom: dockBodyPad,
             child: AnimatedBuilder(
               animation: _playerAnim,
-              builder: (_, child) => IgnorePointer(
-                ignoring: _playerAnim.value > 0.1,
-                child: Opacity(
-                  opacity: (1 - _playerAnim.value * 5).clamp(0.0, 1.0),
-                  child: child,
-                ),
-              ),
+              builder: (_, child) {
+                final opacity = (1 - _playerAnim.value * 5).clamp(0.0, 1.0);
+                if (opacity == 0.0) return const SizedBox.shrink();
+                return IgnorePointer(
+                  ignoring: _playerAnim.value > 0.1,
+                  child: Opacity(opacity: opacity, child: child!),
+                );
+              },
               child: MiniPlayer(onOpen: _openPlayer),
             ),
           ),
@@ -244,6 +245,8 @@ class _MainShellState extends ConsumerState<MainShell>
         // Floating dock — rendered above the scaffold so content is visible
         // behind it (enabling the BackdropFilter blur). Fades when the full
         // player opens.
+        // Floating dock — removed from the layer tree once invisible so the
+        // BackdropFilter doesn't force GPU compositing during player modals.
         if (floatingNav)
           Positioned(
             bottom: safeBottom + _kDockBottom,
@@ -251,18 +254,31 @@ class _MainShellState extends ConsumerState<MainShell>
             right: 0,
             child: AnimatedBuilder(
               animation: _playerAnim,
-              builder: (_, child) => IgnorePointer(
-                ignoring: _playerAnim.value > 0.1,
-                child: Opacity(
-                  opacity: (1 - _playerAnim.value * 5).clamp(0.0, 1.0),
-                  child: child,
-                ),
-              ),
+              builder: (_, child) {
+                final opacity = (1 - _playerAnim.value * 5).clamp(0.0, 1.0);
+                if (opacity == 0.0) return const SizedBox.shrink();
+                return IgnorePointer(
+                  ignoring: _playerAnim.value > 0.1,
+                  child: Opacity(opacity: opacity, child: child!),
+                );
+              },
               child: _buildFloatingDock(scheme),
             ),
           ),
 
-        // Full player
+        // Full player — black underlay prevents the scaffold from showing
+        // through during the slide-up transition on non-AMOLED screens.
+        if (hasSong)
+          AnimatedBuilder(
+            animation: _playerAnim,
+            builder: (_, __) => IgnorePointer(
+              ignoring: true,
+              child: Opacity(
+                opacity: _playerAnim.value.clamp(0.0, 1.0),
+                child: const ColoredBox(color: Colors.black, child: SizedBox.expand()),
+              ),
+            ),
+          ),
         if (hasSong)
           AnimatedBuilder(
             animation: _playerAnim,
@@ -313,17 +329,17 @@ class _FloatingNavItem extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeInOut,
           decoration: BoxDecoration(
             color: selected ? scheme.secondaryContainer : Colors.transparent,
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(_kDockRadius),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.max,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 selected ? selectedIcon : icon,

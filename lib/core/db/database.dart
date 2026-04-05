@@ -224,9 +224,11 @@ class AppDatabase extends _$AppDatabase {
       });
 
   // --- Server change / full reset ---
+  // Play history is intentionally preserved: it stores artist+title strings
+  // (not server-specific IDs) so Deezer recommendations keep working after
+  // switching servers.
   Future<void> clearAllData() => transaction(() async {
         await delete(cachedSongs).go();
-        await delete(playHistory).go();
         await delete(serverConfig).go();
         await delete(downloadQueue).go();
         await delete(queueEntries).go();
