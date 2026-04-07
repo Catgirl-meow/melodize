@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
@@ -127,8 +128,7 @@ class QueueScreen extends ConsumerWidget {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               if (isCurrent)
-                                Icon(Icons.equalizer_rounded,
-                                    size: 20, color: scheme.primary),
+                                _AnimatedEqualizer(color: scheme.primary),
                               IconButton(
                                 icon: const Icon(Icons.close_rounded,
                                     size: 18),
@@ -148,6 +148,71 @@ class QueueScreen extends ConsumerWidget {
           ),
         ],
       ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+class _AnimatedEqualizer extends StatefulWidget {
+  final Color color;
+  const _AnimatedEqualizer({required this.color});
+
+  @override
+  State<_AnimatedEqualizer> createState() => _AnimatedEqualizerState();
+}
+
+class _AnimatedEqualizerState extends State<_AnimatedEqualizer>
+    with TickerProviderStateMixin {
+  late final List<AnimationController> _controllers;
+  late final List<Animation<double>> _anims;
+
+  @override
+  void initState() {
+    super.initState();
+    _controllers = [
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 380))..repeat(reverse: true),
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 500))..repeat(reverse: true),
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 420))..repeat(reverse: true),
+    ];
+    // Stagger start phases so bars aren't in sync
+    _controllers[1].value = 0.5;
+    _controllers[2].value = 0.25;
+    _anims = [
+      Tween<double>(begin: 0.25, end: 1.0).animate(CurvedAnimation(parent: _controllers[0], curve: Curves.easeInOut)),
+      Tween<double>(begin: 0.6, end: 1.0).animate(CurvedAnimation(parent: _controllers[1], curve: Curves.easeInOut)),
+      Tween<double>(begin: 0.35, end: 0.85).animate(CurvedAnimation(parent: _controllers[2], curve: Curves.easeInOut)),
+    ];
+  }
+
+  @override
+  void dispose() {
+    for (final c in _controllers) c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 20,
+      height: 20,
+      child: AnimatedBuilder(
+        animation: Listenable.merge(_controllers),
+        builder: (_, __) => Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: List.generate(3, (i) {
+            return Container(
+              width: 3,
+              height: math.max(3, 18 * _anims[i].value),
+              decoration: BoxDecoration(
+                color: widget.color,
+                borderRadius: BorderRadius.circular(1.5),
+              ),
+            );
+          }),
+        ),
       ),
     );
   }

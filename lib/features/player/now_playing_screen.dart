@@ -213,13 +213,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      // enableDrag: false prevents the sheet drag-to-dismiss gesture from
-      // conflicting with (a) the ReorderableListView drag-to-reorder and
-      // (b) the NowPlayingScreen's player-close GestureDetector.
       // Transparent barrier avoids the full-screen compositing fade that caused
       // dismiss-animation stutter; tap-outside still dismisses (isDismissible
       // is true by default, barrier responds to taps even when invisible).
-      enableDrag: false,
       barrierColor: Colors.transparent,
       builder: (_) => const RepaintBoundary(child: QueueScreen()),
     );
@@ -231,7 +227,6 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
 
     showModalBottomSheet(
       context: context,
-      enableDrag: false,
       barrierColor: Colors.transparent,
       builder: (_) => SafeArea(
         child: Column(

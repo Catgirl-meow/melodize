@@ -380,28 +380,12 @@ class _FloatingNavItem extends StatelessWidget {
             color: pillColor,
             borderRadius: BorderRadius.circular(_kDockRadius),
           ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                selected ? selectedIcon : icon,
-                size: 22,
-                color: selected ? activeColor : scheme.onSurfaceVariant,
-              ),
-              const SizedBox(height: 3),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-                  color: selected ? activeColor : scheme.onSurfaceVariant,
-                  decoration: TextDecoration.none,
-                ),
-              ),
-            ],
+          child: Center(
+            child: Icon(
+              selected ? selectedIcon : icon,
+              size: 26,
+              color: selected ? activeColor : scheme.onSurfaceVariant,
+            ),
           ),
         ),
       ),
