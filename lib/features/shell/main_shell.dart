@@ -177,7 +177,7 @@ class _MainShellState extends ConsumerState<MainShell>
       // floating dock area shows app content through the blur instead of the
       // scaffold's background colour.
       extendBody: floatingNav,
-      backgroundColor: floatingNav ? Colors.transparent : null,
+      backgroundColor: floatingNav ? scheme.surface : null,
       bottomNavigationBar: floatingNav
           ? null
           : NavigationBar(
