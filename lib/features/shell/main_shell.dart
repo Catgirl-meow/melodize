@@ -173,11 +173,13 @@ class _MainShellState extends ConsumerState<MainShell>
         : null; // use theme default
 
     final scaffold = Scaffold(
-      // extendBody: content reaches behind the system navigation bar so the
-      // floating dock area shows app content through the blur instead of the
-      // scaffold's background colour.
-      extendBody: floatingNav,
-      backgroundColor: floatingNav ? scheme.surface : null,
+      // extendBody + extendBodyBehindAppBar: body fills the entire screen
+      // including behind the status bar and system nav bar.  The body's first
+      // child (ColoredBox) provides the surface fill so the MaterialApp's
+      // black root never bleeds through, even on AMOLED.
+      extendBody: true,
+      extendBodyBehindAppBar: true,
+      backgroundColor: Colors.transparent,
       bottomNavigationBar: floatingNav
           ? null
           : NavigationBar(
@@ -213,10 +215,19 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
       body: Stack(
         children: [
-          // Main content — static 72 px bottom padding so the last scroll
-          // item is always reachable above the mini player.
+          // Surface fill — replaces scaffold backgroundColor so the body can
+          // be transparent (needed for edgeToEdge status bar) without the
+          // MaterialApp black root bleeding through on AMOLED.
+          ColoredBox(color: scheme.surface, child: const SizedBox.expand()),
+
+          // Main content — bottom padding accounts for both the floating dock
+          // (when active) AND the mini player so the last item is always
+          // reachable.  Classic dock mode only needs mini-player clearance.
           Padding(
-            padding: EdgeInsets.only(bottom: hasSong ? 72.0 : 0.0),
+            padding: EdgeInsets.only(
+              bottom: (floatingNav ? dockBodyPad : 0.0) +
+                  (hasSong ? 72.0 : 0.0),
+            ),
             child: IndexedStack(
               index: _selectedIndex,
               children: const [
