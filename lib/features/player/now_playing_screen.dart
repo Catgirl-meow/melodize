@@ -10,6 +10,7 @@ import 'package:just_audio/just_audio.dart';
 import '../../core/utils/platform_dirs.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
+import '../../shared/utils/snack.dart';
 import 'queue_screen.dart';
 
 // ---------------------------------------------------------------------------
@@ -214,10 +215,12 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
       backgroundColor: Colors.transparent,
       // enableDrag: false prevents the sheet drag-to-dismiss gesture from
       // conflicting with (a) the ReorderableListView drag-to-reorder and
-      // (b) the NowPlayingScreen's player-close drag gesture.
-      // A light barrier lets the user tap outside to dismiss instead.
+      // (b) the NowPlayingScreen's player-close GestureDetector.
+      // Transparent barrier avoids the full-screen compositing fade that caused
+      // dismiss-animation stutter; tap-outside still dismisses (isDismissible
+      // is true by default, barrier responds to taps even when invisible).
       enableDrag: false,
-      barrierColor: Colors.black12,
+      barrierColor: Colors.transparent,
       builder: (_) => const RepaintBoundary(child: QueueScreen()),
     );
   }
@@ -229,7 +232,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
     showModalBottomSheet(
       context: context,
       enableDrag: false,
-      barrierColor: Colors.black12,
+      barrierColor: Colors.transparent,
       builder: (_) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -401,11 +404,11 @@ class _TopBar extends ConsumerWidget {
               try {
                 await deleteSongFromServer(ref, song);
                 if (context.mounted) {
-                  _styledSnack(context, '"${song.title}" deleted');
+                  showStyledSnack(context, '"${song.title}" deleted');
                 }
               } catch (e) {
                 if (context.mounted) {
-                  _styledSnack(context, 'Failed to delete: $e', isError: true);
+                  showStyledSnack(context, 'Failed to delete: $e', isError: true);
                 }
               }
             },
@@ -1105,15 +1108,3 @@ class _LyricLineState extends State<_LyricLine>
   }
 }
 
-void _styledSnack(BuildContext context, String message, {bool isError = false}) {
-  final scheme = Theme.of(context).colorScheme;
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(message),
-      behavior: SnackBarBehavior.floating,
-      backgroundColor:
-          isError ? scheme.errorContainer : scheme.inverseSurface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    ),
-  );
-}

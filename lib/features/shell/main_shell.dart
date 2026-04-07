@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
+import '../../shared/theme/app_theme.dart';
 import '../home/home_screen.dart';
 import '../library/library_screen.dart';
 import '../search/search_screen.dart';
@@ -78,15 +79,7 @@ class _MainShellState extends ConsumerState<MainShell>
   }
 
   Widget _buildFloatingDock(ColorScheme scheme, Color? accentColor) {
-    final dockBg = accentColor != null
-        ? (scheme.brightness == Brightness.dark
-            ? Color.lerp(accentColor, const Color(0xFF1C1C1E), 0.58)!
-                .withValues(alpha: 0.93)
-            : Color.lerp(accentColor, Colors.white, 0.65)!
-                .withValues(alpha: 0.94))
-        : (scheme.brightness == Brightness.dark
-            ? const Color(0xFF2C2C2E).withValues(alpha: 0.93)
-            : scheme.surfaceContainerHighest.withValues(alpha: 0.94));
+    final dockBg = AppTheme.dockBackground(accentColor, scheme);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: _kDockHorizontal),
@@ -173,14 +166,17 @@ class _MainShellState extends ConsumerState<MainShell>
         : null; // use theme default
 
     final scaffold = Scaffold(
-      // Black scaffold background: the status bar / camera cutout area (above
-      // the body, not covered by ColoredBox) shows black rather than the
-      // dynamic scheme.surface tint — matches camera Island on AMOLED/OriginOS.
-      // The body's ColoredBox fills the content area with scheme.surface.
+      // extendBodyBehindAppBar: body fills behind the status bar so the
+      // ColoredBox(scheme.surface) covers that area with the same tint as the
+      // rest of the app — no visible black/tinted discontinuity around the
+      // camera cutout or Island.
+      // backgroundColor: transparent because the body's ColoredBox covers the
+      // entire screen; the scaffold background is never visible.
       // extendBody only in floating-dock mode so the classic-mode mini player
       // at bottom:0 sits correctly above the NavigationBar.
+      extendBodyBehindAppBar: true,
       extendBody: floatingNav,
-      backgroundColor: Colors.black,
+      backgroundColor: Colors.transparent,
       bottomNavigationBar: floatingNav
           ? null
           : NavigationBar(
@@ -216,9 +212,9 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
       body: Stack(
         children: [
-          // Surface fill — body starts below status bar (no extendBodyBehindAppBar)
-          // so this ColoredBox covers exactly the content area.  The status bar
-          // area above shows through to the black Flutter root = transparent look.
+          // Surface fill — covers the full body (including status bar area, since
+          // extendBodyBehindAppBar is true) with scheme.surface so the camera
+          // cutout / notification area blends seamlessly with the rest of the app.
           ColoredBox(color: scheme.surface, child: const SizedBox.expand()),
 
           // Content fills the full body with no shell-level bottom padding so

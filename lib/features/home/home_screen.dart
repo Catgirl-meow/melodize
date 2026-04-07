@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/album.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
+import '../../shared/utils/download_polling_mixin.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/offline_banner.dart';
 import '../library/album_detail_screen.dart';
@@ -479,15 +480,9 @@ class _RecommendationCard extends ConsumerStatefulWidget {
       _RecommendationCardState();
 }
 
-class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
+class _RecommendationCardState extends ConsumerState<_RecommendationCard>
+    with DownloadPollingMixin {
   bool _loading = false;
-  Timer? _pollTimer;
-
-  @override
-  void dispose() {
-    _pollTimer?.cancel();
-    super.dispose();
-  }
 
   Future<void> _play() async {
     if (_loading) return;
@@ -517,7 +512,7 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
             ? 'Downloading FLAC to Navidrome server…'
             : 'Downloading to Navidrome server (add Deezer ARL in Settings for lossless)'),
       ));
-      _startPolling(companion, jobId);
+      startDownloadPolling(companion, jobId);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -525,33 +520,6 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard> {
     }
   }
 
-  void _startPolling(dynamic companion, String jobId) {
-    var attempts = 0;
-    _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 15), (timer) async {
-      if (!mounted) { timer.cancel(); return; }
-      if (++attempts >= 24) { timer.cancel(); return; }
-      try {
-        final status = await companion.getDownloadStatus(jobId) as Map<String, dynamic>;
-        final s = status['status'] as String?;
-        if (s == 'done') {
-          timer.cancel();
-          ref.read(subsonicClientProvider)?.startScan();
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Added to Navidrome server — library scan started')));
-          }
-        } else if (s == 'error') {
-          timer.cancel();
-          if (mounted) {
-            final err = (status['error'] as String?) ?? 'unknown error';
-            ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Download failed: $err')));
-          }
-        }
-      } catch (_) {}
-    });
-  }
 
   @override
   Widget build(BuildContext context) {

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/utils/platform_dirs.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
+import '../utils/snack.dart';
 import 'cover_art_image.dart';
 
 class SongTile extends ConsumerWidget {
@@ -193,11 +194,11 @@ class _MoreButton extends ConsumerWidget {
               try {
                 await deleteSongFromServer(ref, song);
                 if (context.mounted) {
-                  _showSnack(context, '"${song.title}" deleted');
+                  showStyledSnack(context, '"${song.title}" deleted');
                 }
               } catch (e) {
                 if (context.mounted) {
-                  _showSnack(context, 'Failed to delete: $e', isError: true);
+                  showStyledSnack(context, 'Failed to delete: $e', isError: true);
                 }
               }
             },
@@ -222,15 +223,3 @@ class _MoreButton extends ConsumerWidget {
   }
 }
 
-void _showSnack(BuildContext context, String message, {bool isError = false}) {
-  final scheme = Theme.of(context).colorScheme;
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(message),
-      behavior: SnackBarBehavior.floating,
-      backgroundColor:
-          isError ? scheme.errorContainer : scheme.inverseSurface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    ),
-  );
-}

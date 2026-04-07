@@ -1,11 +1,10 @@
-import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../core/api/navidrome_client.dart' show CompanionClient;
 import '../../core/models/recommended_track.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
+import '../../shared/utils/download_polling_mixin.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/song_tile.dart';
 import '../library/album_detail_screen.dart';
@@ -172,14 +171,8 @@ class _DeezerTrackTile extends ConsumerStatefulWidget {
   ConsumerState<_DeezerTrackTile> createState() => _DeezerTrackTileState();
 }
 
-class _DeezerTrackTileState extends ConsumerState<_DeezerTrackTile> {
-  Timer? _pollTimer;
-
-  @override
-  void dispose() {
-    _pollTimer?.cancel();
-    super.dispose();
-  }
+class _DeezerTrackTileState extends ConsumerState<_DeezerTrackTile>
+    with DownloadPollingMixin {
 
   void _playPreview() {
     final song = Song.fromRecommendation(
@@ -210,7 +203,7 @@ class _DeezerTrackTileState extends ConsumerState<_DeezerTrackTile> {
             ? 'Downloading FLAC to Navidrome server…'
             : 'Downloading to Navidrome server (add Deezer ARL in Settings for lossless)'),
       ));
-      _startPolling(companion, jobId);
+      startDownloadPolling(companion, jobId);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -218,33 +211,6 @@ class _DeezerTrackTileState extends ConsumerState<_DeezerTrackTile> {
     }
   }
 
-  void _startPolling(CompanionClient companion, String jobId) {
-    var attempts = 0;
-    _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 15), (timer) async {
-      if (!mounted) { timer.cancel(); return; }
-      if (++attempts >= 24) { timer.cancel(); return; }
-      try {
-        final status = await companion.getDownloadStatus(jobId);
-        final s = status['status'] as String?;
-        if (s == 'done') {
-          timer.cancel();
-          ref.read(subsonicClientProvider)?.startScan();
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Added to Navidrome server — library scan started')));
-          }
-        } else if (s == 'error') {
-          timer.cancel();
-          if (mounted) {
-            final err = (status['error'] as String?) ?? 'unknown error';
-            ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Download failed: $err')));
-          }
-        }
-      } catch (_) {}
-    });
-  }
 
   @override
   Widget build(BuildContext context) {

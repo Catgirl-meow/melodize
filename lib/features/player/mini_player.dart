@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
+import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/cover_art_image.dart';
 
 // Top-level widget — only rebuilds when the current song identity changes.
@@ -130,13 +131,7 @@ class _FloatingMiniPlayer extends StatelessWidget {
     const radius = 16.0;
     const cardRadius = BorderRadius.all(Radius.circular(radius));
 
-    final bgColor = accentColor != null
-        ? (scheme.brightness == Brightness.dark
-            ? Color.lerp(accentColor!, const Color(0xFF1C1C1E), 0.58)!.withValues(alpha: 0.93)
-            : Color.lerp(accentColor!, Colors.white, 0.65)!.withValues(alpha: 0.94))
-        : (scheme.brightness == Brightness.dark
-            ? const Color(0xFF2C2C2E).withValues(alpha: 0.93)
-            : scheme.surfaceContainerHighest.withValues(alpha: 0.94));
+    final bgColor = AppTheme.dockBackground(accentColor, scheme);
 
     return Padding(
       // Side inset matches the dock. Bottom gap sits 6 px above the dock top.
