@@ -173,14 +173,14 @@ class _MainShellState extends ConsumerState<MainShell>
         : null; // use theme default
 
     final scaffold = Scaffold(
-      // transparent scaffold: the area ABOVE the body (status bar / camera
-      // cutout) shows the Flutter engine's black background, which looks
-      // seamless on dark AMOLED devices.  The body's ColoredBox fills the
-      // content area (below the status bar) with scheme.surface.
-      // extendBody is only active in floating-dock mode so that in classic
-      // mode the mini player at bottom:0 sits correctly above the nav bar.
+      // Black scaffold background: the status bar / camera cutout area (above
+      // the body, not covered by ColoredBox) shows black rather than the
+      // dynamic scheme.surface tint — matches camera Island on AMOLED/OriginOS.
+      // The body's ColoredBox fills the content area with scheme.surface.
+      // extendBody only in floating-dock mode so the classic-mode mini player
+      // at bottom:0 sits correctly above the NavigationBar.
       extendBody: floatingNav,
-      backgroundColor: Colors.transparent,
+      backgroundColor: Colors.black,
       bottomNavigationBar: floatingNav
           ? null
           : NavigationBar(
