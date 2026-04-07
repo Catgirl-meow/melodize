@@ -23,10 +23,22 @@ class CompanionClient {
   }
 
   /// Returns true if the companion is reachable and the API key is valid.
+  ///
+  /// Does NOT follow redirects — Navidrome returns 302→200 for unknown paths,
+  /// which would make a mis-configured URL (e.g. with a /companion suffix)
+  /// appear healthy while DELETE/POST would return 405.
   Future<bool> checkHealth() async {
     try {
-      final resp = await _dio.get('/health');
-      return resp.statusCode == 200;
+      final resp = await _dio.get(
+        '/health',
+        options: Options(
+          followRedirects: false,
+          validateStatus: (s) => s != null,
+        ),
+      );
+      if (resp.statusCode != 200) return false;
+      final data = resp.data;
+      return data is Map && data['status'] == 'ok';
     } catch (_) {
       return false;
     }
