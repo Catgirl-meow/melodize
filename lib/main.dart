@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:drift/drift.dart' show Value;
@@ -19,6 +21,18 @@ void main() {
 
   if (defaultTargetPlatform == TargetPlatform.linux) {
     JustAudioMediaKit.ensureInitialized();
+  }
+
+  // Transparent status bar so the camera cutout area blends with app content
+  // instead of showing a solid system-bar color.
+  if (!Platform.isLinux) {
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.dark,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarDividerColor: Colors.transparent,
+    ));
   }
 
   // Phase 1: create the handler synchronously so the app starts immediately.

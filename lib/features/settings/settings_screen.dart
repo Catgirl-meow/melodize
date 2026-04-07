@@ -16,7 +16,7 @@ class SettingsScreen extends ConsumerWidget {
         title: const Text('Change server?'),
         content: const Text(
             'This will stop playback and permanently clear all cached songs, '
-            'downloaded files, play history, and lyrics.'),
+            'downloaded files, and lyrics. Play history is kept so recommendations still work.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -387,9 +387,13 @@ class SettingsScreen extends ConsumerWidget {
   void _editCompanionUrl(
       BuildContext context, WidgetRef ref, AppPreferences prefs) {
     final serverUrl = ref.read(serverConfigProvider).valueOrNull?.serverUrl ?? '';
+    // Default to the same URL as Navidrome — the nginx mux routes /health and
+    // /api/songs to the companion without any path prefix.  Do NOT append
+    // '/companion' — that path is not handled by the companion and health
+    // checks will fail.
     final defaultUrl = prefs.companionUrl.isNotEmpty
         ? prefs.companionUrl
-        : (serverUrl.isNotEmpty ? '$serverUrl/companion' : '');
+        : serverUrl;
     final ctrl = TextEditingController(text: defaultUrl);
     showDialog(
       context: context,
@@ -398,7 +402,9 @@ class SettingsScreen extends ConsumerWidget {
         content: TextField(
           controller: ctrl,
           decoration: const InputDecoration(
-            hintText: 'https://your-server.example.com/companion',
+            hintText: 'https://your-navidrome-server.example.com',
+            helperText: 'Same URL as your Navidrome server (no /companion suffix)',
+            helperMaxLines: 2,
             border: OutlineInputBorder(),
           ),
           keyboardType: TextInputType.url,

@@ -119,8 +119,10 @@ Future<void> deleteSongFromServer(WidgetRef ref, Song song) async {
   // 5. Remove from active playback queue
   ref.read(audioHandlerNotifierProvider)?.removeSongById(song.id);
 
-  // 6. Refresh song list UI
-  ref.invalidate(allSongsProvider);
+  // 6. Refresh downloads list (song file was deleted in step 3).
+  // allSongsProvider is NOT invalidated here — _pendingDeleteIdsProvider
+  // already triggers its rebuild at step 0, avoiding a double-reload that
+  // would flash a loading spinner and reset the scroll position.
   ref.invalidate(downloadedSongsProvider);
 }
 

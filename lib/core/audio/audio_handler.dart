@@ -193,6 +193,27 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _shuffleHistory.clear();
     _lastHistoryIndex = null;
     final idx = startIndex.clamp(0, songs.length - 1);
+
+    if (Platform.isLinux) {
+      // On Linux (just_audio_media_kit / libmpv), insertAll() before the
+      // current index does not reliably update currentIndex, causing the
+      // sequenceState to report the wrong song (wrong title/cover).
+      // Load the full queue upfront instead — desktop doesn't have the
+      // platform-channel latency that makes this slow on mobile.
+      _playlistSource = ConcatenatingAudioSource(
+        children: songs.map(_songToSource).toList(),
+        useLazyPreparation: true,
+      );
+      try {
+        await player.setAudioSource(_playlistSource, initialIndex: idx, preload: false);
+        await player.play();
+      } catch (e) {
+        debugPrint('loadQueue error: $e');
+      }
+      return;
+    }
+
+    // Mobile: two-phase loading to avoid tap-lag from pre-preparing all sources.
     // Phase 1: fresh playlist with only the selected song — single
     // platform-channel call, no expensive clear() of the old queue.
     _playlistSource = ConcatenatingAudioSource(

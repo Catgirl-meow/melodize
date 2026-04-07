@@ -233,6 +233,10 @@ class _SongsTabState extends ConsumerState<_SongsTab>
     final scheme = Theme.of(context).colorScheme;
 
     return songsAsync.when(
+      // Keep the existing list visible during reload (e.g. after delete) so
+      // the loading spinner never replaces the list and the scroll position
+      // is preserved.
+      skipLoadingOnReload: true,
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(child: Text('$e')),
       data: (rawSongs) {
