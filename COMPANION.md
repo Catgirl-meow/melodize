@@ -178,6 +178,10 @@ If either tool is at a non-standard path, set it in config:
 Running behind your existing reverse proxy gives you HTTPS for free and avoids
 opening extra ports. Choose the option that matches your setup.
 
+> **URL format depends on your proxy option:**
+> - Options A / B (sub-path) and C / Caddy (sub-path): Companion URL in the app is `https://music.your-domain.com/companion`
+> - Option E (SafeLine + nginx mux) and dedicated subdomain setups: Companion URL = the bare Navidrome/site URL, **no `/companion` suffix**
+
 ### Option A — Nginx Proxy Manager (GUI)
 
 1. Create the custom config directory if it doesn't exist:
@@ -295,14 +299,106 @@ The app companion URL would then be `http://YOUR_SERVER_IP:8765`.
 
 ---
 
+### Option E — SafeLine WAF + nginx mux (recommended for SafeLine users)
+
+If you run [SafeLine](https://github.com/chaitin/safeline) WAF, the cleanest
+approach is a single nginx "mux" that sits between SafeLine's tengine and both
+Navidrome and the companion. SafeLine's backend points at the nginx mux; the
+mux routes companion paths internally. **No extra port or subdomain needed.**
+
+#### 1. Create the nginx mux config
+
+On the **reverse proxy host** (the machine running SafeLine), create
+`/etc/nginx/conf.d/melodize-mux.conf`:
+
+```nginx
+# Melodize mux — routes Navidrome and companion under one upstream.
+# SafeLine backend points here (127.0.0.1:PORT_BELOW).
+# Adjust IPs/ports to match your Tailscale or LAN addresses.
+
+upstream navidrome {
+    server YOUR_NAVIDROME_HOST:4533;   # e.g. 100.73.73.73:4533
+    keepalive 32;
+}
+
+upstream companion {
+    server YOUR_COMPANION_HOST:8765;   # e.g. 100.73.73.73:8765
+    keepalive 8;
+}
+
+server {
+    listen 127.0.0.1:4534;            # SafeLine backend points here
+
+    # Pass real client IP forwarded by SafeLine tengine
+    set_real_ip_from 127.0.0.0/8;
+    real_ip_header X-Forwarded-For;
+
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+
+    # Companion: liveness probe
+    location = /health {
+        proxy_pass http://companion;
+    }
+
+    # Companion: song management API
+    location /api/songs {
+        proxy_pass http://companion;
+        client_max_body_size 0;
+    }
+
+    # Everything else → Navidrome
+    location / {
+        proxy_pass http://navidrome;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $http_upgrade;
+        client_max_body_size 0;
+        proxy_read_timeout 600s;
+    }
+}
+```
+
+```bash
+nginx -t && systemctl reload nginx
+```
+
+#### 2. Point SafeLine backend at the mux
+
+In the SafeLine management panel, add or update the site backend to
+`127.0.0.1:4534` (or whatever port you chose in the config above).
+
+#### 3. App companion URL
+
+Because the mux routes companion paths at the **root level** (no `/companion`
+prefix), the Companion URL in the app is the **same as your Navidrome URL**:
+
+```
+https://music.your-domain.com
+```
+
+> **Do NOT** append `/companion` — the mux routes `/health` and `/api/songs`
+> directly; adding a prefix will route those requests to Navidrome instead,
+> causing 405 errors on delete/download.
+
+---
+
 ## 7. Configure the Melodize app
 
 In the app: **Settings → Melodize Companion**
 
-| Field | Value |
-|-------|-------|
-| Companion URL | `https://music.your-domain.com/companion` (no trailing slash) |
-| API Key | The key you generated in Step 2 |
+| Proxy option | Companion URL |
+|---|---|
+| Option A / B (sub-path `/companion/`) | `https://music.your-domain.com/companion` |
+| Option C Caddy (sub-path) | `https://music.your-domain.com/companion` |
+| Option C Caddy (subdomain) | `https://companion.your-domain.com` |
+| Option D (direct port) | `http://YOUR_SERVER_IP:8765` |
+| **Option E (SafeLine mux)** | `https://music.your-domain.com` (same as Navidrome URL) |
+
+Also set the **API Key** to the value generated in Step 2.
 
 Tap the refresh icon next to the status indicator. It should turn green and
 show **"Server management available"**.
@@ -313,10 +409,11 @@ For Deezer FLAC downloads, also configure your ARL in **Settings → Deezer → 
 
 ## 8. Verify the installation
 
-From any machine:
+Replace `BASE_URL` with your companion URL from the table in Section 7
+(e.g. `https://music.your-domain.com/companion` or `https://music.your-domain.com`).
 
 ```bash
-curl https://music.your-domain.com/companion/health
+curl $BASE_URL/health
 # Expected: {"status": "ok", "version": "1.1.0"}
 ```
 
@@ -324,12 +421,12 @@ Test authentication:
 
 ```bash
 # Should succeed
-curl -X DELETE https://music.your-domain.com/companion/api/songs/nonexistent \
+curl -X DELETE $BASE_URL/api/songs/nonexistent \
   -H "X-API-Key: YOUR_KEY"
 # Expected: {"error": "song not found in database"}
 
 # Should be rejected
-curl -X DELETE https://music.your-domain.com/companion/api/songs/nonexistent \
+curl -X DELETE $BASE_URL/api/songs/nonexistent \
   -H "X-API-Key: wrongkey"
 # Expected: {"error": "invalid or missing API key"}
 ```
@@ -405,13 +502,25 @@ permission on `music_dir`:
 chown -R melodize:melodize /opt/navidrome/music
 ```
 
+### Delete / download returns "405 Method Not Allowed"
+
+The companion URL has a wrong path prefix. Navidrome returns 302→200 for
+unknown GETs (which fools the health check), but rejects DELETE/POST with 405.
+
+**Fix:** check the Companion URL in Settings matches the table in Section 7.
+For SafeLine (Option E) and dedicated subdomains, the URL must NOT include
+a `/companion` suffix. Remove it.
+
 ### App shows "Cannot reach companion"
 
-1. Check the companion is running: `systemctl status melodize-companion`
-2. Verify the URL with curl from another device (see Section 8)
-3. Check for typo in the URL — no trailing slash, correct path prefix
+1. Check companion running: `systemctl status melodize-companion`
+2. Verify URL with curl (see Section 8) — health endpoint must return `{"status":"ok"}` not HTML
+3. Check for typo in URL — no trailing slash, correct path prefix per Section 7
 4. If using Nginx Proxy Manager, run `nginx -t` on the NPM host to confirm
    the custom config loaded without errors
+5. If the status indicator was green but delete/download still failed: update
+   the app to v1.7.8+ which validates the health response body instead of
+   just checking the HTTP status code
 
 ### Song reappears after deletion
 

@@ -23,9 +23,11 @@ void main() {
     JustAudioMediaKit.ensureInitialized();
   }
 
-  // Transparent status bar so the camera cutout area blends with app content
-  // instead of showing a solid system-bar color.
+  // Edge-to-edge: content renders behind status bar and nav bar so the camera
+  // cutout area is filled with app content rather than a solid system-bar color.
+  // SafeArea widgets throughout the app handle the inset padding automatically.
   if (!Platform.isLinux) {
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light,
