@@ -48,7 +48,7 @@ class QueueScreen extends ConsumerWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+            padding: const EdgeInsets.fromLTRB(20, 0, 8, 12),
             child: Row(
               children: [
                 Text('Queue',
@@ -60,6 +60,12 @@ class QueueScreen extends ConsumerWidget {
                 Text('$queueLength songs',
                     style: TextStyle(
                         color: scheme.onSurfaceVariant, fontSize: 13)),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, size: 20),
+                  onPressed: () => Navigator.pop(context),
+                  visualDensity: VisualDensity.compact,
+                ),
               ],
             ),
           ),

@@ -212,7 +212,12 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      barrierColor: Colors.transparent,
+      // enableDrag: false prevents the sheet drag-to-dismiss gesture from
+      // conflicting with (a) the ReorderableListView drag-to-reorder and
+      // (b) the NowPlayingScreen's player-close drag gesture.
+      // A light barrier lets the user tap outside to dismiss instead.
+      enableDrag: false,
+      barrierColor: Colors.black12,
       builder: (_) => const RepaintBoundary(child: QueueScreen()),
     );
   }
@@ -223,9 +228,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
 
     showModalBottomSheet(
       context: context,
-      // Transparent barrier removes the full-screen black54 fade compositing
-      // that was causing the dismiss animation to stutter.
-      barrierColor: Colors.transparent,
+      enableDrag: false,
+      barrierColor: Colors.black12,
       builder: (_) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
