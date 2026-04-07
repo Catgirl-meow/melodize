@@ -173,12 +173,13 @@ class _MainShellState extends ConsumerState<MainShell>
         : null; // use theme default
 
     final scaffold = Scaffold(
-      // extendBody + extendBodyBehindAppBar: body fills the entire screen
-      // including behind the status bar and system nav bar.  The body's first
-      // child (ColoredBox) provides the surface fill so the MaterialApp's
-      // black root never bleeds through, even on AMOLED.
-      extendBody: true,
-      extendBodyBehindAppBar: true,
+      // transparent scaffold: the area ABOVE the body (status bar / camera
+      // cutout) shows the Flutter engine's black background, which looks
+      // seamless on dark AMOLED devices.  The body's ColoredBox fills the
+      // content area (below the status bar) with scheme.surface.
+      // extendBody is only active in floating-dock mode so that in classic
+      // mode the mini player at bottom:0 sits correctly above the nav bar.
+      extendBody: floatingNav,
       backgroundColor: Colors.transparent,
       bottomNavigationBar: floatingNav
           ? null
@@ -215,18 +216,22 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
       body: Stack(
         children: [
-          // Surface fill — replaces scaffold backgroundColor so the body can
-          // be transparent (needed for edgeToEdge status bar) without the
-          // MaterialApp black root bleeding through on AMOLED.
+          // Surface fill — body starts below status bar (no extendBodyBehindAppBar)
+          // so this ColoredBox covers exactly the content area.  The status bar
+          // area above shows through to the black Flutter root = transparent look.
           ColoredBox(color: scheme.surface, child: const SizedBox.expand()),
 
-          // Main content — bottom padding accounts for both the floating dock
-          // (when active) AND the mini player so the last item is always
-          // reachable.  Classic dock mode only needs mini-player clearance.
-          Padding(
-            padding: EdgeInsets.only(
-              bottom: (floatingNav ? dockBodyPad : 0.0) +
-                  (hasSong ? 72.0 : 0.0),
+          // Content fills the full body with no shell-level bottom padding so
+          // the dock and mini player overlay actual content (giving the
+          // frosted-glass effect).  MediaQuery injection tells child scroll
+          // views how much bottom clearance to reserve via SafeArea / ListView
+          // default padding so the last item is always scrollable above the dock.
+          MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              padding: MediaQuery.of(context).padding.copyWith(
+                bottom: (floatingNav ? dockBodyPad : 0.0) +
+                    (hasSong ? 72.0 : 0.0),
+              ),
             ),
             child: IndexedStack(
               index: _selectedIndex,
