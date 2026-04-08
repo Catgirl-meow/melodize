@@ -20,6 +20,9 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
   if (defaultTargetPlatform == TargetPlatform.linux) {
+    // prefetchPlaylist: mpv starts buffering the next track before the current
+    // one ends, giving seamless gapless transitions between songs.
+    JustAudioMediaKit.prefetchPlaylist = true;
     JustAudioMediaKit.ensureInitialized();
   }
 
@@ -59,6 +62,17 @@ void main() {
   });
 }
 
+// Light spring physics for all scroll views — gives a satisfying elastic
+// overscroll on desktop (no bounce on mobile; ClampingScrollPhysics is kept
+// there via the platform override).
+class _AppScrollBehavior extends ScrollBehavior {
+  const _AppScrollBehavior();
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) =>
+      const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
+}
+
 class MelodizeApp extends ConsumerWidget {
   const MelodizeApp({super.key});
 
@@ -72,6 +86,7 @@ class MelodizeApp extends ConsumerWidget {
           theme: AppTheme.light(lightScheme),
           darkTheme: AppTheme.dark(darkScheme),
           themeMode: ThemeMode.dark,
+          scrollBehavior: const _AppScrollBehavior(),
           home: const _StartupRouter(),
         );
       },

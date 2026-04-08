@@ -171,7 +171,7 @@ final sequenceStateStreamProvider = StreamProvider<SequenceState?>((ref) {
 final shuffleModeStreamProvider = StreamProvider<bool>((ref) {
   final handler = ref.watch(audioHandlerNotifierProvider);
   if (handler == null) return Stream.value(false);
-  return handler.player.shuffleModeEnabledStream;
+  return handler.shuffleStream;
 });
 
 final loopModeStreamProvider = StreamProvider<LoopMode>((ref) {
@@ -683,12 +683,14 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
     _queue.removeWhere((t) => t.song.id == songId);
     try {
       final row = await _db.getSongById(songId);
+      // Update DB before deleting the file so that if file deletion fails,
+      // the app won't attempt to play a track that no longer exists on disk.
+      await _db.unmarkDownloaded(songId);
+      await _db.deleteDownload(songId);
       if (row?.localPath != null) {
         final file = File(row!.localPath!);
         if (await file.exists()) await file.delete();
       }
-      await _db.unmarkDownloaded(songId);
-      await _db.deleteDownload(songId);
     } catch (_) {}
     final updated = Map<String, DownloadItem>.from(state);
     updated.remove(songId);

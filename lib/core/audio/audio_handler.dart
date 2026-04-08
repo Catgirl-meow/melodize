@@ -9,6 +9,21 @@ import '../api/subsonic_client.dart';
 import '../linux/linux_mpris.dart';
 
 // ---------------------------------------------------------------------------
+// Linux shuffle note:
+//
+// just_audio_media_kit does not implement setShuffleOrder, so just_audio's
+// internal shuffle indices and mpv's independently-generated shuffle order
+// diverge the moment setShuffleModeEnabled(true) is called.  Result:
+// sequenceState.currentSource.tag (and thus cover art / song title) reflects
+// a different song than what mpv is actually decoding.
+//
+// Fix: on Linux we never call player.setShuffleModeEnabled.  Instead we
+// manage shuffle by physically reordering the ConcatenatingAudioSource
+// (setAudioSource with a re-built playlist).  A separate StreamController
+// carries the shuffle-on/off state so the UI still reflects it correctly.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // MelodizeAudioHandler
 //
 // Extends BaseAudioHandler so that audio_service can:
@@ -70,6 +85,17 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   final _shuffleHistory = <int>[];  // original-sequence indices
   int? _lastHistoryIndex;
   bool _seekingBack = false;
+
+  // Linux-only manual shuffle state (see file-top comment).
+  bool _linuxShuffled = false;
+  List<Song> _preShuffleOrder = [];   // queue order captured before shuffle
+  final _linuxShuffleCtrl = StreamController<bool>.broadcast();
+
+  /// Shuffle-mode stream.  On Linux this is our own controller; on other
+  /// platforms it forwards just_audio's native stream.
+  Stream<bool> get shuffleStream => Platform.isLinux
+      ? _linuxShuffleCtrl.stream
+      : player.shuffleModeEnabledStream;
 
   // ---------------------------------------------------------------------------
   // MediaSession sync — keeps audio_service's playbackState + mediaItem current
@@ -200,12 +226,19 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       // sequenceState to report the wrong song (wrong title/cover).
       // Load the full queue upfront instead — desktop doesn't have the
       // platform-channel latency that makes this slow on mobile.
+      //
+      // preload: true (default) tells mpv to open the audio device and start
+      // buffering while setAudioSource awaits, so play() produces audio with
+      // minimal delay instead of waiting for PipeWire to initialize on play().
+      _linuxShuffled = false;
+      _preShuffleOrder = [];
+      _linuxShuffleCtrl.add(false);
       _playlistSource = ConcatenatingAudioSource(
         children: songs.map(_songToSource).toList(),
         useLazyPreparation: true,
       );
       try {
-        await player.setAudioSource(_playlistSource, initialIndex: idx, preload: false);
+        await player.setAudioSource(_playlistSource, initialIndex: idx);
         await player.play();
       } catch (e) {
         debugPrint('loadQueue error: $e');
@@ -308,17 +341,77 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   Future<void> skipToIndex(int index) =>
       player.seek(Duration.zero, index: index);
 
-  Future<void> toggleShuffle() {
+  Future<void> toggleShuffle() async {
+    if (Platform.isLinux) {
+      return _toggleShuffleLinux();
+    }
     if (player.shuffleModeEnabled) {
       // Turning shuffle off — clear history so back works normally.
       _shuffleHistory.clear();
       _lastHistoryIndex = null;
     }
-    return player.setShuffleModeEnabled(!player.shuffleModeEnabled);
+    await player.setShuffleModeEnabled(!player.shuffleModeEnabled);
+  }
+
+  // Rebuilds the ConcatenatingAudioSource in the desired order so that both
+  // just_audio and mpv always agree on what is playing — bypassing mpv's
+  // native shuffle whose order diverges from just_audio's shuffleIndices.
+  Future<void> _toggleShuffleLinux() async {
+    final song = currentSong;
+    final pos = player.position;
+
+    List<Song> orderedSongs;
+
+    if (_linuxShuffled) {
+      // Restore the pre-shuffle order.
+      _linuxShuffled = false;
+      orderedSongs = _preShuffleOrder;
+      _preShuffleOrder = [];
+    } else {
+      // Snapshot current queue order, then shuffle with current song first.
+      _linuxShuffled = true;
+      final seqSongs = player.sequenceState?.effectiveSequence
+              .map((s) => s.tag)
+              .whereType<Song>()
+              .toList() ??
+          [];
+      _preShuffleOrder = seqSongs;
+      orderedSongs = List<Song>.from(seqSongs);
+      if (song != null) {
+        orderedSongs.removeWhere((s) => s.id == song.id);
+        orderedSongs.shuffle();
+        orderedSongs.insert(0, song);
+      } else {
+        orderedSongs.shuffle();
+      }
+    }
+
+    final startIndex = orderedSongs.indexWhere((s) => s.id == song?.id);
+    _playlistSource = ConcatenatingAudioSource(
+      children: orderedSongs.map(_songToSource).toList(),
+      useLazyPreparation: true,
+    );
+    try {
+      // preload: false keeps the gap short — we seek+play immediately after.
+      await player.setAudioSource(_playlistSource,
+          initialIndex: startIndex >= 0 ? startIndex : 0,
+          preload: false);
+      await player.seek(pos);
+      await player.play();
+    } catch (e) {
+      debugPrint('toggleShuffle error: $e');
+    }
+    _linuxShuffleCtrl.add(_linuxShuffled);
   }
 
   Future<void> resetPlaybackModes() async {
-    await player.setShuffleModeEnabled(false);
+    if (Platform.isLinux) {
+      _linuxShuffled = false;
+      _preShuffleOrder = [];
+      _linuxShuffleCtrl.add(false);
+    } else {
+      await player.setShuffleModeEnabled(false);
+    }
     await player.setLoopMode(LoopMode.off);
   }
 
@@ -462,6 +555,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     if (Platform.isLinux) {
       HardwareKeyboard.instance.removeHandler(_handleMediaKey);
       _mpris?.dispose();
+      _linuxShuffleCtrl.close();
     }
     _sleepTimer?.cancel();
     _historyController.close();
