@@ -7,10 +7,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
-import '../../core/utils/platform_dirs.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
-import '../../shared/utils/snack.dart';
+import '../../shared/utils/song_actions.dart';
 import 'queue_screen.dart';
 
 // ---------------------------------------------------------------------------
@@ -37,6 +36,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
   Timer? _sleepCountdown;
   // ValueNotifier so only _BottomActions rebuilds each tick — not the whole screen
   final _sleepNotifier = ValueNotifier<Duration?>(null);
+  // True while a bottom sheet (queue / sleep timer) is open.
+  // The NowPlayingScreen's GestureDetector would otherwise compete in the
+  // gesture arena with the sheet's drag-to-dismiss, causing stutter.
+  bool _sheetOpen = false;
 
   @override
   void dispose() {
@@ -47,20 +50,20 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
   }
 
   void _onVerticalDragStart(DragStartDetails _) {
-    if (_currentPage != 0) return;
+    if (_currentPage != 0 || _sheetOpen) return;
     // Stop any in-progress open/close animation so drag takes over immediately.
     widget.controller.stop();
   }
 
   void _onVerticalDragUpdate(DragUpdateDetails details) {
-    if (_currentPage != 0) return;
+    if (_currentPage != 0 || _sheetOpen) return;
     final screenH = MediaQuery.of(context).size.height;
     // Drag down (positive dy) decreases controller value toward 0 (off-screen).
     widget.controller.value -= details.delta.dy / screenH;
   }
 
   void _onVerticalDragEnd(DragEndDetails details) {
-    if (_currentPage != 0) return;
+    if (_currentPage != 0 || _sheetOpen) return;
     final vel = details.velocity.pixelsPerSecond.dy;
     if (widget.controller.value < 0.5 || vel > 600) {
       widget.onClose();
@@ -209,6 +212,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
   }
 
   void _openQueue(BuildContext context) {
+    setState(() => _sheetOpen = true);
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -218,13 +222,16 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
       // is true by default, barrier responds to taps even when invisible).
       barrierColor: Colors.transparent,
       builder: (_) => const RepaintBoundary(child: QueueScreen()),
-    );
+    ).whenComplete(() {
+      if (mounted) setState(() => _sheetOpen = false);
+    });
   }
 
   void _showSleepTimerDialog(BuildContext context) {
     final handler = ref.read(audioHandlerNotifierProvider);
     if (handler == null) return;
 
+    setState(() => _sheetOpen = true);
     showModalBottomSheet(
       context: context,
       barrierColor: Colors.transparent,
@@ -263,7 +270,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
           ],
         ),
       ),
-    );
+    ).whenComplete(() {
+      if (mounted) setState(() => _sheetOpen = false);
+    });
   }
 
   void _startSleepCountdown(Duration initial) {
@@ -346,13 +355,7 @@ class _TopBar extends ConsumerWidget {
                 title: const Text('Download'),
                 onTap: () async {
                   Navigator.pop(context);
-                  final dir = await getAppStorageDirectory();
-                  final prefs = ref.read(preferencesNotifierProvider);
-                  final path =
-                      '${dir.path}/melodize_downloads/${song.id}.${song.suffix ?? 'mp3'}';
-                  ref
-                      .read(downloadNotifierProvider.notifier)
-                      .download(song, path, quality: prefs.downloadQuality);
+                  await startLocalDownload(ref, song);
                 },
               ),
             if (isDownloaded)
@@ -370,7 +373,7 @@ class _TopBar extends ConsumerWidget {
                     style: TextStyle(color: scheme.error)),
                 onTap: () {
                   Navigator.pop(context);
-                  _confirmAndDelete(context, ref);
+                  confirmAndDeleteSong(context, ref, song);
                 },
               ),
           ],
@@ -379,43 +382,6 @@ class _TopBar extends ConsumerWidget {
     );
   }
 
-  void _confirmAndDelete(BuildContext context, WidgetRef ref) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Delete from server?'),
-        content: Text(
-          '"${song.title}" will be permanently deleted from the server. '
-          'This cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              try {
-                await deleteSongFromServer(ref, song);
-                if (context.mounted) {
-                  showStyledSnack(context, '"${song.title}" deleted');
-                }
-              } catch (e) {
-                if (context.mounted) {
-                  showStyledSnack(context, 'Failed to delete: $e', isError: true);
-                }
-              }
-            },
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.error,
-            ),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 // ---------------------------------------------------------------------------

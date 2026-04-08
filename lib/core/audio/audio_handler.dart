@@ -97,6 +97,12 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       ? _linuxShuffleCtrl.stream
       : player.shuffleModeEnabledStream;
 
+  // When true, currentSongStream holds its last non-null value instead of
+  // emitting null.  Set during setAudioSource calls on Linux so the
+  // now-playing screen doesn't flash/disappear while the source is reloading.
+  bool _holdSongNull = false;
+  Song? _lastSong;
+
   // ---------------------------------------------------------------------------
   // MediaSession sync — keeps audio_service's playbackState + mediaItem current
   // so the notification, lock screen, and Bluetooth display show correct info.
@@ -208,8 +214,14 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   Song? get currentSong =>
       player.sequenceState?.currentSource?.tag as Song?;
 
-  Stream<Song?> get currentSongStream => player.sequenceStateStream
-      .map((s) => s?.currentSource?.tag as Song?);
+  Stream<Song?> get currentSongStream => player.sequenceStateStream.map((s) {
+        final song = s?.currentSource?.tag as Song?;
+        if (song != null) _lastSong = song;
+        // During setAudioSource reload (shuffle toggle), suppress the transient
+        // null so the now-playing screen doesn't blink away.
+        if (song == null && _holdSongNull) return _lastSong;
+        return song;
+      });
 
   // ---------------------------------------------------------------------------
   // Queue management
@@ -391,15 +403,22 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       children: orderedSongs.map(_songToSource).toList(),
       useLazyPreparation: true,
     );
+    _holdSongNull = true;
     try {
-      // preload: false keeps the gap short — we seek+play immediately after.
-      await player.setAudioSource(_playlistSource,
-          initialIndex: startIndex >= 0 ? startIndex : 0,
-          preload: false);
-      await player.seek(pos);
+      // initialPosition tells just_audio to seek inside setAudioSource so
+      // mpv is already at the right position before play() is called.
+      // Using preload: true (default) ensures the audio device is open and
+      // the seek has completed by the time play() runs — no more "no audio".
+      await player.setAudioSource(
+        _playlistSource,
+        initialIndex: startIndex >= 0 ? startIndex : 0,
+        initialPosition: pos,
+      );
       await player.play();
     } catch (e) {
       debugPrint('toggleShuffle error: $e');
+    } finally {
+      _holdSongNull = false;
     }
     _linuxShuffleCtrl.add(_linuxShuffled);
   }
