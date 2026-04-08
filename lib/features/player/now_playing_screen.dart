@@ -102,9 +102,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
     // Material(transparency) provides the Material ancestor Slider needs.
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onVerticalDragStart: _onVerticalDragStart,
-      onVerticalDragUpdate: _onVerticalDragUpdate,
-      onVerticalDragEnd: _onVerticalDragEnd,
+      onVerticalDragStart: _sheetOpen ? null : _onVerticalDragStart,
+      onVerticalDragUpdate: _sheetOpen ? null : _onVerticalDragUpdate,
+      onVerticalDragEnd: _sheetOpen ? null : _onVerticalDragEnd,
       child: AnnotatedRegion<SystemUiOverlayStyle>(
         value: SystemUiOverlayStyle.light,
         child: Material(

@@ -398,6 +398,10 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       }
     }
 
+    // Emit the new shuffle state immediately so the button lights up at once,
+    // before the async playlist rebuild starts.
+    _linuxShuffleCtrl.add(_linuxShuffled);
+
     final startIndex = orderedSongs.indexWhere((s) => s.id == song?.id);
     _playlistSource = ConcatenatingAudioSource(
       children: orderedSongs.map(_songToSource).toList(),
@@ -405,22 +409,28 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     );
     _holdSongNull = true;
     try {
-      // initialPosition tells just_audio to seek inside setAudioSource so
-      // mpv is already at the right position before play() is called.
-      // Using preload: true (default) ensures the audio device is open and
-      // the seek has completed by the time play() runs — no more "no audio".
+      // Pause first so mediakit_player calls _player.open(play:false).
+      // If play:true, mpv starts audio immediately at position 0 and the seek
+      // fires ~200 ms later via the unawaited duration-listener path — the user
+      // hears the start of the track before the seek lands.
+      // With play:false we stay silent, call setAudioSource (which awaits the
+      // loadCompleter and therefore the duration event), then do an explicit
+      // player.seek() which mediakit_player awaits properly when duration is
+      // already known, and finally play() from the correct position.
+      await player.pause();
       await player.setAudioSource(
         _playlistSource,
         initialIndex: startIndex >= 0 ? startIndex : 0,
-        initialPosition: pos,
       );
+      // Duration is now known; seek() goes through the synchronous path in
+      // mediakit_player (not the deferred _setPosition path).
+      await player.seek(pos);
       await player.play();
     } catch (e) {
       debugPrint('toggleShuffle error: $e');
     } finally {
       _holdSongNull = false;
     }
-    _linuxShuffleCtrl.add(_linuxShuffled);
   }
 
   Future<void> resetPlaybackModes() async {
