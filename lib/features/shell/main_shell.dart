@@ -212,10 +212,18 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
       body: Stack(
         children: [
-          // Surface fill — covers the full body (including status bar area, since
-          // extendBodyBehindAppBar is true) with scheme.surface so the camera
-          // cutout / notification area blends seamlessly with the rest of the app.
-          ColoredBox(color: scheme.surface, child: const SizedBox.expand()),
+          // Surface fill — starts BELOW the status bar insets so the camera
+          // cutout / notification area is left unpainted.  That region then
+          // shows the Android window background (black in dark mode, white in
+          // light), which matches the phone frame and looks transparent on
+          // OriginOS 6.  NowPlayingScreen's full-bleed gradient covers this
+          // area when the player is open.  On Linux viewPadding.top == 0 so
+          // the box still fills the full body on desktop.
+          Positioned(
+            top: MediaQuery.of(context).viewPadding.top,
+            left: 0, right: 0, bottom: 0,
+            child: ColoredBox(color: scheme.surface, child: const SizedBox.expand()),
+          ),
 
           // Content fills the full body with no shell-level bottom padding so
           // the dock and mini player overlay actual content (giving the

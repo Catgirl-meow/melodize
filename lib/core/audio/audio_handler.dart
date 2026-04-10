@@ -377,7 +377,6 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   // native shuffle whose order diverges from just_audio's shuffleIndices.
   Future<void> _toggleShuffleLinux() async {
     final song = currentSong;
-    final pos = player.position;
 
     List<Song> orderedSongs;
 
@@ -405,44 +404,39 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       }
     }
 
-    // Emit the new shuffle state immediately so the button lights up at once,
-    // before the async playlist rebuild starts.
+    // Emit the new shuffle state immediately so the button lights up at once.
     _linuxShuffleCtrl.add(_linuxShuffled);
 
-    final startIndex = orderedSongs.indexWhere((s) => s.id == song?.id);
-    _playlistSource = ConcatenatingAudioSource(
-      children: orderedSongs.map(_songToSource).toList(),
-      useLazyPreparation: true,
-    );
+    // Reorder the ConcatenatingAudioSource in-place instead of calling
+    // setAudioSource with a new source.  setAudioSource triggers
+    // _player.open() in mediakit_player, which reloads the current track from
+    // scratch: the audio goes silent for however long it takes mpv to re-open
+    // and buffer the URL (5-10 s on transcoded HTTP streams with no Content-Length).
+    //
+    // In-place manipulation (removeRange / insertAll) uses mpv's add/remove/move
+    // playlist commands which never touch the currently-playing track — no pause,
+    // no reload, no silence, no seek needed.
+    final currentIdx = player.currentIndex ?? 0;
     _holdSongNull = true;
     try {
-      // Pause first so mediakit_player calls _player.open(play:false).
-      // If play:true, mpv starts audio immediately at position 0 and the seek
-      // fires ~200 ms later via the unawaited duration-listener path — the user
-      // hears the start of the track before the seek lands.
-      // With play:false we stay silent, call setAudioSource (which awaits the
-      // loadCompleter and therefore the duration event), then do an explicit
-      // player.seek() which mediakit_player awaits properly when duration is
-      // already known, and finally play() from the correct position.
-      await player.pause();
-      await player.setAudioSource(
-        _playlistSource,
-        initialIndex: startIndex >= 0 ? startIndex : 0,
-      );
-      // setAudioSource() completes when mediakit_player's _loadCompleter fires
-      // (buffering stops), but NOT necessarily when mpv knows the duration.
-      // mediakit_player.seek() checks _player.state.duration.inSeconds > 0;
-      // if zero, it defers the seek via _setPosition. If play() runs first,
-      // mpv starts audio at position 0 before the deferred seek fires.
-      // Waiting for a non-zero durationStream guarantees seek() uses the
-      // direct _player.seek() path, so play() always resumes at the right pos.
-      if ((player.duration ?? Duration.zero) <= Duration.zero) {
-        await player.durationStream
-            .firstWhere((d) => d != null && d > Duration.zero)
-            .timeout(const Duration(seconds: 8), onTimeout: () => null);
+      // 1. Remove songs after current index.
+      if (currentIdx < _playlistSource.length - 1) {
+        await _playlistSource.removeRange(currentIdx + 1, _playlistSource.length);
       }
-      await player.seek(pos);
-      await player.play();
+      // 2. Remove songs before current index (each removal shifts current by -1
+      //    so we always remove from index 0 until none remain before current).
+      if (currentIdx > 0) {
+        await _playlistSource.removeRange(0, currentIdx);
+      }
+      // _playlistSource now contains only the current song at index 0.
+
+      // 3. Insert remaining songs in the desired order after current.
+      if (orderedSongs.length > 1) {
+        await _playlistSource.insertAll(
+          1,
+          orderedSongs.sublist(1).map(_songToSource).toList(),
+        );
+      }
     } catch (e) {
       debugPrint('toggleShuffle error: $e');
     } finally {

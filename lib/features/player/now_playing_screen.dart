@@ -36,34 +36,36 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
   Timer? _sleepCountdown;
   // ValueNotifier so only _BottomActions rebuilds each tick — not the whole screen
   final _sleepNotifier = ValueNotifier<Duration?>(null);
-  // True while a bottom sheet (queue / sleep timer) is open.
-  // The NowPlayingScreen's GestureDetector would otherwise compete in the
-  // gesture arena with the sheet's drag-to-dismiss, causing stutter.
-  bool _sheetOpen = false;
+  // ValueNotifier instead of bool+setState so toggling it only rebuilds the
+  // GestureDetector wrapper (via ValueListenableBuilder), not the entire screen.
+  // This prevents the full NowPlayingScreen rebuild that was causing a visible
+  // stutter when the queue or sleep sheet finished its close animation.
+  final _sheetOpen = ValueNotifier<bool>(false);
 
   @override
   void dispose() {
     _pageController.dispose();
     _sleepCountdown?.cancel();
     _sleepNotifier.dispose();
+    _sheetOpen.dispose();
     super.dispose();
   }
 
   void _onVerticalDragStart(DragStartDetails _) {
-    if (_currentPage != 0 || _sheetOpen) return;
+    if (_currentPage != 0 || _sheetOpen.value) return;
     // Stop any in-progress open/close animation so drag takes over immediately.
     widget.controller.stop();
   }
 
   void _onVerticalDragUpdate(DragUpdateDetails details) {
-    if (_currentPage != 0 || _sheetOpen) return;
+    if (_currentPage != 0 || _sheetOpen.value) return;
     final screenH = MediaQuery.of(context).size.height;
     // Drag down (positive dy) decreases controller value toward 0 (off-screen).
     widget.controller.value -= details.delta.dy / screenH;
   }
 
   void _onVerticalDragEnd(DragEndDetails details) {
-    if (_currentPage != 0 || _sheetOpen) return;
+    if (_currentPage != 0 || _sheetOpen.value) return;
     final vel = details.velocity.pixelsPerSecond.dy;
     if (widget.controller.value < 0.5 || vel > 600) {
       widget.onClose();
@@ -99,12 +101,19 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
     final bgFade = Color.lerp(dominantColor, Colors.black, 0.72)!;
     final bgGlow = dominantColor.withValues(alpha: 0.42);
 
-    // Material(transparency) provides the Material ancestor Slider needs.
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onVerticalDragStart: _sheetOpen ? null : _onVerticalDragStart,
-      onVerticalDragUpdate: _sheetOpen ? null : _onVerticalDragUpdate,
-      onVerticalDragEnd: _sheetOpen ? null : _onVerticalDragEnd,
+    // ValueListenableBuilder rebuilds only the GestureDetector when _sheetOpen
+    // changes — the heavy child (gradient, art, controls) is passed as the
+    // static `child` parameter and is NOT re-built on sheet open/close.
+    return ValueListenableBuilder<bool>(
+      valueListenable: _sheetOpen,
+      builder: (_, sheetOpen, child) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onVerticalDragStart: sheetOpen ? null : _onVerticalDragStart,
+        onVerticalDragUpdate: sheetOpen ? null : _onVerticalDragUpdate,
+        onVerticalDragEnd: sheetOpen ? null : _onVerticalDragEnd,
+        child: child!,
+      ),
+      // Material(transparency) provides the Material ancestor Slider needs.
       child: AnnotatedRegion<SystemUiOverlayStyle>(
         value: SystemUiOverlayStyle.light,
         child: Material(
@@ -212,18 +221,15 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
   }
 
   void _openQueue(BuildContext context) {
-    setState(() => _sheetOpen = true);
+    _sheetOpen.value = true;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      // Transparent barrier avoids the full-screen compositing fade that caused
-      // dismiss-animation stutter; tap-outside still dismisses (isDismissible
-      // is true by default, barrier responds to taps even when invisible).
       barrierColor: Colors.transparent,
       builder: (_) => const RepaintBoundary(child: QueueScreen()),
     ).whenComplete(() {
-      if (mounted) setState(() => _sheetOpen = false);
+      if (mounted) _sheetOpen.value = false;
     });
   }
 
@@ -231,47 +237,55 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
     final handler = ref.read(audioHandlerNotifierProvider);
     if (handler == null) return;
 
-    setState(() => _sheetOpen = true);
+    _sheetOpen.value = true;
     showModalBottomSheet(
       context: context,
       barrierColor: Colors.transparent,
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text('Sleep Timer',
-                  style: Theme.of(context).textTheme.titleMedium),
+      builder: (_) {
+        final scheme = Theme.of(context).colorScheme;
+        return Material(
+          color: scheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          clipBehavior: Clip.hardEdge,
+          child: SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text('Sleep Timer',
+                      style: Theme.of(context).textTheme.titleMedium),
+                ),
+                if (handler.hasSleepTimer)
+                  ListTile(
+                    leading:
+                        const Icon(Icons.timer_off_rounded, color: Colors.red),
+                    title: const Text('Cancel timer'),
+                    onTap: () {
+                      handler.cancelSleepTimer();
+                      _sleepCountdown?.cancel();
+                      Navigator.pop(context);
+                      _sleepNotifier.value = null;
+                    },
+                  ),
+                for (final minutes in [15, 30, 45, 60])
+                  ListTile(
+                    leading: const Icon(Icons.bedtime_rounded),
+                    title: Text('$minutes minutes'),
+                    onTap: () {
+                      final dur = Duration(minutes: minutes);
+                      handler.setSleepTimer(dur);
+                      Navigator.pop(context);
+                      _startSleepCountdown(dur);
+                    },
+                  ),
+              ],
             ),
-            if (handler.hasSleepTimer)
-              ListTile(
-                leading:
-                    const Icon(Icons.timer_off_rounded, color: Colors.red),
-                title: const Text('Cancel timer'),
-                onTap: () {
-                  handler.cancelSleepTimer();
-                  _sleepCountdown?.cancel();
-                  Navigator.pop(context);
-                  _sleepNotifier.value = null;
-                },
-              ),
-            for (final minutes in [15, 30, 45, 60])
-              ListTile(
-                leading: const Icon(Icons.bedtime_rounded),
-                title: Text('$minutes minutes'),
-                onTap: () {
-                  final dur = Duration(minutes: minutes);
-                  handler.setSleepTimer(dur);
-                  Navigator.pop(context);
-                  _startSleepCountdown(dur);
-                },
-              ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     ).whenComplete(() {
-      if (mounted) setState(() => _sheetOpen = false);
+      if (mounted) _sheetOpen.value = false;
     });
   }
 

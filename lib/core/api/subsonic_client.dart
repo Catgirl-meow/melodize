@@ -212,10 +212,10 @@ class SubsonicClient {
   }
 
   // --- Search ---
-  Future<SearchResults> search(String query) async {
+  Future<SearchResults> search(String query, {int songCount = 30}) async {
     final resp = await _get('search3', {
       'query': query,
-      'songCount': 30,
+      'songCount': songCount,
       'albumCount': 10,
       'artistCount': 5,
     });
