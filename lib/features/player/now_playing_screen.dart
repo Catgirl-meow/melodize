@@ -225,9 +225,12 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      enableDrag: false, // _SlideDismiss owns the drag
       backgroundColor: Colors.transparent,
       barrierColor: Colors.transparent,
-      builder: (_) => const RepaintBoundary(child: QueueScreen()),
+      builder: (_) => _SlideDismiss(
+        child: const RepaintBoundary(child: QueueScreen()),
+      ),
     ).whenComplete(() {
       if (mounted) _sheetOpen.value = false;
     });
@@ -241,9 +244,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
     showModalBottomSheet(
       context: context,
       barrierColor: Colors.transparent,
+      enableDrag: false, // _SlideDismiss owns the drag
       builder: (_) {
         final scheme = Theme.of(context).colorScheme;
-        return Material(
+        return _SlideDismiss(child: Material(
           color: scheme.surface,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           clipBehavior: Clip.hardEdge,
@@ -282,7 +286,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
               ],
             ),
           ),
-        );
+        ));
       },
     ).whenComplete(() {
       if (mounted) _sheetOpen.value = false;
@@ -305,6 +309,126 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
       }
       _sleepNotifier.value = Duration(seconds: remaining.inSeconds - 1);
     });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Drag-to-dismiss wrapper for bottom sheets.
+//
+// Owns the vertical drag gesture entirely (the modal is opened with
+// enableDrag: false so Flutter's built-in sheet drag is disabled).
+// This removes the velocity-mismatch stutter that occurs when Flutter's
+// _BottomSheet._handleDragEnd restarts its physics animation independently
+// of the ongoing pointer velocity.
+//
+// Behaviour:
+//   • Dragging down translates the sheet via Transform — zero rebuild cost.
+//   • On release, if past threshold (22 % of screen height) or fast fling
+//     (>500 px/s), animate off-screen then call Navigator.pop().
+//   • Otherwise snap back with easeOutCubic.
+//   • Works with inner scroll views: when the ListView inside QueueScreen is
+//     scrollable the gesture arena gives the ListView priority; when the list
+//     is at the top and the user pulls down, this widget wins and dismisses.
+class _SlideDismiss extends StatefulWidget {
+  final Widget child;
+  const _SlideDismiss({required this.child});
+
+  @override
+  State<_SlideDismiss> createState() => _SlideDismissState();
+}
+
+class _SlideDismissState extends State<_SlideDismiss>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  VoidCallback? _listener;
+  double _dy = 0;
+  bool _dismissing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _clearListener();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _setListener(VoidCallback fn) {
+    _clearListener();
+    _listener = fn;
+    _ctrl.addListener(fn);
+  }
+
+  void _clearListener() {
+    if (_listener != null) {
+      _ctrl.removeListener(_listener!);
+      _listener = null;
+    }
+  }
+
+  void _onUpdate(DragUpdateDetails d) {
+    if (_dismissing) return;
+    _ctrl.stop();
+    final next = _dy + d.delta.dy;
+    if (next < 0) return; // don't let user drag upward
+    setState(() => _dy = next);
+  }
+
+  void _onEnd(DragEndDetails d) {
+    if (_dismissing) return;
+    final screenH = MediaQuery.of(context).size.height;
+    final vel = d.velocity.pixelsPerSecond.dy;
+    if (_dy > screenH * 0.22 || vel > 500) {
+      _animateOut(vel);
+    } else {
+      _snapBack();
+    }
+  }
+
+  void _animateOut(double vel) {
+    _dismissing = true;
+    final screenH = MediaQuery.of(context).size.height;
+    final remaining = screenH - _dy;
+    final ms = (remaining / math.max(vel, 600) * 1000).clamp(80.0, 280.0).round();
+    final anim = Tween<double>(begin: _dy, end: screenH).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeIn),
+    );
+    _ctrl
+      ..duration = Duration(milliseconds: ms)
+      ..reset();
+    _setListener(() { if (mounted) setState(() => _dy = anim.value); });
+    _ctrl.forward().whenComplete(() {
+      _clearListener();
+      if (mounted) Navigator.of(context).pop();
+    });
+  }
+
+  void _snapBack() {
+    final startDy = _dy;
+    final anim = Tween<double>(begin: startDy, end: 0).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic),
+    );
+    _ctrl
+      ..duration = const Duration(milliseconds: 240)
+      ..reset();
+    _setListener(() { if (mounted) setState(() => _dy = anim.value); });
+    _ctrl.forward().whenComplete(_clearListener);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onVerticalDragUpdate: _onUpdate,
+      onVerticalDragEnd: _onEnd,
+      child: Transform.translate(
+        offset: Offset(0, _dy),
+        child: widget.child,
+      ),
+    );
   }
 }
 
