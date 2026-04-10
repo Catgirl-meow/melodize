@@ -275,7 +275,15 @@ class HomeScreen extends ConsumerWidget {
           },
         ),
 
-        const SliverPadding(padding: EdgeInsets.only(bottom: 16)),
+        // Bottom clearance = injected MediaQuery.padding.bottom (dock + mini
+        // player heights from main_shell) + 16 px breathing room.
+        // CustomScrollView does NOT auto-apply MediaQuery.padding (unlike
+        // ListView/GridView which extend BoxScrollView), so we read it here.
+        SliverPadding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.paddingOf(context).bottom + 16,
+          ),
+        ),
       ],
       ),
     ),

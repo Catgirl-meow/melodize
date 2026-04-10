@@ -136,6 +136,10 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     });
 
     // Update MediaSession media item when the current song changes.
+    // Also immediately broadcast playbackState with position=0 so the system
+    // player (OriginOS Island, lock screen) sees new song + correct time in
+    // one event — prevents showing "new song title, position = 2:35 (old song)"
+    // when mediaItem and playbackState update in separate microtasks.
     player.sequenceStateStream.listen((seqState) {
       final song = seqState?.currentSource?.tag as Song?;
       if (song == null) {
@@ -159,10 +163,13 @@ class MelodizeAudioHandler extends BaseAudioHandler {
             : null,
         artUri: artUri,
       ));
+      // Force position=0 alongside the new mediaItem so the system player
+      // never renders "new song + stale position from previous track."
+      _broadcastState(positionOverride: Duration.zero);
     });
   }
 
-  void _broadcastState() {
+  void _broadcastState({Duration? positionOverride}) {
     final ps = player.processingState;
     playbackState.add(PlaybackState(
       controls: [
@@ -184,7 +191,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         ProcessingState.completed => AudioProcessingState.completed,
       },
       playing: player.playing,
-      updatePosition: player.position,
+      updatePosition: positionOverride ?? player.position,
       bufferedPosition: player.bufferedPosition,
       speed: player.speed,
       queueIndex: player.currentIndex,
@@ -422,8 +429,18 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         _playlistSource,
         initialIndex: startIndex >= 0 ? startIndex : 0,
       );
-      // Duration is now known; seek() goes through the synchronous path in
-      // mediakit_player (not the deferred _setPosition path).
+      // setAudioSource() completes when mediakit_player's _loadCompleter fires
+      // (buffering stops), but NOT necessarily when mpv knows the duration.
+      // mediakit_player.seek() checks _player.state.duration.inSeconds > 0;
+      // if zero, it defers the seek via _setPosition. If play() runs first,
+      // mpv starts audio at position 0 before the deferred seek fires.
+      // Waiting for a non-zero durationStream guarantees seek() uses the
+      // direct _player.seek() path, so play() always resumes at the right pos.
+      if ((player.duration ?? Duration.zero) <= Duration.zero) {
+        await player.durationStream
+            .firstWhere((d) => d != null && d > Duration.zero)
+            .timeout(const Duration(seconds: 8), onTimeout: () => null);
+      }
       await player.seek(pos);
       await player.play();
     } catch (e) {
@@ -618,8 +635,14 @@ Future<void> connectAudioService(MelodizeAudioHandler handler) async {
       config: const AudioServiceConfig(
         androidNotificationChannelId: 'com.catgirl.melodize.channel.audio',
         androidNotificationChannelName: 'Melodize',
-        androidNotificationOngoing: true,
-        androidStopForegroundOnPause: true,
+        // androidNotificationOngoing must be false when stopForegroundOnPause
+        // is false — audio_service asserts they can't both be true (ongoing
+        // is redundant when the foreground service never stops).
+        androidNotificationOngoing: false,
+        // Keep the foreground service alive when paused — otherwise OriginOS
+        // and other aggressive-OEM ROMs kill the MediaSession after pause,
+        // causing the system player (Island, lock screen) to vanish.
+        androidStopForegroundOnPause: false,
         androidNotificationIcon: 'mipmap/ic_launcher',
       ),
     );
