@@ -226,6 +226,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
       context: context,
       isScrollControlled: true,
       enableDrag: false, // _SlideDismiss owns the drag
+      // Zero reverse duration: when _SlideDismiss calls Navigator.pop() the
+      // sheet content is already off-screen via Transform.  Without this the
+      // route still runs its ~300 ms close animation as a blank overlay (ghost).
+      sheetAnimationStyle: AnimationStyle(reverseDuration: Duration.zero),
       backgroundColor: Colors.transparent,
       barrierColor: Colors.transparent,
       builder: (_) => _SlideDismiss(
@@ -245,6 +249,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
       context: context,
       barrierColor: Colors.transparent,
       enableDrag: false, // _SlideDismiss owns the drag
+      sheetAnimationStyle: AnimationStyle(reverseDuration: Duration.zero),
       builder: (_) {
         final scheme = Theme.of(context).colorScheme;
         return _SlideDismiss(child: Material(
