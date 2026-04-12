@@ -248,6 +248,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
     showModalBottomSheet(
       context: context,
       barrierColor: Colors.transparent,
+      backgroundColor: Colors.transparent, // no route-level surface behind Transform
       enableDrag: false, // _SlideDismiss owns the drag
       sheetAnimationStyle: AnimationStyle(reverseDuration: Duration.zero),
       builder: (_) {

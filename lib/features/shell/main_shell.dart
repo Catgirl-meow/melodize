@@ -218,6 +218,31 @@ class _MainShellState extends ConsumerState<MainShell>
           // the player is open.
           ColoredBox(color: scheme.surface, child: const SizedBox.expand()),
 
+          // Camera cutout / status bar gradient — dark mode only.
+          // dynamic_color generates a surface that may be distinctly purple/
+          // teal/etc. rather than pure black.  On a black phone frame the
+          // coloured band is visible and looks wrong.  Overlaying a black →
+          // transparent gradient over the status bar height makes the area
+          // blend with the frame and read as "transparent" regardless of what
+          // the wallpaper-derived surface colour is.
+          // On Linux viewPadding.top == 0 so this is a zero-height no-op.
+          if (scheme.brightness == Brightness.dark)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: MediaQuery.of(context).viewPadding.top + 8.0,
+              child: const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.black, Colors.transparent],
+                  ),
+                ),
+              ),
+            ),
+
           // Content fills the full body with no shell-level bottom padding so
           // the dock and mini player overlay actual content (giving the
           // frosted-glass effect).  MediaQuery injection tells child scroll
