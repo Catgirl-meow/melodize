@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift/drift.dart' show Value;
-import 'package:flutter/material.dart' show Color, Size;
+import 'package:flutter/material.dart' show Color, HSLColor, Size;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:palette_generator/palette_generator.dart';
@@ -724,11 +724,31 @@ final dominantColorProvider =
       size: const Size(112, 112), // downsample before extraction — much faster
       maximumColorCount: 8,
     );
-    return palette.dominantColor?.color;
+    // Prefer intentionally-saturated swatches over the dominant (most-pixels)
+    // color, which is often the album cover's background — off-white, black, or
+    // a washed-out neutral that makes a poor accent.
+    final raw = palette.vibrantColor?.color
+        ?? palette.darkVibrantColor?.color
+        ?? palette.mutedColor?.color
+        ?? palette.dominantColor?.color;
+    if (raw == null) return null;
+    return _processAccentColor(raw);
   } catch (_) {
     return null;
   }
 });
+
+/// Clamps a raw palette color into a range that works as a UI accent:
+/// - Saturation ≥ 0.20 so it reads as a colour, not a gray.
+/// - Lightness ∈ [0.28, 0.62] so it is neither too dark to tint surfaces
+///   nor too light to support white text (dock pill, player bg, mini player).
+Color _processAccentColor(Color raw) {
+  final hsl = HSLColor.fromColor(raw);
+  return hsl
+      .withSaturation(hsl.saturation.clamp(0.20, 1.0))
+      .withLightness(hsl.lightness.clamp(0.28, 0.62))
+      .toColor();
+}
 
 // Accent color derived from the current song's album art.
 // Returns null until the color resolves, then updates all watchers.

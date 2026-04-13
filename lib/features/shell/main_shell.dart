@@ -218,20 +218,29 @@ class _MainShellState extends ConsumerState<MainShell>
           // the player is open.
           ColoredBox(color: scheme.surface, child: const SizedBox.expand()),
 
-          // Camera cutout / status bar gradient — dark mode only.
-          // dynamic_color generates a surface that may be distinctly purple/
-          // teal/etc. rather than pure black.  On a black phone frame the
-          // coloured band is visible and looks wrong.  Overlaying a black →
-          // transparent gradient over the status bar height makes the area
-          // blend with the frame and read as "transparent" regardless of what
-          // the wallpaper-derived surface colour is.
-          // On Linux viewPadding.top == 0 so this is a zero-height no-op.
+          // Camera cutout / status bar — dark mode only.
+          // Solid black covers the full viewPadding.top height (camera notch +
+          // status bar) so it matches the phone frame rather than exposing the
+          // wallpaper-derived surface colour.  A prior gradient approach left
+          // the bottom of the overlay transparent, which let the surface colour
+          // bleed through.
+          // On Linux viewPadding.top == 0 so both widgets are zero-height no-ops.
           if (scheme.brightness == Brightness.dark)
             Positioned(
               top: 0,
               left: 0,
               right: 0,
-              height: MediaQuery.of(context).viewPadding.top + 8.0,
+              height: MediaQuery.of(context).viewPadding.top,
+              child: const ColoredBox(color: Colors.black),
+            ),
+          // Short fade below the status bar to soften the hard black edge.
+          if (scheme.brightness == Brightness.dark &&
+              MediaQuery.of(context).viewPadding.top > 0)
+            Positioned(
+              top: MediaQuery.of(context).viewPadding.top,
+              left: 0,
+              right: 0,
+              height: 16.0,
               child: const DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
