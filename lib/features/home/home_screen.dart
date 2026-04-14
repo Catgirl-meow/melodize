@@ -73,10 +73,15 @@ class HomeScreen extends ConsumerWidget {
             ),
           ),
 
-        // Header
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-          sliver: SliverToBoxAdapter(
+        // Header — top pad = status bar height so greeting sits below notch
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              16,
+              MediaQuery.of(context).viewPadding.top + 16,
+              16,
+              0,
+            ),
             child: Text(
               _greeting(username),
               style: Theme.of(context)
@@ -334,7 +339,7 @@ class _Section extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 24, 8, 12),
+          padding: const EdgeInsets.fromLTRB(16, 24, 8, 12),
           child: Row(
             children: [
               Expanded(
