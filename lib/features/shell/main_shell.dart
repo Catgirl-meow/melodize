@@ -316,15 +316,20 @@ class _MainShellState extends ConsumerState<MainShell>
       ),
     );
 
-    // How far up from the screen bottom snackbars must sit to clear the
-    // mini player and dock (or classic nav bar).
-    final snackClearance = (hasSong ? 72.0 : 0.0) +
+    // Snackbars from any screen inside MainShell use the inner ScaffoldMessenger
+    // below (nearest ancestor wins). It lives inside a MediaQuery that overrides
+    // padding.bottom so Flutter's floating-snackbar placement algorithm uses the
+    // full clearance value (dock/nav + mini player + safe area) and keeps the
+    // snackbar visible above all overlays.
+    final snackBottom = (hasSong ? 72.0 : 0.0) +
         (floatingNav
             ? _kDockHeight + _kDockBottom + safeBottom
             : 62.0 + safeBottom); // 62 = classic NavigationBar height
 
-    return SnackBarClearance(
-      bottom: snackClearance,
+    return MediaQuery(
+      data: MediaQuery.of(context)
+          .copyWith(padding: MediaQuery.of(context).padding.copyWith(bottom: snackBottom)),
+      child: ScaffoldMessenger(
       child: Stack(
       children: [
         scaffold,
@@ -387,7 +392,7 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
           ),
       ],
-    ));
+      ))); // Stack / ScaffoldMessenger / MediaQuery
   }
 }
 

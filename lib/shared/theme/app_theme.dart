@@ -57,8 +57,8 @@ class AppTheme {
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: scheme.surfaceContainerHigh,
-        contentTextStyle: TextStyle(color: scheme.onSurface),
+        backgroundColor: const Color(0xFF2C2C2E),
+        contentTextStyle: const TextStyle(color: Colors.white),
         actionTextColor: scheme.primary,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
