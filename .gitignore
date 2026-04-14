@@ -49,3 +49,7 @@ app.*.map.json
 
 # Flutter generated
 .flutter-plugins
+
+# Release artifacts — uploaded to GitHub releases, not committed to repo
+*.apk
+*.tar.gz
