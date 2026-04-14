@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/navidrome_client.dart';
 import '../../core/providers.dart';
+import 'snack.dart';
 
 /// Mixin for ConsumerState subclasses that poll a companion download job.
 /// Provides [startDownloadPolling] and automatically cancels the timer on
@@ -36,17 +37,14 @@ mixin DownloadPollingMixin<T extends ConsumerStatefulWidget>
           timer.cancel();
           ref.read(subsonicClientProvider)?.startScan();
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('Added to Navidrome server — library scan started'),
-            ));
+            showStyledSnack(context,
+                'Added to Navidrome server — library scan started');
           }
         } else if (s == 'error') {
           timer.cancel();
           if (mounted) {
             final err = (status['error'] as String?) ?? 'unknown error';
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Download failed: $err')),
-            );
+            showStyledSnack(context, 'Download failed: $err', isError: true);
           }
         }
       } catch (_) {}

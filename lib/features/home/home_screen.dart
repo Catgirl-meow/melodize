@@ -6,6 +6,7 @@ import '../../core/models/album.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/utils/download_polling_mixin.dart';
+import '../../shared/utils/snack.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/offline_banner.dart';
 import '../library/album_detail_screen.dart';
@@ -515,16 +516,16 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
         deezerArl: prefs.hasDeezerArl ? prefs.deezerArl : null,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(prefs.hasDeezerArl
+      showStyledSnack(
+        context,
+        prefs.hasDeezerArl
             ? 'Downloading FLAC to Navidrome server…'
-            : 'Downloading to Navidrome server (add Deezer ARL in Settings for lossless)'),
-      ));
+            : 'Downloading to Navidrome server (add Deezer ARL in Settings for lossless)',
+      );
       startDownloadPolling(companion, jobId);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not start download: $e')));
+      showStyledSnack(context, 'Could not start download: $e', isError: true);
     }
   }
 

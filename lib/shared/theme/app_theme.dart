@@ -57,9 +57,9 @@ class AppTheme {
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: scheme.inverseSurface,
-        contentTextStyle: TextStyle(color: scheme.onInverseSurface),
-        actionTextColor: scheme.inversePrimary,
+        backgroundColor: scheme.surfaceContainerHigh,
+        contentTextStyle: TextStyle(color: scheme.onSurface),
+        actionTextColor: scheme.primary,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );

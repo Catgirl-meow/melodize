@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
 import '../../shared/theme/app_theme.dart';
+import '../../shared/utils/snack.dart';
 import '../home/home_screen.dart';
 import '../library/library_screen.dart';
 import '../search/search_screen.dart';
@@ -157,6 +158,22 @@ class _MainShellState extends ConsumerState<MainShell>
       if (!wasOnline && isNowOnline) _invalidateServerProviders();
     });
 
+    // Surface local download errors as snackbars.
+    ref.listen<Map<String, DownloadItem>>(downloadNotifierProvider,
+        (prev, next) {
+      if (prev == null) return;
+      for (final entry in next.entries) {
+        final prevItem = prev[entry.key];
+        if (prevItem?.status != 'error' && entry.value.status == 'error') {
+          final errMsg = entry.value.errorMessage;
+          final msg = errMsg != null
+              ? 'Download failed: $errMsg'
+              : '"${entry.value.song.title}" failed to download';
+          showStyledSnack(context, msg, isError: true);
+        }
+      }
+    });
+
     // Classic dock accent color
     final navBg = accentColor != null
         ? Color.lerp(accentColor, scheme.surface, 0.88)!
@@ -299,7 +316,16 @@ class _MainShellState extends ConsumerState<MainShell>
       ),
     );
 
-    return Stack(
+    // How far up from the screen bottom snackbars must sit to clear the
+    // mini player and dock (or classic nav bar).
+    final snackClearance = (hasSong ? 72.0 : 0.0) +
+        (floatingNav
+            ? _kDockHeight + _kDockBottom + safeBottom
+            : 62.0 + safeBottom); // 62 = classic NavigationBar height
+
+    return SnackBarClearance(
+      bottom: snackClearance,
+      child: Stack(
       children: [
         scaffold,
 
@@ -361,7 +387,7 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
           ),
       ],
-    );
+    ));
   }
 }
 

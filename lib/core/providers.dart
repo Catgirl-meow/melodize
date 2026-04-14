@@ -504,10 +504,12 @@ class DownloadItem {
   final double progress; // 0.0 – 1.0
   // status: 'queued' | 'downloading' | 'done' | 'error'
   final String status;
+  final String? errorMessage;
   const DownloadItem({
     required this.song,
     required this.progress,
     required this.status,
+    this.errorMessage,
   });
 }
 
@@ -664,11 +666,14 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
       updated[song.id] = DownloadItem(song: song, progress: 1, status: 'done');
       state = updated;
       _ref.invalidate(downloadedSongsProvider);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       final updated = Map<String, DownloadItem>.from(state);
-      updated[song.id] =
-          DownloadItem(song: song, progress: 0, status: 'error');
+      updated[song.id] = DownloadItem(
+          song: song,
+          progress: 0,
+          status: 'error',
+          errorMessage: e.toString());
       state = updated;
     }
   }
