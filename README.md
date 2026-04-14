@@ -20,6 +20,7 @@ on lossless playback, a polished Material 3 UI, and offline support.
 - **Sleep timer**
 - **Scrobbling** — submits plays to the server (Navidrome tracks history)
 - **Delete from server** — remove songs directly from your Navidrome library via the companion service
+- **Floating nav dock** — optional frosted-glass floating navigation bar (toggleable in Settings)
 - **Origin Island** — automatic integration via Android MediaSession (no setup needed)
 
 ---
