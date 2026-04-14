@@ -39,6 +39,7 @@ class HomeScreen extends ConsumerWidget {
         ref.watch(serverReachableProvider).valueOrNull ?? true;
 
     return SafeArea(
+      top: false,
       bottom: false,
       child: RefreshIndicator(
       onRefresh: () => _refresh(ref),
