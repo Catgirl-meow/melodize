@@ -351,10 +351,17 @@ class _MainShellState extends ConsumerState<MainShell>
                 ),
               );
             },
-            child: RepaintBoundary(
-              child: NowPlayingScreen(
-                controller: _playerAnim,
-                onClose: _closePlayer,
+            // Reset padding to raw system insets so the player's SafeArea only
+            // respects the notch/home-indicator, not the inflated snack clearance.
+            child: MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                padding: MediaQuery.of(context).viewPadding,
+              ),
+              child: RepaintBoundary(
+                child: NowPlayingScreen(
+                  controller: _playerAnim,
+                  onClose: _closePlayer,
+                ),
               ),
             ),
           ),
