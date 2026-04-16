@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
 import '../models/song.dart';
 import '../api/subsonic_client.dart';
@@ -561,13 +562,29 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   // window as standard key events. MPRIS (via audio_service) handles the
   // unfocused case; this covers when the app window is in focus.
 
+  // Returns true if a text-input widget currently has keyboard focus.
+  // Used to suppress vim shortcuts while the user is typing.
+  bool _isTextFieldFocused() {
+    final focus = FocusManager.instance.primaryFocus;
+    return focus?.context?.widget is EditableText;
+  }
+
+  void _seekRelative(Duration delta) {
+    final dur = player.duration;
+    if (dur == null) return;
+    final next = player.position + delta;
+    player.seek(next < Duration.zero ? Duration.zero : next > dur ? dur : next);
+  }
+
+  void _adjustVolume(double delta) {
+    final vol = (player.volume + delta).clamp(0.0, 1.0);
+    player.setVolume(vol);
+  }
+
   bool _handleMediaKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
 
-    // Debug: print all key-down events so we can see if XF86 keys reach Flutter
-    // and what their logical key ID is. Remove once media keys are confirmed working.
-    debugPrint('[media] key: ${event.logicalKey.debugName} id:0x${event.logicalKey.keyId.toRadixString(16)}');
-
+    // XF86 media keys — always handle regardless of focus.
     switch (event.logicalKey) {
       case LogicalKeyboardKey.mediaPlay:
       case LogicalKeyboardKey.mediaPlayPause:
@@ -584,6 +601,46 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         return true;
       case LogicalKeyboardKey.mediaStop:
         player.stop();
+        return true;
+    }
+
+    // Vim-style shortcuts — skip when a text field has focus.
+    if (_isTextFieldFocused()) return false;
+
+    final shift = HardwareKeyboard.instance.isShiftPressed;
+    switch (event.logicalKey) {
+      case LogicalKeyboardKey.space:
+        player.playing ? player.pause() : player.play();
+        return true;
+      case LogicalKeyboardKey.keyN:
+        player.seekToNext();
+        return true;
+      case LogicalKeyboardKey.keyP:
+        skipToPrevious();
+        return true;
+      case LogicalKeyboardKey.keyL:
+        _seekRelative(shift ? const Duration(seconds: 30) : const Duration(seconds: 5));
+        return true;
+      case LogicalKeyboardKey.keyH:
+        _seekRelative(shift ? const Duration(seconds: -30) : const Duration(seconds: -5));
+        return true;
+      case LogicalKeyboardKey.digit0:
+        player.seek(Duration.zero);
+        return true;
+      case LogicalKeyboardKey.keyJ:
+        _adjustVolume(-0.05);
+        return true;
+      case LogicalKeyboardKey.keyK:
+        _adjustVolume(0.05);
+        return true;
+      case LogicalKeyboardKey.keyM:
+        player.setVolume(player.volume > 0 ? 0.0 : 1.0);
+        return true;
+      case LogicalKeyboardKey.keyS:
+        toggleShuffle();
+        return true;
+      case LogicalKeyboardKey.keyR:
+        cycleLoopMode();
         return true;
     }
     return false;

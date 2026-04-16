@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
 import '../../shared/theme/app_theme.dart';
@@ -50,12 +51,43 @@ class _MainShellState extends ConsumerState<MainShell>
       vsync: this,
       duration: const Duration(milliseconds: 450),
     );
+    HardwareKeyboard.instance.addHandler(_handleNavKey);
   }
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleNavKey);
     _playerAnim.dispose();
     super.dispose();
+  }
+
+  bool _handleNavKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    // Only intercept when no text field is focused.
+    final focus = FocusManager.instance.primaryFocus;
+    if (focus?.context?.widget is EditableText) return false;
+
+    switch (event.logicalKey) {
+      case LogicalKeyboardKey.digit1:
+        setState(() => _selectedIndex = 0);
+        return true;
+      case LogicalKeyboardKey.digit2:
+        setState(() => _selectedIndex = 1);
+        return true;
+      case LogicalKeyboardKey.digit3:
+        setState(() => _selectedIndex = 2);
+        return true;
+      case LogicalKeyboardKey.digit4:
+        setState(() => _selectedIndex = 3);
+        return true;
+      case LogicalKeyboardKey.escape:
+        if (_playerAnim.value > 0.01) {
+          _closePlayer();
+          return true;
+        }
+        return false;
+    }
+    return false;
   }
 
   void _openPlayer() => _playerAnim.animateTo(
