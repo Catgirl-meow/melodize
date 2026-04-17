@@ -33,23 +33,37 @@ class MiniPlayer extends ConsumerWidget {
 // ---------------------------------------------------------------------------
 // Classic mini player — full-width bar, rounded top only. Used with old nav.
 
-class _ClassicMiniPlayer extends StatelessWidget {
+const _kClassicPausedTopRadius = 28.0;
+const _kClassicPlayingTopRadius = 8.0;
+const _kClassicThumbPaused = 20.0;
+const _kClassicThumbPlaying = 6.0;
+const _kClassicShapeDuration = Duration(milliseconds: 400);
+const _kClassicShapeCurve = Curves.easeInOutCubicEmphasized;
+
+class _ClassicMiniPlayer extends ConsumerWidget {
   final Song song;
   final VoidCallback onOpen;
   final Color? accentColor;
   const _ClassicMiniPlayer({required this.song, required this.onOpen, this.accentColor});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
+    final isPlaying = ref.watch(
+      playerStateStreamProvider.select((s) => s.valueOrNull?.playing ?? false),
+    );
 
     final bg = accentColor != null
         ? Color.lerp(accentColor!, scheme.surfaceContainerHigh, 0.55)!
         : Color.lerp(scheme.surfaceContainerHigh, scheme.primaryContainer, 0.28)!;
 
+    final topRadius = isPlaying ? _kClassicPlayingTopRadius : _kClassicPausedTopRadius;
+    final thumbRadius = isPlaying ? _kClassicThumbPlaying : _kClassicThumbPaused;
+
     return GestureDetector(
       onTap: onOpen,
       child: DecoratedBox(
+        // Shadow shape fixed — blur hides the morph.
         decoration: BoxDecoration(
           borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
           boxShadow: [
@@ -60,8 +74,13 @@ class _ClassicMiniPlayer extends StatelessWidget {
             ),
           ],
         ),
-        child: ClipRRect(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+        child: AnimatedContainer(
+          duration: _kClassicShapeDuration,
+          curve: _kClassicShapeCurve,
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(topRadius)),
+          ),
           child: Container(
             height: 72,
             color: bg,
@@ -74,11 +93,17 @@ class _ClassicMiniPlayer extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     child: Row(
                       children: [
-                        CoverArtImage(
+                        TweenAnimationBuilder<double>(
+                          tween: Tween<double>(end: thumbRadius),
+                          duration: _kClassicShapeDuration,
+                          curve: _kClassicShapeCurve,
+                          builder: (_, r, __) => CoverArtImage(
                             coverArtId: song.coverArt,
                             externalUrl: song.externalCoverUrl,
                             size: 44,
-                            borderRadius: 6),
+                            borderRadius: r,
+                          ),
+                        ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(

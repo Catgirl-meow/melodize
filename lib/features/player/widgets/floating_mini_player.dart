@@ -6,15 +6,12 @@ import '../../../core/providers.dart';
 import '../../../shared/theme/app_theme.dart';
 import '../../../shared/widgets/cover_art_image.dart';
 
-// Playing shape: slightly asymmetric, wider leading corner for visual motion.
-// Paused shape: uniform 16 px — same as the dock corners.
-const _kPausedRadius = 16.0;
-const _kPlayingTL = 22.0;
-const _kPlayingBL = 22.0;
-const _kPlayingTR = 18.0;
-const _kPlayingBR = 18.0;
-const _kThumbPaused = 12.0;
-const _kThumbPlaying = 18.0;
+// Paused shape: near-circular pill (28 px) — soft, at rest.
+// Playing shape: compact uniform corners (10 px) — crisp, active.
+const _kPausedRadius = 28.0;
+const _kPlayingRadius = 10.0;
+const _kThumbPaused = 20.0;   // near-circle on 40 px thumbnail
+const _kThumbPlaying = 6.0;   // squared off when playing
 
 const _kShapeDuration = Duration(milliseconds: 400);
 const _kShapeCurve = Curves.easeInOutCubicEmphasized;
@@ -39,12 +36,7 @@ class FloatingMiniPlayer extends ConsumerWidget {
     );
 
     final cardRadius = isPlaying
-        ? const BorderRadius.only(
-            topLeft: Radius.circular(_kPlayingTL),
-            bottomLeft: Radius.circular(_kPlayingBL),
-            topRight: Radius.circular(_kPlayingTR),
-            bottomRight: Radius.circular(_kPlayingBR),
-          )
+        ? BorderRadius.circular(_kPlayingRadius)
         : BorderRadius.circular(_kPausedRadius);
 
     final thumbRadius = isPlaying ? _kThumbPlaying : _kThumbPaused;
@@ -56,9 +48,9 @@ class FloatingMiniPlayer extends ConsumerWidget {
       child: GestureDetector(
         onTap: onOpen,
         child: DecoratedBox(
-          // Shadow shape is fixed — 24 px blur makes corner asymmetry invisible.
+          // Shadow shape is fixed — 24 px blur hides the morph.
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(_kPausedRadius),
+            borderRadius: BorderRadius.circular(16.0),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.42),
@@ -91,7 +83,9 @@ class FloatingMiniPlayer extends ConsumerWidget {
                               tween: Tween<double>(end: thumbRadius),
                               duration: _kShapeDuration,
                               curve: _kShapeCurve,
-                              builder: (_, r, child) => CoverArtImage(
+                              // CoverArtImage owns the ClipRRect so it must
+                              // rebuild each tick — borderRadius drives the clip.
+                              builder: (_, r, __) => CoverArtImage(
                                 coverArtId: song.coverArt,
                                 externalUrl: song.externalCoverUrl,
                                 size: 40,

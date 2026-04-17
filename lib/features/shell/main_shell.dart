@@ -331,10 +331,7 @@ class _MainShellState extends ConsumerState<MainShell>
       ),
     );
 
-    return MediaQuery(
-      data: MediaQuery.of(context)
-          .copyWith(padding: MediaQuery.of(context).padding.copyWith(bottom: snackBottom)),
-      child: ScaffoldMessenger(
+    return ScaffoldMessenger(
       child: Stack(
       children: [
         scaffold,
@@ -389,8 +386,6 @@ class _MainShellState extends ConsumerState<MainShell>
                 ),
               );
             },
-            // Reset padding to raw system insets so the player's SafeArea only
-            // respects the notch/home-indicator, not the inflated snack clearance.
             child: MediaQuery(
               data: MediaQuery.of(context).copyWith(
                 padding: MediaQuery.of(context).viewPadding,
@@ -404,7 +399,7 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
           ),
       ],
-      ))); // Stack / ScaffoldMessenger / MediaQuery
+      )); // Stack / ScaffoldMessenger
   }
 }
 

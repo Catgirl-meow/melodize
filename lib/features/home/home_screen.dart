@@ -49,8 +49,7 @@ class HomeScreen extends ConsumerWidget {
         // Always scrollable so pull-to-refresh works even with little content
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
-        // Large collapsing app bar — title doubles as the greeting.
-        SliverAppBar.large(
+        SliverAppBar.medium(
           title: Text(_greeting(username)),
           automaticallyImplyLeading: false,
           scrolledUnderElevation: 0,

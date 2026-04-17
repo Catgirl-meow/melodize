@@ -137,8 +137,10 @@ class LibraryScreen extends ConsumerWidget {
                       automaticallyImplyLeading: false,
                       scrolledUnderElevation: 0,
                       surfaceTintColor: scheme.surfaceContainer,
-                      // Stays visually elevated while inner content is scrolled.
-                      forceElevated: innerBoxIsScrolled,
+                      // Floats back on upward scroll; only the TabBar stays pinned.
+                      pinned: false,
+                      floating: true,
+                      snap: true,
                     ),
                     // Tab bar pinned immediately below the collapsed app bar.
                     SliverPersistentHeader(

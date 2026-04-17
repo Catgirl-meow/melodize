@@ -73,8 +73,7 @@ class SettingsScreen extends ConsumerWidget {
     return Scaffold(
       body: CustomScrollView(
         slivers: [
-          // Large collapsing app bar — matches Android 14+ Settings idiom.
-          SliverAppBar.large(
+          SliverAppBar.medium(
             title: const Text('Settings'),
             automaticallyImplyLeading: false,
             scrolledUnderElevation: 0,
