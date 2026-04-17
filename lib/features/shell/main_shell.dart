@@ -177,6 +177,14 @@ class _MainShellState extends ConsumerState<MainShell>
     final dockBodyPad =
         floatingNav ? _kDockHeight + _kDockBottom + safeBottom : 0.0;
 
+    // Full clearance needed to position a snackbar above the dock + mini player.
+    // Used for ref.listen callbacks whose BuildContext sits outside the inner
+    // MediaQuery override, so they can't rely on padding.bottom auto-resolution.
+    final snackBottom = (hasSong ? 72.0 : 0.0) +
+        (floatingNav
+            ? _kDockHeight + _kDockBottom + safeBottom
+            : 62.0 + safeBottom);
+
     // Collapse player when the queue runs out.
     ref.listen(currentSongStreamProvider, (prev, next) {
       if (prev?.valueOrNull != null && next.valueOrNull == null) {
@@ -190,18 +198,26 @@ class _MainShellState extends ConsumerState<MainShell>
       if (!wasOnline && isNowOnline) _invalidateServerProviders();
     });
 
-    // Surface local download errors as snackbars.
+    // Surface local download completion and errors as snackbars.
     ref.listen<Map<String, DownloadItem>>(downloadNotifierProvider,
         (prev, next) {
       if (prev == null) return;
       for (final entry in next.entries) {
         final prevItem = prev[entry.key];
+        if (prevItem?.status != 'done' && entry.value.status == 'done') {
+          showStyledSnack(
+            context,
+            '"${entry.value.song.title}" downloaded',
+            bottomOffset: snackBottom + 12,
+          );
+        }
         if (prevItem?.status != 'error' && entry.value.status == 'error') {
           final errMsg = entry.value.errorMessage;
           final msg = errMsg != null
               ? 'Download failed: $errMsg'
               : '"${entry.value.song.title}" failed to download';
-          showStyledSnack(context, msg, isError: true);
+          showStyledSnack(context, msg,
+              isError: true, bottomOffset: snackBottom + 12);
         }
       }
     });
@@ -314,16 +330,6 @@ class _MainShellState extends ConsumerState<MainShell>
         ],
       ),
     );
-
-    // Snackbars from any screen inside MainShell use the inner ScaffoldMessenger
-    // below (nearest ancestor wins). It lives inside a MediaQuery that overrides
-    // padding.bottom so Flutter's floating-snackbar placement algorithm uses the
-    // full clearance value (dock/nav + mini player + safe area) and keeps the
-    // snackbar visible above all overlays.
-    final snackBottom = (hasSong ? 72.0 : 0.0) +
-        (floatingNav
-            ? _kDockHeight + _kDockBottom + safeBottom
-            : 62.0 + safeBottom); // 62 = classic NavigationBar height
 
     return MediaQuery(
       data: MediaQuery.of(context)
