@@ -70,145 +70,155 @@ class SettingsScreen extends ConsumerWidget {
     final config = ref.watch(serverConfigProvider).valueOrNull;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-        backgroundColor: scheme.surface,
-        surfaceTintColor: Colors.transparent,
-      ),
-      body: ListView(
-        children: [
-          // --- Appearance ---
-          _SectionHeader('Appearance'),
-          SwitchListTile(
-            title: const Text('Floating navigation bar'),
-            subtitle: const Text('Pill-shaped dock at the bottom'),
-            secondary: const Icon(Icons.dock_rounded),
-            value: prefs.floatingNavBar,
-            onChanged: (v) => ref
-                .read(preferencesNotifierProvider.notifier)
-                .update(prefs.copyWith(floatingNavBar: v)),
+      body: CustomScrollView(
+        slivers: [
+          // Large collapsing app bar — matches Android 14+ Settings idiom.
+          SliverAppBar.large(
+            title: const Text('Settings'),
+            automaticallyImplyLeading: false,
+            scrolledUnderElevation: 0,
+            surfaceTintColor: scheme.surfaceContainer,
           ),
 
-          // --- Playback ---
-          _SectionHeader('Playback'),
-          ListTile(
-            title: const Text('Streaming quality'),
-            subtitle: Text(_qualityLabel(prefs.streamQuality)),
-            leading: const Icon(Icons.high_quality_rounded),
-            onTap: () => _showQualityPicker(
-              context,
-              ref,
-              title: 'Streaming quality',
-              current: prefs.streamQuality,
-              onSelected: (q) => ref
-                  .read(preferencesNotifierProvider.notifier)
-                  .update(prefs.copyWith(streamQuality: q)),
-            ),
-          ),
-
-          // --- Downloads ---
-          _SectionHeader('Downloads'),
-          ListTile(
-            title: const Text('Download quality'),
-            subtitle: Text(_qualityLabel(prefs.downloadQuality)),
-            leading: const Icon(Icons.download_rounded),
-            onTap: () => _showQualityPicker(
-              context,
-              ref,
-              title: 'Download quality',
-              current: prefs.downloadQuality,
-              onSelected: (q) => ref
-                  .read(preferencesNotifierProvider.notifier)
-                  .update(prefs.copyWith(downloadQuality: q)),
-            ),
-          ),
-          ListTile(
-            title: const Text('Auto-download'),
-            subtitle: Text(_autoDownloadLabel(prefs.autoDownload)),
-            leading: const Icon(Icons.sync_rounded),
-            onTap: () => _showAutoDownloadPicker(context, ref, prefs),
-          ),
-          ListTile(
-            title: const Text('Downloaded songs'),
-            subtitle: Text(
-              activeDownloadCount > 0
-                  ? '$activeDownloadCount downloading...'
-                  : 'View and manage downloaded songs',
-            ),
-            leading: const Icon(Icons.folder_rounded),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => const DownloadedSongsScreen(),
+          SliverList.list(
+            children: [
+              // --- Appearance ---
+              _SectionHeader('Appearance'),
+              SwitchListTile(
+                title: const Text('Floating navigation bar'),
+                subtitle: const Text('Pill-shaped dock at the bottom'),
+                secondary: const Icon(Icons.dock_rounded),
+                value: prefs.floatingNavBar,
+                onChanged: (v) => ref
+                    .read(preferencesNotifierProvider.notifier)
+                    .update(prefs.copyWith(floatingNavBar: v)),
               ),
-            ),
-          ),
-          // --- Server ---
-          _SectionHeader('Server'),
-          if (config != null)
-            ListTile(
-              title: Text(
-                config.serverUrl,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+
+              // --- Playback ---
+              _SectionHeader('Playback'),
+              ListTile(
+                title: const Text('Streaming quality'),
+                subtitle: Text(_qualityLabel(prefs.streamQuality)),
+                leading: const Icon(Icons.high_quality_rounded),
+                onTap: () => _showQualityPicker(
+                  context,
+                  ref,
+                  title: 'Streaming quality',
+                  current: prefs.streamQuality,
+                  onSelected: (q) => ref
+                      .read(preferencesNotifierProvider.notifier)
+                      .update(prefs.copyWith(streamQuality: q)),
+                ),
               ),
-              subtitle: Text(config.username),
-              leading: const Icon(Icons.dns_rounded),
-            ),
-          ListTile(
-            title: const Text('Change server'),
-            subtitle: const Text('Clears all cache and downloaded files'),
-            leading: const Icon(Icons.swap_horiz_rounded),
-            onTap: () => _changeServer(context, ref),
-          ),
 
-          // --- Deezer ---
-          _SectionHeader('Deezer'),
-          ListTile(
-            leading: const Icon(Icons.account_circle_rounded),
-            title: const Text('Deezer Account'),
-            subtitle: Text(
-              prefs.hasDeezerArl
-                  ? 'Connected — FLAC downloads enabled'
-                  : 'Not connected — 30s previews only',
-            ),
-            trailing: prefs.hasDeezerArl
-                ? Icon(Icons.check_circle_rounded, color: Colors.green)
-                : null,
-            onTap: () => _editDeezerArl(context, ref, prefs),
-          ),
-          ListTile(
-            leading: const Icon(Icons.help_outline_rounded),
-            title: const Text('How to connect'),
-            subtitle: const Text('Step-by-step instructions'),
-            onTap: () => _showDeezerInstructions(context),
-          ),
+              // --- Downloads ---
+              _SectionHeader('Downloads'),
+              ListTile(
+                title: const Text('Download quality'),
+                subtitle: Text(_qualityLabel(prefs.downloadQuality)),
+                leading: const Icon(Icons.download_rounded),
+                onTap: () => _showQualityPicker(
+                  context,
+                  ref,
+                  title: 'Download quality',
+                  current: prefs.downloadQuality,
+                  onSelected: (q) => ref
+                      .read(preferencesNotifierProvider.notifier)
+                      .update(prefs.copyWith(downloadQuality: q)),
+                ),
+              ),
+              ListTile(
+                title: const Text('Auto-download'),
+                subtitle: Text(_autoDownloadLabel(prefs.autoDownload)),
+                leading: const Icon(Icons.sync_rounded),
+                onTap: () => _showAutoDownloadPicker(context, ref, prefs),
+              ),
+              ListTile(
+                title: const Text('Downloaded songs'),
+                subtitle: Text(
+                  activeDownloadCount > 0
+                      ? '$activeDownloadCount downloading...'
+                      : 'View and manage downloaded songs',
+                ),
+                leading: const Icon(Icons.folder_rounded),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const DownloadedSongsScreen(),
+                  ),
+                ),
+              ),
 
-          // --- Companion ---
-          _SectionHeader('Melodize Companion'),
-          ListTile(
-            title: const Text('Companion URL'),
-            subtitle: Text(
-              prefs.companionUrl.isEmpty ? 'Not configured' : prefs.companionUrl,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            leading: const Icon(Icons.hub_rounded),
-            onTap: () => _editCompanionUrl(context, ref, prefs),
+              // --- Server ---
+              _SectionHeader('Server'),
+              if (config != null)
+                ListTile(
+                  title: Text(
+                    config.serverUrl,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(config.username),
+                  leading: const Icon(Icons.dns_rounded),
+                ),
+              ListTile(
+                title: const Text('Change server'),
+                subtitle: const Text('Clears all cache and downloaded files'),
+                leading: const Icon(Icons.swap_horiz_rounded),
+                onTap: () => _changeServer(context, ref),
+              ),
+
+              // --- Deezer ---
+              _SectionHeader('Deezer'),
+              ListTile(
+                leading: const Icon(Icons.account_circle_rounded),
+                title: const Text('Deezer Account'),
+                subtitle: Text(
+                  prefs.hasDeezerArl
+                      ? 'Connected — FLAC downloads enabled'
+                      : 'Not connected — 30s previews only',
+                ),
+                trailing: prefs.hasDeezerArl
+                    ? const Icon(Icons.check_circle_rounded, color: Colors.green)
+                    : null,
+                onTap: () => _editDeezerArl(context, ref, prefs),
+              ),
+              ListTile(
+                leading: const Icon(Icons.help_outline_rounded),
+                title: const Text('How to connect'),
+                subtitle: const Text('Step-by-step instructions'),
+                onTap: () => _showDeezerInstructions(context),
+              ),
+
+              // --- Companion ---
+              _SectionHeader('Melodize Companion'),
+              ListTile(
+                title: const Text('Companion URL'),
+                subtitle: Text(
+                  prefs.companionUrl.isEmpty ? 'Not configured' : prefs.companionUrl,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                leading: const Icon(Icons.hub_rounded),
+                onTap: () => _editCompanionUrl(context, ref, prefs),
+              ),
+              ListTile(
+                title: const Text('API Key'),
+                subtitle: Text(
+                  prefs.companionApiKey.isEmpty
+                      ? 'Not set'
+                      : '••••••••${prefs.companionApiKey.substring(prefs.companionApiKey.length.clamp(8, prefs.companionApiKey.length) - 8)}',
+                ),
+                leading: const Icon(Icons.key_rounded),
+                onTap: () => _editCompanionApiKey(context, ref, prefs),
+              ),
+              if (prefs.hasCompanion) _CompanionStatusTile(),
+
+              // Bottom clearance — dock + mini player + breathing room.
+              SizedBox(height: MediaQuery.paddingOf(context).bottom + 16),
+            ],
           ),
-          ListTile(
-            title: const Text('API Key'),
-            subtitle: Text(
-              prefs.companionApiKey.isEmpty
-                  ? 'Not set'
-                  : '••••••••${prefs.companionApiKey.substring(prefs.companionApiKey.length.clamp(8, prefs.companionApiKey.length) - 8)}',
-            ),
-            leading: const Icon(Icons.key_rounded),
-            onTap: () => _editCompanionApiKey(context, ref, prefs),
-          ),
-          if (prefs.hasCompanion)
-            _CompanionStatusTile(),
         ],
       ),
     );

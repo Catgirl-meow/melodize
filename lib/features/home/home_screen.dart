@@ -38,6 +38,8 @@ class HomeScreen extends ConsumerWidget {
     final serverReachable =
         ref.watch(serverReachableProvider).valueOrNull ?? true;
 
+    final scheme = Theme.of(context).colorScheme;
+
     return SafeArea(
       top: false,
       bottom: false,
@@ -47,7 +49,15 @@ class HomeScreen extends ConsumerWidget {
         // Always scrollable so pull-to-refresh works even with little content
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
-        // Offline banner
+        // Large collapsing app bar — title doubles as the greeting.
+        SliverAppBar.large(
+          title: Text(_greeting(username)),
+          automaticallyImplyLeading: false,
+          scrolledUnderElevation: 0,
+          surfaceTintColor: scheme.surfaceContainer,
+        ),
+
+        // Offline banner — below the app bar so it stays in the content flow.
         const SliverToBoxAdapter(child: OfflineBanner()),
 
         // Server unreachable chip (only when device is online but server is down)
@@ -59,38 +69,19 @@ class HomeScreen extends ConsumerWidget {
                 children: [
                   Icon(Icons.cloud_off_rounded,
                       size: 13,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      color: scheme.onSurfaceVariant),
                   const SizedBox(width: 5),
                   Text(
                     'Server unreachable — pull to retry',
                     style: TextStyle(
                       fontSize: 12,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      color: scheme.onSurfaceVariant,
                     ),
                   ),
                 ],
               ),
             ),
           ),
-
-        // Header — top pad = status bar height so greeting sits below notch
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              16,
-              MediaQuery.of(context).viewPadding.top + 16,
-              16,
-              0,
-            ),
-            child: Text(
-              _greeting(username),
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineMedium
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-          ),
-        ),
 
         // Playlists
         playlistsAsync.when(

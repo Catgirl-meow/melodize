@@ -109,31 +109,54 @@ class LibraryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Plain Scaffold + AppBar is much lighter than NestedScrollView +
-    // SliverAppBar when the app bar is always pinned anyway.
+    final scheme = Theme.of(context).colorScheme;
+
     return DefaultTabController(
       length: 3,
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Library'),
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'Songs'),
-              Tab(text: 'Albums'),
-              Tab(text: 'Artists'),
-            ],
-          ),
-        ),
-        body: const Column(
+        body: Column(
           children: [
-            OfflineBanner(),
+            // OfflineBanner outside the scroll view so it stays visible
+            // regardless of scroll position.
+            const OfflineBanner(),
             Expanded(
-              child: TabBarView(
-                children: [
-                  RepaintBoundary(child: _SongsTab()),
-                  RepaintBoundary(child: _AlbumsTab()),
-                  RepaintBoundary(child: _ArtistsTab()),
-                ],
+              child: NestedScrollView(
+                headerSliverBuilder: (ctx, innerBoxIsScrolled) {
+                  // TabBar created here so it inherits DefaultTabController
+                  // from the widget tree above.
+                  const tabBar = TabBar(
+                    tabs: [
+                      Tab(text: 'Songs'),
+                      Tab(text: 'Albums'),
+                      Tab(text: 'Artists'),
+                    ],
+                  );
+                  return [
+                    SliverAppBar.medium(
+                      title: const Text('Library'),
+                      automaticallyImplyLeading: false,
+                      scrolledUnderElevation: 0,
+                      surfaceTintColor: scheme.surfaceContainer,
+                      // Stays visually elevated while inner content is scrolled.
+                      forceElevated: innerBoxIsScrolled,
+                    ),
+                    // Tab bar pinned immediately below the collapsed app bar.
+                    SliverPersistentHeader(
+                      pinned: true,
+                      delegate: _TabBarDelegate(
+                        tabBar: tabBar,
+                        color: scheme.surface,
+                      ),
+                    ),
+                  ];
+                },
+                body: const TabBarView(
+                  children: [
+                    RepaintBoundary(child: _SongsTab()),
+                    RepaintBoundary(child: _AlbumsTab()),
+                    RepaintBoundary(child: _ArtistsTab()),
+                  ],
+                ),
               ),
             ),
           ],
@@ -141,6 +164,29 @@ class LibraryScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+// Pins the TabBar at a fixed height below the collapsed SliverAppBar.
+class _TabBarDelegate extends SliverPersistentHeaderDelegate {
+  const _TabBarDelegate({required this.tabBar, required this.color});
+
+  final TabBar tabBar;
+  final Color color;
+
+  @override
+  double get minExtent => tabBar.preferredSize.height;
+  @override
+  double get maxExtent => tabBar.preferredSize.height;
+
+  @override
+  Widget build(
+      BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return ColoredBox(color: color, child: tabBar);
+  }
+
+  @override
+  bool shouldRebuild(_TabBarDelegate old) =>
+      old.tabBar != tabBar || old.color != color;
 }
 
 // ---------------------------------------------------------------------------
