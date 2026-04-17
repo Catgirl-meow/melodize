@@ -71,17 +71,15 @@ class SettingsScreen extends ConsumerWidget {
     final config = ref.watch(serverConfigProvider).valueOrNull;
 
     return Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar.medium(
-            title: const Text('Settings'),
-            automaticallyImplyLeading: false,
-            scrolledUnderElevation: 0,
-            surfaceTintColor: scheme.surfaceContainer,
-          ),
-
-          SliverList.list(
-            children: [
+      appBar: AppBar(
+        title: const Text('Settings'),
+        automaticallyImplyLeading: false,
+        backgroundColor: scheme.surface,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
+      ),
+      body: ListView(
+        children: [
               // --- Appearance ---
               _SectionHeader('Appearance'),
               GroupedSection(children: [
@@ -230,8 +228,6 @@ class SettingsScreen extends ConsumerWidget {
               // Bottom clearance — dock + mini player + breathing room.
               SizedBox(height: MediaQuery.paddingOf(context).bottom + 16),
             ],
-          ),
-        ],
       ),
     );
   }

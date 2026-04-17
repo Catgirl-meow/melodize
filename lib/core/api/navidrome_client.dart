@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 
 /// Client for the melodize-companion sidecar service.
 ///
@@ -20,6 +22,10 @@ class CompanionClient {
       receiveTimeout: const Duration(seconds: 15),
       headers: {'X-API-Key': apiKey},
     ));
+    // Accept self-signed / local certificates — companion runs on the user's
+    // own server so cert validation adds no security benefit here.
+    (_dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () =>
+        HttpClient()..badCertificateCallback = (_, __, ___) => true;
   }
 
   /// Returns true if the companion is reachable and the API key is valid.
