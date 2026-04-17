@@ -49,15 +49,28 @@ class HomeScreen extends ConsumerWidget {
         // Always scrollable so pull-to-refresh works even with little content
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
-        SliverAppBar.medium(
-          title: Text(_greeting(username)),
-          automaticallyImplyLeading: false,
-          scrolledUnderElevation: 0,
-          surfaceTintColor: scheme.surfaceContainer,
-        ),
-
-        // Offline banner — below the app bar so it stays in the content flow.
+        // Offline banner — before the greeting so it sits at the very top.
         const SliverToBoxAdapter(child: OfflineBanner()),
+
+        // Greeting — status-bar clearance via viewPadding.top, no SliverAppBar
+        // so there's no empty toolbar gap above the title.
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              16,
+              MediaQuery.of(context).viewPadding.top + 16,
+              16,
+              0,
+            ),
+            child: Text(
+              _greeting(username),
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ),
 
         // Server unreachable chip (only when device is online but server is down)
         if (isOnline && !serverReachable)
