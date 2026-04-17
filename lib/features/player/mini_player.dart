@@ -1,10 +1,9 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
-import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/cover_art_image.dart';
+import 'widgets/floating_mini_player.dart';
 
 // Top-level widget — only rebuilds when the current song identity changes.
 class MiniPlayer extends ConsumerWidget {
@@ -26,7 +25,7 @@ class MiniPlayer extends ConsumerWidget {
     final accentColor = ref.watch(currentAccentColorProvider);
 
     return floatingNav
-        ? _FloatingMiniPlayer(song: song, onOpen: onOpen, accentColor: accentColor)
+        ? FloatingMiniPlayer(song: song, onOpen: onOpen, accentColor: accentColor)
         : _ClassicMiniPlayer(song: song, onOpen: onOpen, accentColor: accentColor);
   }
 }
@@ -107,101 +106,6 @@ class _ClassicMiniPlayer extends StatelessWidget {
                   ),
                 ),
               ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Floating mini player — glass card with all-rounded corners, inset to match
-// the floating dock.
-
-class _FloatingMiniPlayer extends StatelessWidget {
-  final Song song;
-  final VoidCallback onOpen;
-  final Color? accentColor;
-  const _FloatingMiniPlayer({required this.song, required this.onOpen, this.accentColor});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    const radius = 16.0;
-    const cardRadius = BorderRadius.all(Radius.circular(radius));
-
-    final bgColor = AppTheme.dockBackground(accentColor, scheme);
-
-    return Padding(
-      // Side inset matches the dock. Bottom gap sits 6 px above the dock top.
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
-      child: GestureDetector(
-        onTap: onOpen,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: cardRadius,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.42),
-                blurRadius: 24,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: cardRadius,
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-              child: Container(
-                height: 62,
-                color: bgColor,
-                child: Stack(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      child: Row(
-                        children: [
-                          CoverArtImage(
-                              coverArtId: song.coverArt,
-                              externalUrl: song.externalCoverUrl,
-                              size: 40,
-                              borderRadius: 10),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(song.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 13)),
-                                Text(song.artist,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                        fontSize: 12,
-                                        color: scheme.onSurfaceVariant)),
-                              ],
-                            ),
-                          ),
-                          RepaintBoundary(child: _MiniPlayerControls()),
-                        ],
-                      ),
-                    ),
-                    // Progress bar — clipped to card corner radius at bottom
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: RepaintBoundary(child: _MiniPlayerProgress()),
-                    ),
-                  ],
-                ),
-              ),
             ),
           ),
         ),
