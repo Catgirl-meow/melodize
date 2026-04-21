@@ -44,8 +44,9 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# Claude Code memory (private)
+# Claude Code memory + local settings (private)
 /memory/
+.claude/
 
 # Flutter generated
 .flutter-plugins

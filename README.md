@@ -9,19 +9,24 @@ on lossless playback, a polished Material 3 UI, and offline support.
 ## Features
 
 - **Lossless playback** — streams original FLAC/OPUS/MP3 without re-encoding
-- **Offline / downloads** — download songs to device for playback without a connection
+- **Offline / downloads** — download songs to device for playback without a connection; batch "download all" option
 - **Synced lyrics** — fetches time-synced LRC lyrics from LRClib, auto-scrolls with the song
 - **Now Playing screen** — album-art colour-extracted gradient, swipe between player and lyrics
 - **Queue management** — drag to reorder, play next, add to queue
 - **Library sorting** — sort by name, artist, recently added, downloaded
 - **Home screen** — time-aware greeting, recently added albums, random picks
-- **Recommendations** — Deezer-powered "Recommended for You" based on your listening history; tap to play a 30s preview, long-press to download the full FLAC to your Navidrome server
+- **Discovery / Recommendations** — Deezer-powered "Recommended for You" based on your listening history, surfacing new tracks you don't already have; tap to play a 30s preview, long-press to download the full FLAC to your Navidrome server
 - **Deezer search** — search the Deezer catalog from the Search tab; play previews or save to server
+- **Deezer account (ARL)** — paste your Deezer `arl` cookie in Settings to unlock full-FLAC downloads via the companion
 - **Sleep timer**
-- **Scrobbling** — submits plays to the server (Navidrome tracks history)
+- **Scrobbling** — submits plays to the server (Navidrome can forward to Last.fm if configured server-side)
 - **Delete from server** — remove songs directly from your Navidrome library via the companion service
-- **Floating nav dock** — optional frosted-glass floating navigation bar (toggleable in Settings)
-- **Origin Island** — automatic integration via Android MediaSession (no setup needed)
+- **Dock toggle** — switch between classic Material `NavigationBar` and the new floating pill dock (Settings → Appearance)
+- **Android 15-style grouped settings tiles** — rounded clustered rows in the Settings screen
+- **Origin Island / MediaSession** — Android lock-screen + notification controls wired automatically
+- **Linux MPRIS2** — exposes playback to `playerctl`, niri / Hyprland media keybindings, KDE / GNOME media widgets
+- **Keyboard shortcuts** — space play/pause, `j`/`k` prev/next, `l`/`h` seek, `n`/`p` prev/next, `s` shuffle, `r` repeat, XF86 media keys; `1`/`2`/`3`/`4` switch nav tabs; `Esc` closes the Now Playing screen
+- **Shape-morphing mini player** — mini-player radius and thumbnail morph between paused and playing states (Material 3 Expressive)
 
 ---
 
@@ -200,12 +205,38 @@ See [COMPANION.md](COMPANION.md) for full installation and API documentation.
 
 ## Roadmap
 
-- [x] Recommendations tab (Deezer-powered)
-- [x] Download recommended songs to server via companion
-- [x] Deezer catalog search with previews
-- [ ] Playlist creation / editing
-- [ ] Star / favourite songs
-- [ ] CarPlay / Android Auto
+Work is organized into three passes. Full detail in [`docs/three-pass-plan.md`](docs/three-pass-plan.md).
+
+### Pass 1 — Docs + dead-code cleanup ✅
+- Rewrite README + `memory/project_overview.md` to match real code
+- Drop the orphaned `QueueEntries` Drift table and unused star/favourite Subsonic methods
+- Schema migration v3 → v4
+
+### Pass 2 — Bug + design fixes (in progress)
+- **Recommendations quality** — parallel seed fetches, artist-diversity enforcement, better library cross-check, real error messages instead of silent empty
+- **Connection-error specificity** — differentiate no-network / DNS / TLS / HTTP 401 / 403 / 5xx / timeout on the Home offline banner
+- **Download reliability + notifications** — audit companion polling, snackbar on every completion / failure, de-jank library refresh
+- **Companion availability** — periodic re-check instead of one-shot `FutureProvider`
+- **Auto-download idempotency** — guard `ref.listen(allSongsProvider)` with a song-list signature
+- **Mini-player + dock redesign** — reconcile `MiniPlayer` / `FloatingMiniPlayer`, revisit shape morph radii/curve, fix app-bar geometry on Home / Library / Settings, visual pass on grouped settings tiles
+- **Menu + visual-glitch triage** — per-screen iteration
+
+### Pass 3 — Material 3 Expressive upgrade
+Driven by [`Material 3 Expressive Roadmap.html`](Material 3 Expressive Roadmap.html):
+1. Shape-morphing mini player (P0, rework)
+2. Large / medium `SliverAppBar` (P0, rework)
+3. Grouped settings tiles (P0, visual pass)
+4. Wavy progress + FAB shape morph (P1, Flutter 3.27+)
+5. `DynamicSchemeVariant.expressive` (P1)
+6. Motion tokens (P1, codebase-wide)
+7. `displayLargeEmphasized` typography (P2)
+8. Haptics w/ opt-out preference (P2)
+
+### Optional / future
+- Crossfade
+- Persistent queue (table dropped in Pass 1; reintroduce with proper wiring when the feature is built)
+- Playlist creation / editing
+- ListenBrainz scrobbling (Navidrome already forwards to Last.fm server-side)
 
 ---
 

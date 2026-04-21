@@ -135,14 +135,6 @@ class SubsonicClient {
         .toList();
   }
 
-  Future<List<Song>> getStarredSongs() async {
-    final resp = await _get('getStarred2');
-    final songs = resp['starred2']?['song'] as List? ?? [];
-    return songs
-        .map((s) => Song.fromSubsonicJson(s as Map<String, dynamic>))
-        .toList();
-  }
-
   Future<List<Song>> getSimilarSongs(String songId, {int count = 20}) async {
     try {
       final resp = await _get('getSimilarSongs', {'id': songId, 'count': count});
@@ -154,9 +146,6 @@ class SubsonicClient {
       return [];
     }
   }
-
-  Future<void> starSong(String id) => _get('star', {'id': id});
-  Future<void> unstarSong(String id) => _get('unstar', {'id': id});
 
   // --- Albums ---
   Future<List<Album>> getAlbums({

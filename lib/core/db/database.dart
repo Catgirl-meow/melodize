@@ -63,27 +63,6 @@ class DownloadQueue extends Table {
   Set<Column> get primaryKey => {songId};
 }
 
-class QueueEntries extends Table {
-  IntColumn get position => integer()();
-  TextColumn get songId => text()();
-  TextColumn get songTitle => text()();
-  TextColumn get artist => text()();
-  TextColumn get album => text()();
-  TextColumn get albumId => text().nullable()();
-  TextColumn get artistId => text().nullable()();
-  IntColumn get duration => integer().nullable()();
-  TextColumn get coverArt => text().nullable()();
-  TextColumn get suffix => text().nullable()();
-  TextColumn get contentType => text().nullable()();
-  IntColumn get bitRate => integer().nullable()();
-  BoolColumn get isDownloaded => boolean().withDefault(const Constant(false))();
-  TextColumn get localPath => text().nullable()();
-  BoolColumn get isCurrent => boolean().withDefault(const Constant(false))();
-
-  @override
-  Set<Column> get primaryKey => {position};
-}
-
 class LyricsCache extends Table {
   TextColumn get songId => text()();
   TextColumn get plainLyrics => text().nullable()();
@@ -101,7 +80,6 @@ class LyricsCache extends Table {
   PlayHistory,
   ServerConfig,
   DownloadQueue,
-  QueueEntries,
   LyricsCache,
 ])
 class AppDatabase extends _$AppDatabase {
@@ -110,17 +88,20 @@ class AppDatabase extends _$AppDatabase {
   factory AppDatabase() => _instance;
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onUpgrade: (m, from, to) async {
           if (from < 2) {
-            await m.createTable(queueEntries);
             await m.createTable(lyricsCache);
           }
           if (from < 3) {
             await m.addColumn(cachedSongs, cachedSongs.created);
+          }
+          if (from < 4) {
+            // Drop orphaned queue_entries table (never written to).
+            await customStatement('DROP TABLE IF EXISTS queue_entries');
           }
         },
       );
@@ -179,9 +160,6 @@ class AppDatabase extends _$AppDatabase {
       into(serverConfig).insertOnConflictUpdate(config);
 
   // --- Downloads ---
-  Future<List<DownloadQueueData>> getPendingDownloads() =>
-      (select(downloadQueue)..where((t) => t.status.equals('pending'))).get();
-
   Future<List<DownloadQueueData>> getAllDownloads() =>
       (select(downloadQueue)
             ..orderBy([(t) => OrderingTerm.desc(t.addedAt)]))
@@ -202,18 +180,6 @@ class AppDatabase extends _$AppDatabase {
   Future<void> deleteDownload(String songId) =>
       (delete(downloadQueue)..where((t) => t.songId.equals(songId))).go();
 
-  // --- Queue ---
-  Future<List<QueueEntry>> getSavedQueue() =>
-      (select(queueEntries)..orderBy([(t) => OrderingTerm.asc(t.position)]))
-          .get();
-
-  Future<void> saveQueue(List<QueueEntriesCompanion> entries) async {
-    await delete(queueEntries).go();
-    if (entries.isNotEmpty) {
-      await batch((b) => b.insertAll(queueEntries, entries));
-    }
-  }
-
   // --- Single song removal (server-side delete) ---
   Future<void> deleteSongCompletely(String songId) => transaction(() async {
         await (delete(cachedSongs)..where((t) => t.id.equals(songId))).go();
@@ -231,7 +197,6 @@ class AppDatabase extends _$AppDatabase {
         await delete(cachedSongs).go();
         await delete(serverConfig).go();
         await delete(downloadQueue).go();
-        await delete(queueEntries).go();
         await delete(lyricsCache).go();
       });
 

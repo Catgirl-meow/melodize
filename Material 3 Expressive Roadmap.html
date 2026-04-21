@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Melodize · Material 3 Expressive Roadmap</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f0d12;
+    --surface: #16131b;
+    --surface-2: #1d1a25;
+    --line: #2a2632;
+    --text: #e8e3ef;
+    --muted: #8b849a;
+    --accent: oklch(0.74 0.14 300);
+    --accent-soft: oklch(0.35 0.08 300);
+    --good: oklch(0.78 0.16 150);
+    --warn: oklch(0.78 0.16 70);
+    --issue: oklch(0.72 0.18 25);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; font-size: 15px; line-height: 1.55; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 64px 40px 120px; }
+
+  .doc-meta { display: flex; gap: 24px; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); margin-bottom: 32px; font-family: 'JetBrains Mono', monospace; }
+  .doc-meta span::before { content: '· '; margin-right: 6px; color: var(--accent); }
+  .doc-meta span:first-child::before { display: none; }
+
+  h1 { font-size: 42px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 12px; line-height: 1.05; }
+  h1 .paren { color: var(--muted); font-weight: 400; }
+  .tagline { font-size: 17px; color: var(--muted); max-width: 720px; margin-bottom: 56px; }
+
+  h2 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; margin: 64px 0 8px; display: flex; align-items: baseline; gap: 12px; }
+  h2 .num { font-family: 'JetBrains Mono', monospace; font-weight: 500; color: var(--accent); font-size: 16px; }
+  h2 + .h2-sub { color: var(--muted); margin: 0 0 24px; font-size: 14px; max-width: 680px; }
+
+  h3 { font-size: 15px; font-weight: 600; margin: 28px 0 10px; color: var(--text); }
+
+  p { margin: 0 0 12px; color: #c7c1d1; }
+
+  ul { margin: 0 0 14px; padding-left: 20px; }
+  li { margin-bottom: 6px; color: #c7c1d1; }
+
+  code { font-family: 'JetBrains Mono', monospace; font-size: 13px; background: #272232; color: #e8e3ef; padding: 1px 6px; border-radius: 4px; }
+
+  .pill { display: inline-block; font-size: 10px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; padding: 3px 8px; border-radius: 6px; margin-left: 8px; vertical-align: middle; }
+  .pill.p0 { background: oklch(0.32 0.09 25); color: oklch(0.88 0.1 25); }
+  .pill.p1 { background: oklch(0.32 0.09 70); color: oklch(0.88 0.1 70); }
+  .pill.p2 { background: oklch(0.3 0.05 300); color: oklch(0.85 0.06 300); }
+
+  .est { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); letter-spacing: 0.4px; margin-left: 8px; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 22px 24px; margin: 14px 0 22px;
+  }
+
+  .prompt {
+    background: #0a0811; border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 18px 20px; margin: 14px 0 8px;
+    font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.7;
+    color: #d8d2e2; white-space: pre-wrap;
+    position: relative;
+  }
+  .prompt::before {
+    content: 'CLAUDE CODE PROMPT';
+    position: absolute; top: -9px; left: 18px;
+    background: var(--bg); padding: 0 8px;
+    font-family: 'Inter', sans-serif; font-size: 10px; font-weight: 600;
+    letter-spacing: 1.2px; color: var(--accent);
+  }
+
+  .files { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted); margin: 4px 0 14px; }
+  .files span { color: var(--accent); }
+
+  .criteria { font-size: 13px; color: var(--muted); margin-top: 10px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  .criteria strong { color: var(--text); font-weight: 500; }
+  .criteria ul { margin-top: 6px; }
+
+  .intro-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 20px 0 40px; }
+  .intro-stat { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+  .intro-stat .n { font-size: 28px; font-weight: 600; letter-spacing: -0.02em; color: var(--accent); font-family: 'JetBrains Mono', monospace; }
+  .intro-stat .l { font-size: 12px; color: var(--muted); margin-top: 4px; text-transform: uppercase; letter-spacing: 1px; }
+
+  .divider { height: 1px; background: linear-gradient(90deg, transparent, var(--line), transparent); margin: 80px 0 0; }
+
+  .footer { margin-top: 40px; color: var(--muted); font-size: 12px; font-family: 'JetBrains Mono', monospace; }
+
+  strong { color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="doc-meta">
+    <span>Melodize</span>
+    <span>Design Review Addendum</span>
+    <span>17 Apr 2026</span>
+  </div>
+
+  <h1>Material 3 Expressive <span class="paren">roadmap</span></h1>
+  <div class="tagline">
+    You&rsquo;re on <code>material_color_utilities: ^0.12</code> and already use dynamic color, but the app is still styled against M3&rsquo;s 2023 vocabulary. Google&rsquo;s M3 Expressive refresh (rolled out through 2024–25) ships shapes, motion, and type that would genuinely improve Melodize — not just chase fashion. Here&rsquo;s a prioritized plan with ready-to-paste Claude Code prompts.
+  </div>
+
+  <div class="intro-grid">
+    <div class="intro-stat">
+      <div class="n">8</div>
+      <div class="l">Work items</div>
+    </div>
+    <div class="intro-stat">
+      <div class="n">~3d</div>
+      <div class="l">P0 effort total</div>
+    </div>
+    <div class="intro-stat">
+      <div class="n">0</div>
+      <div class="l">Breaking changes</div>
+    </div>
+  </div>
+
+  <!-- ───────────────────────────────────────────── -->
+  <h2><span class="num">01</span> Shape morphing on the mini player <span class="pill p0">P0</span><span class="est">~4h</span></h2>
+  <p class="h2-sub">The single strongest M3E idea and the one that fits Melodize best. Shapes are no longer static — they morph on state change.</p>
+
+  <div class="card">
+    <h3>What</h3>
+    <p>When the mini player is playing, its 16 px rounded rectangle should <em>breathe</em> into a softer, slightly-asymmetric shape (e.g. 22 px leading, 18 px trailing) synced to beat detection or the scrub progress. On pause, it returns to uniform 16 px. The same treatment applies to the album thumbnail inside it — square at rest, <strong>squircle</strong> while playing.</p>
+
+    <h3>Why for Melodize</h3>
+    <p>You already re-tint the whole dock from artwork. Shape-morphing gives the app a second axis of personality that most Subsonic clients can&rsquo;t replicate. It&rsquo;s a low-risk visual upgrade because it&rsquo;s ignorable — static shapes still look correct.</p>
+
+    <div class="files">edits: <span>lib/features/player/widgets/floating_mini_player.dart</span></div>
+  </div>
+
+  <div class="prompt">In lib/features/player/widgets/floating_mini_player.dart, replace the static ClipRRect(borderRadius: 16) with an AnimatedContainer whose borderRadius responds to AudioService.playbackState. When playing: BorderRadius.only(topLeft: 22, bottomLeft: 22, topRight: 18, bottomRight: 18). When paused: uniform BorderRadius.circular(16). Use Curves.easeInOutCubicEmphasized (400 ms). Do the same to the leading album thumbnail — 12 px when paused, 18 px when playing. Keep the existing blur+tint layer untouched. Add a RepaintBoundary around the AnimatedContainer so we don&rsquo;t dirty the surrounding dock.</div>
+
+  <div class="criteria">
+    <strong>Acceptance</strong>
+    <ul>
+      <li>Play/pause toggle visibly changes the mini player&rsquo;s corner asymmetry.</li>
+      <li>No new jank on profile — repaint cost stays within 1.5 ms/frame on a Pixel 6.</li>
+      <li>Works in both light and dark themes without color shifts.</li>
+    </ul>
+  </div>
+
+  <!-- ───────────────────────────────────────────── -->
+  <h2><span class="num">02</span> M3E top app bars on Home, Library, Settings <span class="pill p0">P0</span><span class="est">~3h</span></h2>
+  <p class="h2-sub">Top-level destinations should use <strong>large</strong> or <strong>medium</strong> app bars that collapse on scroll. All three currently use the small variant.</p>
+
+  <div class="card">
+    <h3>What</h3>
+    <ul>
+      <li><strong>Home</strong> → <code>SliverAppBar.large</code>, title "Home" or user greeting, collapses from 152 → 64 px.</li>
+      <li><strong>Library</strong> → <code>SliverAppBar.medium</code> (112 px), tabs pin below.</li>
+      <li><strong>Settings</strong> → <code>SliverAppBar.large</code>, matches Android 14+ Settings idiom.</li>
+    </ul>
+    <div class="files">edits: <span>home/home_screen.dart</span>, <span>library/library_screen.dart</span>, <span>settings/settings_screen.dart</span></div>
+  </div>
+
+  <div class="prompt">Convert home_screen, library_screen, and settings_screen to use CustomScrollView with SliverAppBar. For Home and Settings use SliverAppBar.large; for Library use SliverAppBar.medium with a TabBar pinned underneath via SliverPersistentHeader. The large app bar should show a 36 sp title (M3E "headlineMedium" equivalent) when expanded and collapse to 22 sp. Keep your existing body content as a list of slivers. Set scrolledUnderElevation: 0 and surfaceTintColor: Theme.of(context).colorScheme.surfaceContainer so the bar tints correctly on scroll without a shadow. Do not add back buttons — these are top-level destinations.</div>
+
+  <div class="criteria">
+    <strong>Acceptance</strong>
+    <ul>
+      <li>Each screen&rsquo;s app bar expands on initial load and collapses on scroll without jitter.</li>
+      <li>Title size animates smoothly between expanded/collapsed states.</li>
+      <li>Library&rsquo;s tab bar stays pinned below the collapsed app bar.</li>
+    </ul>
+  </div>
+
+  <!-- ───────────────────────────────────────────── -->
+  <h2><span class="num">03</span> Grouped list tiles in Settings <span class="pill p0">P0</span><span class="est">~2h</span></h2>
+  <p class="h2-sub">M3E introduces grouped settings with shared outer radius and tight inner corners — the Android 15 Settings look.</p>
+
+  <div class="card">
+    <h3>What</h3>
+    <p>In each section (Appearance, Playback, Downloads, Server, Deezer, Companion), adjacent tiles should share a 24 px outer radius on the group&rsquo;s top and bottom, with <strong>4 px inner radius</strong> on all touching edges between tiles. Single-item groups get full 24 px on all corners.</p>
+    <div class="files">new: <span>lib/widgets/grouped_list_tile.dart</span> · edits: <span>settings/settings_screen.dart</span></div>
+  </div>
+
+  <div class="prompt">Create lib/widgets/grouped_list_tile.dart exporting a GroupedListTile widget and a GroupedSection wrapper. GroupedSection takes a List&lt;Widget&gt; and computes each child&rsquo;s borderRadius based on position: first child = BorderRadius.vertical(top: Radius.circular(24)) + bottom corners 4px; middle = 4px all corners; last = bottom 24px + top 4px; only-child = 24px all corners. Each tile gets a colorScheme.surfaceContainerHigh background with 2 px vertical gaps between tiles in the group (use a SizedBox with height 2). Refactor settings_screen.dart to wrap each existing section&rsquo;s tiles in GroupedSection. Keep the existing TextStyle, leading icons, and trailing switches intact.</div>
+
+  <div class="criteria">
+    <strong>Acceptance</strong>
+    <ul>
+      <li>Settings sections visually chunk as pills instead of flat rows.</li>
+      <li>4 px gutters between tiles in the same group; 24 px section breathing room.</li>
+      <li>Works in light mode without losing contrast.</li>
+    </ul>
+  </div>
+
+  <!-- ───────────────────────────────────────────── -->
+  <h2><span class="num">04</span> Expressive loading and button feedback <span class="pill p1">P1</span><span class="est">~3h</span></h2>
+  <p class="h2-sub">Replace <code>CircularProgressIndicator</code>s with M3E&rsquo;s wavy <code>LinearProgressIndicator</code> and adopt the new <code>ProgressIndicator</code> shape morphs.</p>
+
+  <div class="card">
+    <h3>What</h3>
+    <ul>
+      <li>The 4-dot loading indicator in your Now Playing lyrics panel → <code>LinearProgressIndicator(year: 2023, waveAmplitude: 4)</code> with accent color.</li>
+      <li>Play/pause FAB on Now Playing → M3E&rsquo;s shape-morph button (rounded square ⇄ circle on state change).</li>
+      <li>Download progress in the Library&rsquo;s Downloaded view → wavy horizontal bar with animated stops.</li>
+    </ul>
+    <div class="files">edits: <span>lib/features/player/now_playing_screen.dart</span>, <span>lib/widgets/wavy_progress.dart</span></div>
+  </div>
+
+  <div class="prompt">Upgrade Flutter to ^3.27 (channel stable) if not already, then use LinearProgressIndicator&rsquo;s new waveAmplitude and waveLength parameters. Create lib/widgets/wavy_progress.dart that wraps LinearProgressIndicator with defaults: waveAmplitude: 3.0, waveLength: 32.0, color: Theme.of(context).colorScheme.primary, backgroundColor: colorScheme.primaryContainer.withOpacity(0.3). Replace the existing CircularProgressIndicator usages in lyrics loading states. For the play/pause FAB in now_playing_screen, wrap the FloatingActionButton&rsquo;s shape in AnimatedContainer that morphs between RoundedRectangleBorder(22) when paused and StadiumBorder() (circle) when playing — 300ms easeInOutCubicEmphasized.</div>
+
+  <div class="criteria">
+    <strong>Acceptance</strong>
+    <ul>
+      <li>Lyrics loading shows a horizontal wavy bar animating left-to-right.</li>
+      <li>Play/pause FAB morphs shape smoothly on each tap.</li>
+      <li>Shuffle/repeat toggles use the new filled-icon-button style (<code>IconButton.filled</code>).</li>
+    </ul>
+  </div>
+
+  <!-- ───────────────────────────────────────────── -->
+  <h2><span class="num">05</span> Re-seed the color scheme with <code>DynamicSchemeVariant.expressive</code> <span class="pill p1">P1</span><span class="est">~1h</span></h2>
+  <p class="h2-sub">Flutter 3.27 exposes M3E&rsquo;s new tonal-palette variants. Swap <code>tonalSpot</code> for <code>expressive</code> or <code>vibrant</code>.</p>
+
+  <div class="card">
+    <h3>What</h3>
+    <p>Your <code>ColorSchemeBuilder</code> currently calls <code>ColorScheme.fromSeed(seedColor: artworkSeed)</code> which defaults to <code>DynamicSchemeVariant.tonalSpot</code>. M3E ships <code>expressive</code> (playful, higher chroma) and <code>vibrant</code> (maximum saturation). Melodize&rsquo;s artwork-driven tinting will feel dramatically richer under <code>expressive</code> without losing legibility.</p>
+    <div class="files">edits: <span>lib/theme/app_theme.dart</span> or wherever <code>ColorScheme.fromSeed</code> is called</div>
+  </div>
+
+  <div class="prompt">Find every call to ColorScheme.fromSeed in the codebase. Add the parameter dynamicSchemeVariant: DynamicSchemeVariant.expressive to each call, after the seedColor arg. If the call is inside the artwork-palette path (PaletteGenerator result → seed), use DynamicSchemeVariant.vibrant instead for stronger artwork-driven personality. Also bump contrastLevel: 0.3 on both light and dark scheme construction to satisfy WCAG AA on the secondary-container backgrounds that currently fail (see design review §01 note 4).</div>
+
+  <div class="criteria">
+    <strong>Acceptance</strong>
+    <ul>
+      <li>Home feed cards visibly pop more on colorful artwork (e.g. Ado, Kenshi Yonezu albums).</li>
+      <li>Text on <code>primaryContainer</code> passes WCAG AA everywhere (≥4.5:1).</li>
+      <li>No regressions in light mode on pale artwork.</li>
+    </ul>
+  </div>
+
+  <!-- ───────────────────────────────────────────── -->
+  <h2><span class="num">06</span> Emphasized motion everywhere <span class="pill p1">P1</span><span class="est">~4h</span></h2>
+  <p class="h2-sub">M3E&rsquo;s motion system uses <code>emphasized</code> and <code>standard</code> families — not the old <code>easeInOut</code>.</p>
+
+  <div class="card">
+    <h3>What</h3>
+    <p>Create a <code>MotionTokens</code> class that matches M3E spec: <code>emphasized</code> (400 ms, cubicEmphasized), <code>emphasizedAccelerate</code> (200 ms, cubicEmphasizedAccelerate), <code>standard</code> (300 ms, easeInOutCubic). Replace hard-coded <code>Duration(milliseconds: X)</code> + <code>Curves.easeInOut</code> calls across the app.</p>
+    <div class="files">new: <span>lib/theme/motion_tokens.dart</span> · edits: every animated widget (~22 files)</div>
+  </div>
+
+  <div class="prompt">Create lib/theme/motion_tokens.dart exporting a static class MotionTokens with these constants: emphasizedDuration = Duration(milliseconds: 400); standardDuration = Duration(milliseconds: 300); emphasizedCurve = Cubic(0.2, 0.0, 0.0, 1.0); emphasizedAccelerate = Cubic(0.3, 0.0, 0.8, 0.15); emphasizedDecelerate = Cubic(0.05, 0.7, 0.1, 1.0); standardCurve = Curves.easeInOutCubic. Then do a codebase-wide refactor: replace every Duration(milliseconds: 200/300/400) paired with Curves.easeInOut in AnimatedContainer, AnimatedOpacity, TweenAnimationBuilder, PageRouteBuilder, and AnimationController with the appropriate MotionTokens constant. Use emphasizedDuration for state changes (play/pause, sheet open), standardDuration for incidental things (hover, ripple). Report each file you edit with the before/after lines.</div>
+
+  <div class="criteria">
+    <strong>Acceptance</strong>
+    <ul>
+      <li>All major state transitions feel snappier and more deliberate.</li>
+      <li>Now Playing → Lyrics pager page swipes use <code>emphasizedDecelerate</code>.</li>
+      <li>No animation takes longer than 400 ms end-to-end.</li>
+    </ul>
+  </div>
+
+  <!-- ───────────────────────────────────────────── -->
+  <h2><span class="num">07</span> Typography: adopt M3E <code>displayLargeEmphasized</code> <span class="pill p2">P2</span><span class="est">~2h</span></h2>
+  <p class="h2-sub">M3E&rsquo;s 2025 type scale adds an "emphasized" axis for every text style — heavier weight, tighter tracking.</p>
+
+  <div class="card">
+    <h3>What</h3>
+    <p>Use the emphasized styles on: Now Playing song title (currently 22 sp, 700), section headers in Home (currently 14 sp, 600), and the Library tab labels. M3E spec: <code>titleLargeEmphasized</code> = 22 sp, weight 700, tracking -0.2. <code>labelLargeEmphasized</code> = 14 sp, weight 700, tracking 0.</p>
+    <div class="files">edits: <span>lib/theme/app_theme.dart</span></div>
+  </div>
+
+  <div class="prompt">Extend the app TextTheme to include the M3E emphasized variants. Add these custom TextStyles as extensions on TextTheme via ThemeExtension: displayLargeEmphasized, titleLargeEmphasized, labelLargeEmphasized. Values per M3E spec: titleLargeEmphasized = TextStyle(fontSize: 22, fontWeight: FontWeight.w700, letterSpacing: -0.2, height: 1.27); labelLargeEmphasized = TextStyle(fontSize: 14, fontWeight: FontWeight.w700, letterSpacing: 0, height: 1.43). Apply titleLargeEmphasized to the now playing song title and labelLargeEmphasized to Home&rsquo;s section titles ("Made for you", "Recently Played", etc). Keep the font family the same (Google Sans / platform default).</div>
+
+  <div class="criteria">
+    <strong>Acceptance</strong>
+    <ul>
+      <li>Now Playing title visibly heavier and tighter than before.</li>
+      <li>Home section headers no longer feel undersized.</li>
+      <li>No text clipping on narrow devices.</li>
+    </ul>
+  </div>
+
+  <!-- ───────────────────────────────────────────── -->
+  <h2><span class="num">08</span> Haptics alongside motion <span class="pill p2">P2</span><span class="est">~1h</span></h2>
+  <p class="h2-sub">M3E couples shape/motion changes with subtle haptic feedback.</p>
+
+  <div class="card">
+    <h3>What</h3>
+    <p>Add <code>HapticFeedback.selectionClick()</code> on: dock tab switches, play/pause, queue reorder, scrub release. Use <code>HapticFeedback.lightImpact()</code> on the sheet-dismiss over-scroll in Now Playing.</p>
+    <div class="files">edits: <span>floating_dock.dart</span>, <span>now_playing_screen.dart</span>, <span>queue_sheet.dart</span></div>
+  </div>
+
+  <div class="prompt">Add HapticFeedback calls (from flutter/services.dart) to key interaction points. In floating_dock.dart&rsquo;s onDestinationSelected, call HapticFeedback.selectionClick() before the setState. In now_playing_screen.dart&rsquo;s play/pause button onTap, call HapticFeedback.lightImpact() alongside the audio command. On the scrub bar&rsquo;s onChangeEnd, call HapticFeedback.selectionClick(). On the queue sheet&rsquo;s ReorderableListView, HapticFeedback.mediumImpact() in onReorderStart and selectionClick in onReorderEnd. Gate all haptic calls behind a user setting (add a new SharedPreferences key &quot;haptics_enabled&quot; defaulting to true) and expose it as a switch tile under Settings → Appearance.</div>
+
+  <div class="criteria">
+    <strong>Acceptance</strong>
+    <ul>
+      <li>Every primary interaction has a subtle tactile response on devices that support it.</li>
+      <li>Users can disable haptics from Settings.</li>
+      <li>No haptics fire on iOS web/desktop targets (guarded by platform check).</li>
+    </ul>
+  </div>
+
+  <div class="divider"></div>
+
+  <h2 style="margin-top: 64px;"><span class="num">⌘</span> Suggested sequencing</h2>
+  <p class="h2-sub">Ship in this order for maximum perceived polish at minimum risk.</p>
+
+  <div class="card">
+    <p><strong>Week 1 (P0):</strong> 05 re-seed (1h) → 02 app bars (3h) → 03 grouped settings (2h) → 01 shape morph (4h). Ship as 0.2.0. Visible impact: richer colors, proper hierarchy, the signature mini-player breath.</p>
+    <p><strong>Week 2 (P1):</strong> 06 motion tokens (4h) → 04 wavy progress + FAB morph (3h) → 05 re-seed on vibrant variant (revisit if too saturated). Ship as 0.2.1.</p>
+    <p><strong>Later (P2):</strong> 07 type emphasized + 08 haptics. These are small and can land alongside any feature work.</p>
+  </div>
+
+  <div class="footer">
+    Melodize · Material 3 Expressive roadmap · paired with the design review artifact · Catgirl-meow/melodize@main
+  </div>
+
+</div>
+</body>
+</html>
