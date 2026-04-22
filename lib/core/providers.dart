@@ -4,7 +4,8 @@ import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift/drift.dart' show Value;
-import 'package:flutter/material.dart' show Color, HSLColor, Size;
+import 'package:flutter/material.dart'
+    show Color, HSLColor, ImageConfiguration, Size;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:palette_generator/palette_generator.dart';
@@ -14,6 +15,7 @@ import 'api/navidrome_client.dart' show CompanionClient;
 import 'api/deezer_client.dart';
 import 'api/lrclib_client.dart';
 import 'models/recommended_track.dart';
+import 'models/recommendations_state.dart';
 import 'audio/audio_handler.dart';
 import 'db/database.dart';
 import 'models/app_preferences.dart';
@@ -22,6 +24,7 @@ import 'models/album.dart';
 import 'models/artist.dart';
 import 'models/lyrics_result.dart';
 import 'models/search_results.dart';
+import 'utils/title_normalize.dart';
 
 // --- Database ---
 final databaseProvider = Provider<AppDatabase>((_) => AppDatabase());
@@ -90,6 +93,28 @@ final companionAvailableProvider = FutureProvider<bool>((ref) async {
 
 final canDeleteFromServerProvider = Provider<bool>((ref) =>
     ref.watch(companionAvailableProvider).valueOrNull ?? false);
+
+/// Three-state readable status for the user's Deezer ARL cookie.
+///
+/// `notSet` — user never pasted an ARL. No banner, no red chip; the app is
+///            just in "previews only" mode.
+/// `valid`  — Deezer's gw-light endpoint returned a non-zero USER_ID.
+/// `invalid`— ARL set but Deezer rejected it (expired, malformed, etc.)
+///            → surface an actionable banner / red tile so the user knows
+///            *before* they hit a mystery "download failed" on the server.
+enum DeezerArlStatus { notSet, valid, invalid }
+
+/// Validates the configured Deezer ARL by calling Deezer's gw-light endpoint
+/// directly — no companion round-trip needed. Re-runs automatically whenever
+/// `preferencesNotifierProvider` emits a new ARL via `ref.watch`.
+final deezerArlStatusProvider = FutureProvider<DeezerArlStatus>((ref) async {
+  final arl = ref.watch(
+    preferencesNotifierProvider.select((p) => p.deezerArl),
+  );
+  if (arl.isEmpty) return DeezerArlStatus.notSet;
+  final ok = await DeezerClient.validateArl(arl);
+  return ok ? DeezerArlStatus.valid : DeezerArlStatus.invalid;
+});
 
 Future<void> deleteSongFromServer(WidgetRef ref, Song song) async {
   final companion = ref.read(companionClientProvider);
@@ -245,56 +270,165 @@ final randomSongsProvider = FutureProvider<List<Song>>((ref) async {
 
 final deezerClientProvider = Provider<DeezerClient>((_) => DeezerClient());
 
-// Seeded from recently played songs; uses Deezer artist radio to discover
-// tracks NOT already in the user's Navidrome library.
-// Cross-references each Deezer result against the library in parallel:
-// if the track is found (already on server) it is skipped — only true
-// discoveries (30 s previews) are returned.
-// Returns [] silently on any failure so the home screen always loads.
+/// When set, [recommendationsProvider] uses this single seed instead of
+/// pulling from play history. Wired to the "More like this" action on a
+/// recommendation card's 3-dot menu.
+///
+/// The consumer is responsible for clearing this back to null after its
+/// invalidate, so a subsequent refresh falls back to the history-based
+/// flow rather than re-forcing the same seed forever.
+typedef RecommendationSeed = ({String artist, String title, String? genre});
+
+final recommendationsSeedOverrideProvider =
+    StateProvider<RecommendationSeed?>((_) => null);
+
+/// Discovers NEW tracks the user doesn't already have via Deezer artist
+/// radios. Explicit [RecommendationsState] so Home can distinguish
+/// loading / empty-history / error / ready — the previous version
+/// silently returned `[]` for every failure mode.
+///
+/// Pipeline:
+///   1. Build up to 6 seeds (override takes precedence; otherwise dedupe
+///      recent history by artist, shuffle, take 6).
+///   2. For each seed run [DeezerClient.searchBestArtist] (fuzzy match,
+///      genre-biased) then [DeezerClient.artistRadio] — all seeds in
+///      parallel via Future.wait.
+///   3. If every seed returned empty, retry the whole fan-out once
+///      (transient network hits tend to be correlated).
+///   4. Merge + dedupe by Deezer ID.
+///   5. Filter out anything whose normalized title+artist matches a
+///      library track — recommendations are for music the user doesn't
+///      own yet. Uses the local [allSongsProvider] snapshot, not a
+///      per-candidate Subsonic search (the old impl did N searches per
+///      refresh, which was both slow and brittle).
+///   6. Cap at 2 tracks per artist (bucket-interleave), shuffle, take 30.
+///   7. Warm the cover-art disk cache so the list doesn't pop in.
+///
+/// Intentionally NOT autoDispose: a fail-empty state used to stick
+/// across navigation because rebuilding with the same seed reproduced
+/// the same failure. Keeping the provider alive lets explicit
+/// `ref.invalidate` from the refresh button be the only retry trigger.
 final recommendationsProvider =
-    FutureProvider.autoDispose<List<Song>>((ref) async {
+    FutureProvider<RecommendationsState>((ref) async {
   final db = ref.watch(databaseProvider);
   final client = ref.watch(subsonicClientProvider);
   final deezer = ref.watch(deezerClientProvider);
+  final override = ref.watch(recommendationsSeedOverrideProvider);
 
-  if (client == null) return [];
-  final history = await db.getRecentHistory(limit: 30);
-  if (history.isEmpty) return [];
-
-  final shuffled = history.toList()..shuffle();
-  final seen = <int>{};
-  final deezerTracks = <RecommendedTrack>[];
-
-  // Collect Deezer artist-radio candidates from up to 10 history seeds.
-  for (final h in shuffled.take(10)) {
-    final batch = await deezer.getRecommendations(h.artist, h.songTitle);
-    for (final t in (batch.toList()..shuffle())) {
-      if (seen.add(t.deezerId)) deezerTracks.add(t);
-    }
-    if (deezerTracks.length >= 40) break;
+  if (client == null) {
+    return const RecsError(
+        'Connect a server in Settings to get recommendations.');
   }
 
-  // Check each candidate against the library in parallel.
-  // Tracks already on the server are excluded — recommendations are for
-  // music the user hasn't added yet.
-  final toCheck = deezerTracks.take(30).toList();
-  final searchResults = await Future.wait(
-    toCheck.map((t) => client
-        .search('${t.title} ${t.artist}', songCount: 3)
-        .catchError((_) => SearchResults.empty())),
-  );
+  // Library snapshot used for the already-owned cross-check. ref.read,
+  // not watch — we don't want a rec rebuild every time the library
+  // stream re-emits (stale-then-fresh).
+  final library = ref.read(allSongsProvider).valueOrNull ?? const <Song>[];
+  final libraryKeys = <String>{
+    for (final s in library) keyFor(s.title, s.artist),
+  };
+  final genreBySongId = <String, String?>{
+    for (final s in library) s.id: s.genre,
+  };
 
-  final songs = <Song>[];
-  final seenIds = <String>{};
-  for (int i = 0; i < toCheck.length && songs.length < 20; i++) {
-    final t = toCheck[i];
-    final titleLower = t.title.toLowerCase().trim();
-    final inLibrary = searchResults[i].songs
-        .any((s) => s.title.toLowerCase().trim() == titleLower);
-    if (inLibrary) continue;
-    final id = 'deezer:${t.deezerId}';
-    if (seenIds.add(id)) {
-      songs.add(Song.fromRecommendation(
+  final seeds = <RecommendationSeed>[];
+  if (override != null) {
+    seeds.add(override);
+  } else {
+    final history = await db.getRecentHistory(limit: 30);
+    if (history.isEmpty) return const RecsEmptyNoHistory();
+
+    // Dedupe by artist so 6 seeds cover 6 different artists; avoids the
+    // "played the same track 6 times today = 6 identical seeds = 1 radio"
+    // degenerate case.
+    final byArtist = <String, PlayHistoryData>{};
+    for (final h in history) {
+      byArtist.putIfAbsent(h.artist, () => h);
+    }
+    final distinct = byArtist.values.toList()..shuffle();
+    for (final h in distinct.take(6)) {
+      seeds.add((
+        artist: h.artist,
+        title: h.songTitle,
+        genre: genreBySongId[h.songId],
+      ));
+    }
+    if (seeds.isEmpty) return const RecsEmptyNoHistory();
+  }
+
+  Future<List<RecommendedTrack>> fanOut(RecommendationSeed seed) async {
+    final id = await deezer.searchBestArtist(
+      artistName: seed.artist,
+      trackTitle: seed.title,
+      genreHint: seed.genre,
+    );
+    if (id == null) return const [];
+    return deezer.artistRadio(id, limit: 10);
+  }
+
+  var results = await Future.wait(seeds.map(fanOut));
+  if (results.every((r) => r.isEmpty)) {
+    results = await Future.wait(seeds.map(fanOut));
+  }
+  final failedSeeds = results.where((r) => r.isEmpty).length;
+
+  final byDeezerId = <int, RecommendedTrack>{};
+  for (final list in results) {
+    for (final t in list) {
+      byDeezerId.putIfAbsent(t.deezerId, () => t);
+    }
+  }
+  if (byDeezerId.isEmpty) {
+    return const RecsError(
+        "Couldn't fetch recommendations right now — check your connection and retry.");
+  }
+
+  final discoveries = byDeezerId.values
+      .where((t) => !libraryKeys.contains(keyFor(t.title, t.artist)))
+      .toList();
+
+  // Artist diversity: at most 2 per artist, interleaved so same-artist
+  // tracks aren't clustered at the top of the list.
+  final buckets = <String, List<RecommendedTrack>>{};
+  for (final t in discoveries) {
+    buckets.putIfAbsent(normalize(t.artist), () => []).add(t);
+  }
+  final shuffledBuckets = buckets.values.map((b) {
+    final list = b.toList()..shuffle();
+    return list.take(2).toList();
+  }).toList()
+    ..shuffle();
+  final capped = <RecommendedTrack>[];
+  for (var round = 0; capped.length < 30; round++) {
+    var anyLeft = false;
+    for (final bucket in shuffledBuckets) {
+      if (round < bucket.length) {
+        capped.add(bucket[round]);
+        anyLeft = true;
+        if (capped.length >= 30) break;
+      }
+    }
+    if (!anyLeft) break;
+  }
+
+  if (capped.isEmpty) {
+    return const RecsError(
+        'All recommendations matched tracks you already have — try refreshing.');
+  }
+
+  // Warm cover-art disk cache. CachedNetworkImageProvider writes through
+  // to disk on resolve; fire-and-forget so a slow image host can't stall
+  // the whole provider.
+  for (final t in capped) {
+    final url = t.coverUrl;
+    if (url != null && url.isNotEmpty) {
+      CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
+    }
+  }
+
+  final songs = [
+    for (final t in capped)
+      Song.fromRecommendation(
         deezerId: t.deezerId,
         title: t.title,
         artist: t.artist,
@@ -302,11 +436,10 @@ final recommendationsProvider =
         durationSeconds: t.durationSeconds,
         previewUrl: t.previewUrl,
         coverUrl: t.coverUrl,
-      ));
-    }
-  }
+      ),
+  ];
 
-  return songs;
+  return RecsReady(songs, failedSeeds: failedSeeds);
 });
 
 // Deezer catalog search — powers the "From Deezer" section in the search tab.

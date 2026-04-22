@@ -408,36 +408,24 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     // Emit the new shuffle state immediately so the button lights up at once.
     _linuxShuffleCtrl.add(_linuxShuffled);
 
-    // Reorder the ConcatenatingAudioSource in-place instead of calling
-    // setAudioSource with a new source.  setAudioSource triggers
-    // _player.open() in mediakit_player, which reloads the current track from
-    // scratch: the audio goes silent for however long it takes mpv to re-open
-    // and buffer the URL (5-10 s on transcoded HTTP streams with no Content-Length).
+    // Rebuild the ConcatenatingAudioSource in the desired order and reload it.
     //
-    // In-place manipulation (removeRange / insertAll) uses mpv's add/remove/move
-    // playlist commands which never touch the currently-playing track — no pause,
-    // no reload, no silence, no seek needed.
-    final currentIdx = player.currentIndex ?? 0;
+    // The previous approach (removeRange + insertAll) issued N playlist-move
+    // commands to MPV for an N-song queue.  MPV's event queue overflows and
+    // all moves fail silently, leaving a 1-song queue that stops after the
+    // current track.  setAudioSource avoids that: it issues a single loadlist
+    // command and seeks back to the saved position, causing only a brief gap
+    // (~1 s on LAN) instead of a silently broken queue.
+    final pos = player.position;
     _holdSongNull = true;
+    _playlistSource = ConcatenatingAudioSource(
+      children: orderedSongs.map(_songToSource).toList(),
+      useLazyPreparation: true,
+    );
     try {
-      // 1. Remove songs after current index.
-      if (currentIdx < _playlistSource.length - 1) {
-        await _playlistSource.removeRange(currentIdx + 1, _playlistSource.length);
-      }
-      // 2. Remove songs before current index (each removal shifts current by -1
-      //    so we always remove from index 0 until none remain before current).
-      if (currentIdx > 0) {
-        await _playlistSource.removeRange(0, currentIdx);
-      }
-      // _playlistSource now contains only the current song at index 0.
-
-      // 3. Insert remaining songs in the desired order after current.
-      if (orderedSongs.length > 1) {
-        await _playlistSource.insertAll(
-          1,
-          orderedSongs.sublist(1).map(_songToSource).toList(),
-        );
-      }
+      await player.setAudioSource(_playlistSource, initialIndex: 0, preload: true);
+      await player.seek(pos);
+      await player.play();
     } catch (e) {
       debugPrint('toggleShuffle error: $e');
     } finally {

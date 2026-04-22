@@ -218,7 +218,7 @@ Work is organized into three passes. Full detail in [`docs/three-pass-plan.md`](
 - **Download reliability + notifications** — audit companion polling, snackbar on every completion / failure, de-jank library refresh
 - **Companion availability** — periodic re-check instead of one-shot `FutureProvider`
 - **Auto-download idempotency** — guard `ref.listen(allSongsProvider)` with a song-list signature
-- **Mini-player + dock redesign** — reconcile `MiniPlayer` / `FloatingMiniPlayer`, revisit shape morph radii/curve, fix app-bar geometry on Home / Library / Settings, visual pass on grouped settings tiles
+- **Mini-player + dock redesign** — shape-morph radius consistency + dock pill geometry shipped in v1.8.4; app-bar geometry + grouped-settings-tile visual pass still pending
 - **Menu + visual-glitch triage** — per-screen iteration
 
 ### Pass 3 — Material 3 Expressive upgrade

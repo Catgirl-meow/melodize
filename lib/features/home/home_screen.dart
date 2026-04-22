@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/album.dart';
+import '../../core/models/recommendations_state.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/utils/download_polling_mixin.dart';
@@ -11,6 +12,7 @@ import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/offline_banner.dart';
 import '../library/album_detail_screen.dart';
 import '../library/playlist_detail_screen.dart';
+import '../settings/settings_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -37,6 +39,7 @@ class HomeScreen extends ConsumerWidget {
     final isOnline = ref.watch(isOnlineProvider).valueOrNull ?? true;
     final serverReachable =
         ref.watch(serverReachableProvider).valueOrNull ?? true;
+    final arlStatus = ref.watch(deezerArlStatusProvider).valueOrNull;
 
     final scheme = Theme.of(context).colorScheme;
 
@@ -71,6 +74,13 @@ class HomeScreen extends ConsumerWidget {
             ),
           ),
         ),
+
+        // Deezer ARL expired banner — appears only when ARL is set but
+        // Deezer's own /getUserData returned USER_ID=0. Preempts the mystery
+        // "download failed" snacks users would otherwise see when adding
+        // recommendations to the library.
+        if (arlStatus == DeezerArlStatus.invalid)
+          const SliverToBoxAdapter(child: _DeezerExpiredBanner()),
 
         // Server unreachable chip (only when device is online but server is down)
         if (isOnline && !serverReachable)
@@ -214,47 +224,10 @@ class HomeScreen extends ConsumerWidget {
           ),
         ),
 
-        // Recommended for You — library songs via getSimilarSongs (Last.fm),
-        // falling back to Deezer artist radio with library cross-reference.
-        recsAsync.when(
-          skipLoadingOnRefresh: true,
-          loading: () => const SliverToBoxAdapter(child: SizedBox.shrink()),
-          error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
-          data: (recs) {
-            if (recs.isEmpty) {
-              return const SliverToBoxAdapter(child: SizedBox.shrink());
-            }
-            return SliverToBoxAdapter(
-              child: _Section(
-                title: 'Recommended for You',
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      tooltip: 'Play all',
-                      icon: const Icon(Icons.play_arrow_rounded),
-                      onPressed: () => _playRecommendations(ref, recs, shuffle: false),
-                    ),
-                    IconButton(
-                      tooltip: 'Shuffle',
-                      icon: const Icon(Icons.shuffle_rounded),
-                      onPressed: () => _playRecommendations(ref, recs, shuffle: true),
-                    ),
-                  ],
-                ),
-                child: SizedBox(
-                  height: 176,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: recs.length,
-                    itemBuilder: (_, i) => _RecommendationCard(song: recs[i]),
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
+        // Recommended for You — Deezer artist-radio discoveries filtered
+        // against the library. Surface is state-driven so we can distinguish
+        // loading / empty-history / error / ready instead of silently hiding.
+        _buildRecsSection(context, ref, recsAsync),
 
         // Recently played
         recentAsync.when(
@@ -304,10 +277,86 @@ class HomeScreen extends ConsumerWidget {
     ref.read(audioHandlerNotifierProvider)?.loadQueue(songs, startIndex: index);
   }
 
-  void _playRecommendations(WidgetRef ref, List<Song> songs, {required bool shuffle}) {
-    final list = songs.toList();
-    if (shuffle) list.shuffle();
-    ref.read(audioHandlerNotifierProvider)?.loadQueue(list, startIndex: 0);
+  Widget _buildRecsSection(
+    BuildContext context,
+    WidgetRef ref,
+    AsyncValue<RecommendationsState> recsAsync,
+  ) {
+    void refresh() {
+      // Clear any active "More like this" override so the refresh falls
+      // back to history-based seeds instead of re-running the same single
+      // seed the user clicked earlier.
+      ref.read(recommendationsSeedOverrideProvider.notifier).state = null;
+      ref.invalidate(recommendationsProvider);
+    }
+
+    return recsAsync.when(
+      skipLoadingOnRefresh: true,
+      loading: () => const SliverToBoxAdapter(child: SizedBox.shrink()),
+      error: (_, __) => SliverToBoxAdapter(
+        child: _Section(
+          title: 'Recommended for You',
+          trailing: IconButton(
+            tooltip: 'Retry',
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: refresh,
+          ),
+          child: _RecsInlineError(
+            message: 'Recommendations failed to load.',
+            onRetry: refresh,
+          ),
+        ),
+      ),
+      data: (state) {
+        switch (state) {
+          case RecsLoading():
+            return const SliverToBoxAdapter(child: SizedBox.shrink());
+          case RecsEmptyNoHistory():
+            return const SliverToBoxAdapter(
+              child: _Section(
+                title: 'Recommended for You',
+                child: _RecsEmptyHint(),
+              ),
+            );
+          case RecsError(reason: final reason):
+            return SliverToBoxAdapter(
+              child: _Section(
+                title: 'Recommended for You',
+                trailing: IconButton(
+                  tooltip: 'Retry',
+                  icon: const Icon(Icons.refresh_rounded),
+                  onPressed: refresh,
+                ),
+                child: _RecsInlineError(message: reason, onRetry: refresh),
+              ),
+            );
+          case RecsReady(songs: final songs):
+            return SliverToBoxAdapter(
+              child: _Section(
+                title: 'Recommended for You',
+                trailing: IconButton(
+                  tooltip: 'Refresh recommendations',
+                  icon: const Icon(Icons.refresh_rounded),
+                  onPressed: refresh,
+                ),
+                child: SizedBox(
+                  height: 176,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: songs.length,
+                    itemBuilder: (_, i) => _RecommendationCard(
+                      song: songs[i],
+                      queue: songs,
+                      index: i,
+                    ),
+                  ),
+                ),
+              ),
+            );
+        }
+      },
+    );
   }
 
   String _greeting(String? username) {
@@ -491,7 +540,16 @@ class _PlaylistCard extends ConsumerWidget {
 
 class _RecommendationCard extends ConsumerStatefulWidget {
   final Song song;
-  const _RecommendationCard({required this.song});
+  // Full recommendations list so tapping this card starts sequential
+  // playback of the whole row; shuffle / loop in the player then operate
+  // over every recommendation, not the single tapped track.
+  final List<Song> queue;
+  final int index;
+  const _RecommendationCard({
+    required this.song,
+    required this.queue,
+    required this.index,
+  });
 
   @override
   ConsumerState<_RecommendationCard> createState() =>
@@ -500,37 +558,47 @@ class _RecommendationCard extends ConsumerStatefulWidget {
 
 class _RecommendationCardState extends ConsumerState<_RecommendationCard>
     with DownloadPollingMixin {
-  bool _loading = false;
-
-  Future<void> _play() async {
-    if (_loading) return;
-    setState(() => _loading = true);
-    try {
-      ref.read(audioHandlerNotifierProvider)?.loadQueue([widget.song]);
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+  void _play() {
+    ref
+        .read(audioHandlerNotifierProvider)
+        ?.loadQueue(widget.queue, startIndex: widget.index);
   }
 
   Future<void> _addToLibrary() async {
+    debugPrint('[rec] _addToLibrary for ${widget.song.id} "${widget.song.title}"');
     final companion = ref.read(companionClientProvider);
-    if (companion == null) return;
+    if (companion == null) {
+      showStyledSnack(context,
+          'Companion not configured — set it up in Settings',
+          isError: true);
+      return;
+    }
     final prefs = ref.read(preferencesNotifierProvider);
-    // song.id is 'deezer:TRACKID' for preview-only recommendations.
+    // Deemix fails hard without a valid ARL — preflight here so the user
+    // gets an actionable message instead of a "Download failed: Aborted!"
+    // snack five seconds later from the server-side polling path.
+    if (!prefs.hasDeezerArl) {
+      showStyledSnack(context,
+          'Add Deezer ARL in Settings — required for server downloads',
+          isError: true);
+      return;
+    }
+    final arlStatus = ref.read(deezerArlStatusProvider).valueOrNull;
+    if (arlStatus == DeezerArlStatus.invalid) {
+      showStyledSnack(context,
+          'Deezer session expired — update ARL in Settings',
+          isError: true);
+      return;
+    }
     final deezerTrackId = widget.song.id.substring('deezer:'.length);
     final url = 'https://www.deezer.com/track/$deezerTrackId';
+
+    showStyledSnack(context, 'Sending to server (FLAC)…');
+
     try {
-      final jobId = await companion.startDownload(
-        url,
-        deezerArl: prefs.hasDeezerArl ? prefs.deezerArl : null,
-      );
+      final jobId =
+          await companion.startDownload(url, deezerArl: prefs.deezerArl);
       if (!mounted) return;
-      showStyledSnack(
-        context,
-        prefs.hasDeezerArl
-            ? 'Downloading FLAC to Navidrome server…'
-            : 'Downloading to Navidrome server (add Deezer ARL in Settings for lossless)',
-      );
       startDownloadPolling(companion, jobId);
     } catch (e) {
       if (!mounted) return;
@@ -538,12 +606,55 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
     }
   }
 
+  void _moreLikeThis() {
+    ref.read(recommendationsSeedOverrideProvider.notifier).state = (
+      artist: widget.song.artist,
+      title: widget.song.title,
+      // Deezer-sourced song — no library genre to bias the search with.
+      genre: null,
+    );
+    ref.invalidate(recommendationsProvider);
+  }
+
+  void _openMenu() {
+    final canDownload = ref.read(canDeleteFromServerProvider);
+    debugPrint('[rec] _openMenu canDownload=$canDownload song=${widget.song.id}');
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (canDownload)
+              ListTile(
+                leading: const Icon(Icons.library_add_rounded),
+                title: const Text('Add to library'),
+                subtitle: const Text('Download to Navidrome server'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _addToLibrary();
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.auto_awesome_rounded),
+              title: const Text('More like this'),
+              subtitle: const Text('Rebuild recommendations from this track'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _moreLikeThis();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isPreview = widget.song.externalStreamUrl != null;
-    final canDownload = ref.watch(canDeleteFromServerProvider) && isPreview;
 
     Widget cover;
     if (widget.song.externalCoverUrl != null) {
@@ -566,24 +677,29 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
       );
     }
 
+    // Two separate tap zones (cover + text block) instead of one outer
+    // InkWell wrapping the 3-dot button. Nested InkWells inside a Stack
+    // were swallowing the 3-dot tap and routing it to _play, so the
+    // menu never opened and companion downloads never fired.
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: SizedBox(
         width: 130,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: _play,
-          onLongPress: canDownload ? () { _addToLibrary(); } : null,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Stack(
-                children: [
-                  cover,
-                  if (isPreview)
-                    Positioned(
-                      bottom: 6,
-                      right: 6,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Stack(
+              children: [
+                InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: _play,
+                  child: cover,
+                ),
+                if (isPreview)
+                  Positioned(
+                    bottom: 6,
+                    left: 6,
+                    child: IgnorePointer(
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 5, vertical: 2),
@@ -600,32 +716,48 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
                         ),
                       ),
                     ),
-                  if (_loading)
-                    Positioned.fill(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Container(
-                          color: Colors.black45,
-                          child: const Center(
-                              child: CircularProgressIndicator(strokeWidth: 2)),
-                        ),
+                  ),
+                Positioned(
+                  top: 2,
+                  right: 2,
+                  child: Material(
+                    color: Colors.black38,
+                    shape: const CircleBorder(),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: _openMenu,
+                      child: const Padding(
+                        padding: EdgeInsets.all(4),
+                        child: Icon(Icons.more_vert_rounded,
+                            size: 18, color: Colors.white),
                       ),
                     ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            InkWell(
+              borderRadius: BorderRadius.circular(6),
+              onTap: _play,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(widget.song.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600)),
+                  Text(widget.song.artist,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 12, color: scheme.onSurfaceVariant)),
                 ],
               ),
-              const SizedBox(height: 8),
-              Text(widget.song.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w600)),
-              Text(widget.song.artist ?? '',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 12, color: scheme.onSurfaceVariant)),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -641,4 +773,139 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
               size: 52, color: scheme.onSurfaceVariant),
         ),
       );
+}
+
+// ---------------------------------------------------------------------------
+
+// Inline error row rendered inside the "Recommended for You" section —
+// not a dialog / snackbar, deliberately. Goes away the moment the retry
+// succeeds; never blocks the rest of the Home screen.
+class _RecsInlineError extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  const _RecsInlineError({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.error_outline_rounded,
+                size: 18, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(
+                    fontSize: 13, color: scheme.onSurfaceVariant),
+              ),
+            ),
+            TextButton(
+              onPressed: onRetry,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Surfaces Deezer ARL expiry as an actionable top-of-home banner. Tapping
+// routes to Settings so the user can paste a fresh ARL without hunting
+// through the nav.
+class _DeezerExpiredBanner extends StatelessWidget {
+  const _DeezerExpiredBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Material(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const SettingsScreen()),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Icon(Icons.error_rounded, color: scheme.onErrorContainer),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Deezer session expired',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onErrorContainer,
+                        ),
+                      ),
+                      Text(
+                        'Paste a fresh ARL in Settings to re-enable server downloads.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: scheme.onErrorContainer,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded,
+                    color: scheme.onErrorContainer),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Shown when the user has no play history yet — can't build seeds.
+class _RecsEmptyHint extends StatelessWidget {
+  const _RecsEmptyHint();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.auto_awesome_rounded,
+                size: 18, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Play a few songs — recommendations appear after some listening history.',
+                style: TextStyle(
+                    fontSize: 13, color: scheme.onSurfaceVariant),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

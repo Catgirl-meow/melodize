@@ -178,18 +178,9 @@ class SettingsScreen extends ConsumerWidget {
               // --- Deezer ---
               _SectionHeader('Deezer'),
               GroupedSection(children: [
-                ListTile(
-                  leading: const Icon(Icons.account_circle_rounded),
-                  title: const Text('Deezer Account'),
-                  subtitle: Text(
-                    prefs.hasDeezerArl
-                        ? 'Connected — FLAC downloads enabled'
-                        : 'Not connected — 30s previews only',
-                  ),
-                  trailing: prefs.hasDeezerArl
-                      ? const Icon(Icons.check_circle_rounded, color: Colors.green)
-                      : null,
-                  onTap: () => _editDeezerArl(context, ref, prefs),
+                _DeezerAccountTile(
+                  prefs: prefs,
+                  onEdit: () => _editDeezerArl(context, ref, prefs),
                 ),
                 ListTile(
                   leading: const Icon(Icons.help_outline_rounded),
@@ -516,6 +507,67 @@ class SettingsScreen extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// Replaces the plain ARL tile with one that surfaces live validation status,
+// so the user finds out an expired ARL from Settings (or the Home banner)
+// rather than from a mystery "download failed" five seconds after tapping
+// Add to library.
+class _DeezerAccountTile extends ConsumerWidget {
+  final AppPreferences prefs;
+  final VoidCallback onEdit;
+  const _DeezerAccountTile({required this.prefs, required this.onEdit});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+
+    if (!prefs.hasDeezerArl) {
+      return ListTile(
+        leading: const Icon(Icons.account_circle_rounded),
+        title: const Text('Deezer Account'),
+        subtitle: const Text('Not connected — 30s previews only'),
+        onTap: onEdit,
+      );
+    }
+
+    final statusAsync = ref.watch(deezerArlStatusProvider);
+    final (String subtitle, Widget trailing) = statusAsync.when(
+      loading: () => (
+        'Checking Deezer session…',
+        const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2)),
+      ),
+      error: (_, __) => (
+        'Could not verify (check internet)',
+        Icon(Icons.help_outline_rounded, color: scheme.onSurfaceVariant),
+      ),
+      data: (status) => switch (status) {
+        DeezerArlStatus.valid => (
+          'Connected — FLAC downloads enabled',
+          const Icon(Icons.check_circle_rounded, color: Colors.green),
+        ),
+        DeezerArlStatus.invalid => (
+          'Session expired — tap to paste a fresh ARL',
+          Icon(Icons.error_rounded, color: scheme.error),
+        ),
+        DeezerArlStatus.notSet => (
+          'Not connected — 30s previews only',
+          const SizedBox.shrink(),
+        ),
+      },
+    );
+
+    return ListTile(
+      leading: const Icon(Icons.account_circle_rounded),
+      title: const Text('Deezer Account'),
+      subtitle: Text(subtitle),
+      trailing: trailing,
+      onTap: onEdit,
     );
   }
 }

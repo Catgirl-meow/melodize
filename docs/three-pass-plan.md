@@ -38,83 +38,21 @@ Done on 2026-04-21. Summary:
 
 ---
 
-## Pass 2 — Bug + design fixes (next session)
+## Pass 2 — Bug + design fixes (in progress)
 
-Each sub-item lists current state, what's wrong, and target behavior. Suggested order by priority. Architectural rewrites permitted per user policy.
+Pass 2 is split into seven standalone sub-plans under [`docs/pass-2/`](pass-2/). Each file is self-contained: context, problem, proposal, open questions, files, verification. A fresh session can resume any sub-item by reading just that file.
 
-### 2a. Recommendations quality
+| # | Topic | File | Status |
+|---|-------|------|--------|
+| 2a | Recommendations quality rewrite | [pass-2/2a-recommendations.md](pass-2/2a-recommendations.md) | in progress — awaiting user decisions |
+| 2b | Connection-error specificity on Home | [pass-2/2b-connection-errors.md](pass-2/2b-connection-errors.md) | pending |
+| 2c | Download reliability + notifications | [pass-2/2c-download-reliability.md](pass-2/2c-download-reliability.md) | pending |
+| 2d | `companionAvailableProvider` staleness | [pass-2/2d-companion-freshness.md](pass-2/2d-companion-freshness.md) | pending |
+| 2e | Auto-download `'all'` idempotency | [pass-2/2e-auto-download-idempotency.md](pass-2/2e-auto-download-idempotency.md) | pending |
+| 2f | Mini-player + dock design fixes | [pass-2/2f-miniplayer-dock.md](pass-2/2f-miniplayer-dock.md) | shape/radius pass shipped in v1.8.4 — tiles + app bars still pending |
+| 2g | Menu + visual-glitch triage | [pass-2/2g-menu-triage.md](pass-2/2g-menu-triage.md) | pending (needs screenshots) |
 
-Current state: `lib/core/providers.dart` (`recommendationsProvider`), `lib/core/api/deezer_client.dart` (`getRecommendations`).
-
-Problems:
-- Seeds are random 5–10 from last 30 history entries. No artist-diversity enforcement on the seed set.
-- Seed fetches are sequential, one HTTP round-trip per seed. Slow.
-- `DeezerClient.search` picks `tracks.first` — fails on common names (wrong artist → wrong radio).
-- Library cross-check is exact-title equality — misses remixes, covers, `(Remastered)` etc.
-- Silent empty on any failure — UI can't distinguish "nothing found" from "network error" from "no history yet".
-
-Target (Deezer stays primary, **do not** wire `getSimilarSongs`):
-- Parallel seed fetches via `Future.wait`.
-- Pick Deezer artist by best fuzzy match on artist name across the first N search hits.
-- Enforce artist diversity: max 2 tracks per artist in the final list.
-- Grow candidate pool (40+) → shuffle → take 20.
-- Surface failure reasons in the UI (not just an empty section).
-- Improve library cross-check: strip `(Remastered)`, `feat. X`, parenthetical suffixes before comparison.
-- Re-check cache policy — `autoDispose` may be causing churn on navigation.
-
-### 2b. Connection-error specificity on Home
-
-Current: single chip "Server unreachable — pull to retry" for every failure mode. User specifically complained.
-
-Target: differentiate at the `SubsonicClient` level and surface distinct chips:
-
-| Condition | Message |
-|-----------|---------|
-| No network at all | No internet connection |
-| DNS / connection refused | Server not reachable (check URL) |
-| TLS handshake failure | Server TLS error |
-| HTTP 401 | Login rejected — update password in Settings |
-| HTTP 403 | Access forbidden |
-| HTTP 5xx | Server error — try again |
-| Timeout | Server slow or unreachable |
-
-Likely implementation: wrap ping result in a typed error enum, plumb through `serverReachableProvider`, render with matching icon + CTA.
-
-### 2c. Download reliability + notifications
-
-User: "Download on server is glitchy and notifications … sometimes not appearing and they don't give much info and library updates and janky."
-
-Target:
-- Audit `DownloadPollingMixin` — confirm the polling loop survives widget disposal and communicates progress.
-- Every completion / failure path surfaces a snackbar with actionable info (track title, error reason).
-- Companion-side: double-check job lifecycle (`startDownload` → `getDownloadStatus`); add resumption / timeout handling.
-- Library refresh jank: `allSongsProvider` emits twice (cache + fresh) causing list reconciliation work. Diff in place vs replace wholesale.
-
-### 2d. `companionAvailableProvider` staleness
-
-`FutureProvider` resolves once then stays. If companion drops, UI keeps showing it online. Fix: `StreamProvider` with periodic re-check when companion-dependent UI is mounted, or invalidate on any companion error.
-
-### 2e. Auto-download `'all'` idempotency
-
-`ref.listen(allSongsProvider)` in `_StartupRouterState` fires on every emission. `downloadBatch` dedupes so no harm, but wastes CPU on cache/fresh cycles. Guard with a signature check (hash of song-ID list).
-
-### 2f. Mini-player + dock design fixes
-
-User: "Horrible design in some places like mini player, menus and some other stuff … new dock which is partly horrible. The old dock can be btw enabled in settings."
-
-Investigate:
-- `FloatingMiniPlayer` vs `_ClassicMiniPlayer` (in `mini_player.dart`). Reconcile shape-morph treatment so both variants feel coherent.
-- Shape-morph item 01 from M3 Expressive roadmap landed with radius 28 ↔ 10 on play/pause and a thumbnail morph. User says "partly horrible". Review radius choice, curve, and how it meshes with the floating dock geometry.
-- Item 02 app-bar (`SliverAppBar.large/medium`) — review Home / Library / Settings. Recent commits removed a SliverAppBar gap but the architecture may still be wrong.
-- Item 03 grouped settings tiles (v1.7.36) — needs a visual pass.
-
-### 2g. Menu + visual-glitch triage
-
-Broad "menus look bad / visual glitches". In Pass 2 session, ask the user for specific screens or screenshots, then iterate per-screen.
-
-### Verification (Pass 2)
-- Each sub-item gets its own acceptance criteria when executed.
-- Device install + manual QA on each touched surface.
+Current execution order (picked by user to benchmark Opus 4.7 on a meaty item first): **2a now**, remaining order TBD after.
 
 ---
 

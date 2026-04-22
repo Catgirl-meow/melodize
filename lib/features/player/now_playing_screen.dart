@@ -9,6 +9,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
+import '../../shared/utils/download_polling_mixin.dart';
+import '../../shared/utils/snack.dart';
 import '../../shared/utils/song_actions.dart';
 import 'queue_screen.dart';
 
@@ -440,13 +442,23 @@ class _SlideDismissState extends State<_SlideDismiss>
 
 // ---------------------------------------------------------------------------
 
-class _TopBar extends ConsumerWidget {
+class _TopBar extends ConsumerStatefulWidget {
   final Song song;
   final VoidCallback onClose;
   const _TopBar({required this.song, required this.onClose});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_TopBar> createState() => _TopBarState();
+}
+
+class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
+  Song get song => widget.song;
+
+  @override
+  double? get snackBottomOffset => _snackBottom();
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
@@ -454,7 +466,7 @@ class _TopBar extends ConsumerWidget {
           IconButton(
             icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 28),
             color: Colors.white,
-            onPressed: onClose,
+            onPressed: widget.onClose,
           ),
           const Spacer(),
           Text('Now Playing',
@@ -466,22 +478,29 @@ class _TopBar extends ConsumerWidget {
           IconButton(
             icon: const Icon(Icons.more_vert_rounded),
             color: Colors.white,
-            onPressed: () => _showMoreOptions(context, ref),
+            onPressed: _showMoreOptions,
           ),
         ],
       ),
     );
   }
 
-  void _showMoreOptions(BuildContext context, WidgetRef ref) {
+  // True for Deezer-preview tracks surfaced in recommendations — they are not
+  // in the Subsonic library, so local Subsonic-based Download/Delete are N/A.
+  bool get _isPreview =>
+      song.externalStreamUrl != null || song.id.startsWith('deezer:');
+
+  void _showMoreOptions() {
     final downloadedIds = ref.read(downloadedSongIdsProvider);
     final isDownloaded = downloadedIds.contains(song.id) || song.isDownloaded;
-    final canDelete = ref.read(canDeleteFromServerProvider);
+    final canUseCompanion = ref.read(canDeleteFromServerProvider);
+    final isPreview = _isPreview;
     final scheme = Theme.of(context).colorScheme;
+
     showModalBottomSheet(
       context: context,
       useRootNavigator: true,
-      builder: (_) => SafeArea(
+      builder: (sheetCtx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -490,33 +509,53 @@ class _TopBar extends ConsumerWidget {
               title: const Text('Play next'),
               onTap: () {
                 ref.read(audioHandlerNotifierProvider)?.playNext(song);
-                Navigator.pop(context);
+                Navigator.pop(sheetCtx);
               },
             ),
-            if (!isDownloaded)
+            ListTile(
+              leading: const Icon(Icons.auto_awesome_rounded),
+              title: const Text('More like this'),
+              subtitle:
+                  const Text('Rebuild recommendations from this track'),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                _moreLikeThis();
+              },
+            ),
+            if (isPreview && canUseCompanion)
+              ListTile(
+                leading: const Icon(Icons.library_add_rounded),
+                title: const Text('Add to library'),
+                subtitle: const Text('Download to Navidrome server'),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  _addToLibraryViaCompanion();
+                },
+              ),
+            if (!isPreview && !isDownloaded)
               ListTile(
                 leading: const Icon(Icons.download_rounded),
                 title: const Text('Download'),
                 onTap: () async {
-                  Navigator.pop(context);
+                  Navigator.pop(sheetCtx);
                   await startLocalDownload(ref, song);
                 },
               ),
-            if (isDownloaded)
+            if (!isPreview && isDownloaded)
               ListTile(
                 leading: Icon(Icons.download_done_rounded,
                     color: scheme.primary),
                 title: const Text('Downloaded'),
                 enabled: false,
               ),
-            if (canDelete)
+            if (!isPreview && canUseCompanion)
               ListTile(
                 leading: Icon(Icons.delete_forever_rounded,
                     color: scheme.error),
                 title: Text('Delete from server',
                     style: TextStyle(color: scheme.error)),
                 onTap: () {
-                  Navigator.pop(context);
+                  Navigator.pop(sheetCtx);
                   confirmAndDeleteSong(context, ref, song);
                 },
               ),
@@ -526,6 +565,79 @@ class _TopBar extends ConsumerWidget {
     );
   }
 
+  // The player renders *outside* the shell's injected bottom-padding
+  // MediaQuery, so `showStyledSnack`'s default offset (viewPadding + 12)
+  // plants the snack BEHIND the mini player / dock. Compute the full
+  // clearance here the same way MainShell does, and pass it explicitly.
+  double _snackBottom() {
+    final floatingNav = ref.read(
+      preferencesNotifierProvider.select((p) => p.floatingNavBar),
+    );
+    final safeBottom = MediaQuery.of(context).viewPadding.bottom;
+    const kDockHeight = 52.0;
+    const kDockBottom = 8.0;
+    final dockPad = floatingNav
+        ? kDockHeight + kDockBottom + safeBottom
+        : 62.0 + safeBottom;
+    const miniPlayerHeight = 72.0;
+    return dockPad + miniPlayerHeight + 12;
+  }
+
+  void _snack(String msg, {bool isError = false}) =>
+      showStyledSnack(context, msg,
+          isError: isError, bottomOffset: _snackBottom());
+
+  void _moreLikeThis() {
+    ref.read(recommendationsSeedOverrideProvider.notifier).state = (
+      artist: song.artist,
+      title: song.title,
+      genre: song.genre,
+    );
+    ref.invalidate(recommendationsProvider);
+    _snack('Refreshing recommendations from "${song.title}"');
+  }
+
+  Future<void> _addToLibraryViaCompanion() async {
+    final companion = ref.read(companionClientProvider);
+    if (companion == null) {
+      _snack('Companion not configured — set it up in Settings',
+          isError: true);
+      return;
+    }
+    final prefs = ref.read(preferencesNotifierProvider);
+
+    // Preview songs from recommendations use id "deezer:TRACKID".
+    // Library songs that somehow fall here wouldn't have a Deezer ID; guard.
+    if (!song.id.startsWith('deezer:')) {
+      _snack('No Deezer source for this track', isError: true);
+      return;
+    }
+    final deezerTrackId = song.id.substring('deezer:'.length);
+    final url = 'https://www.deezer.com/track/$deezerTrackId';
+
+    if (!prefs.hasDeezerArl) {
+      _snack('Add Deezer ARL in Settings — required for server downloads',
+          isError: true);
+      return;
+    }
+    final arlStatus = ref.read(deezerArlStatusProvider).valueOrNull;
+    if (arlStatus == DeezerArlStatus.invalid) {
+      _snack('Deezer session expired — update ARL in Settings',
+          isError: true);
+      return;
+    }
+
+    _snack('Sending to server (FLAC)…');
+
+    try {
+      final jobId = await companion.startDownload(url, deezerArl: prefs.deezerArl);
+      if (!mounted) return;
+      startDownloadPolling(companion, jobId);
+    } catch (e) {
+      if (!mounted) return;
+      _snack('Could not start download: $e', isError: true);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

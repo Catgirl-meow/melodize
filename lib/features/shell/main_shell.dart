@@ -16,7 +16,12 @@ import '../player/now_playing_screen.dart';
 const _kDockHeight = 52.0;
 const _kDockBottom = 8.0;      // gap between dock bottom and safe area edge
 const _kDockHorizontal = 20.0;
-const _kDockRadius = 16.0;     // shared by dock corners AND selection pill
+const _kDockRadius = 16.0;     // dock corners — matches mini player playing state
+// Pill is 38 px tall (dock 52 − 2×7 vertical padding). Radius = height/2 so it
+// renders as a true stadium, not a smaller rounded rectangle. Decoupled from
+// the dock radius on purpose — same radius on nested shapes reads as "mini
+// dock inside dock" instead of a distinct selection indicator.
+const _kPillRadius = 19.0;
 
 class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
@@ -111,6 +116,18 @@ class _MainShellState extends ConsumerState<MainShell>
     ref.invalidate(serverReachableProvider);
   }
 
+  // Snack with a try/catch fallback for the one rare case the deferred
+  // post-frame callback still fires against a ScaffoldMessenger whose
+  // scaffold list is empty (e.g. during shell rebuild). Losing the snack
+  // is fine; crashing the UI is not.
+  void _safeSnack(String msg,
+      {bool isError = false, double? bottomOffset}) {
+    try {
+      showStyledSnack(context, msg,
+          isError: isError, bottomOffset: bottomOffset);
+    } catch (_) {}
+  }
+
   Widget _buildFloatingDock(ColorScheme scheme, Color? accentColor) {
     final dockBg = AppTheme.dockBackground(accentColor, scheme);
 
@@ -199,27 +216,34 @@ class _MainShellState extends ConsumerState<MainShell>
     });
 
     // Surface local download completion and errors as snackbars.
+    //
+    // Listener runs with MainShell's own context, which is above the
+    // Scaffold. If a DownloadNotifier state change fires synchronously
+    // during a navigation transition, the Scaffold child hasn't
+    // registered with the root ScaffoldMessenger yet and
+    // showSnackBar asserts `_scaffolds.isNotEmpty`. Defer to after the
+    // current frame and swallow the assertion defensively — dropping a
+    // snack is strictly better than crashing the UI thread.
     ref.listen<Map<String, DownloadItem>>(downloadNotifierProvider,
         (prev, next) {
       if (prev == null) return;
-      for (final entry in next.entries) {
-        final prevItem = prev[entry.key];
-        if (prevItem?.status != 'done' && entry.value.status == 'done') {
-          showStyledSnack(
-            context,
-            '"${entry.value.song.title}" downloaded',
-            bottomOffset: snackBottom + 12,
-          );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        for (final entry in next.entries) {
+          final prevItem = prev[entry.key];
+          if (prevItem?.status != 'done' && entry.value.status == 'done') {
+            _safeSnack('"${entry.value.song.title}" downloaded',
+                bottomOffset: snackBottom + 12);
+          }
+          if (prevItem?.status != 'error' && entry.value.status == 'error') {
+            final errMsg = entry.value.errorMessage;
+            final msg = errMsg != null
+                ? 'Download failed: $errMsg'
+                : '"${entry.value.song.title}" failed to download';
+            _safeSnack(msg, isError: true, bottomOffset: snackBottom + 12);
+          }
         }
-        if (prevItem?.status != 'error' && entry.value.status == 'error') {
-          final errMsg = entry.value.errorMessage;
-          final msg = errMsg != null
-              ? 'Download failed: $errMsg'
-              : '"${entry.value.song.title}" failed to download';
-          showStyledSnack(context, msg,
-              isError: true, bottomOffset: snackBottom + 12);
-        }
-      }
+      });
     });
 
     // Classic dock accent color
@@ -443,15 +467,15 @@ class _FloatingNavItem extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Padding(
-        // vertical: 7 — pill is shorter than dock height, making it pill-like;
-        // same _kDockRadius is used for both dock and pill corners.
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
+        // vertical 7 → pill is 38 tall; horizontal 10 gives the pill breathing
+        // room inside its cell so it reads as an indicator, not a filled cell.
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeInOut,
           decoration: BoxDecoration(
             color: pillColor,
-            borderRadius: BorderRadius.circular(_kDockRadius),
+            borderRadius: BorderRadius.circular(_kPillRadius),
           ),
           child: Center(
             child: Icon(

@@ -6,12 +6,13 @@ import '../../../core/providers.dart';
 import '../../../shared/theme/app_theme.dart';
 import '../../../shared/widgets/cover_art_image.dart';
 
-// Paused shape: near-circular pill (28 px) — soft, at rest.
-// Playing shape: compact uniform corners (10 px) — crisp, active.
+// Paused: near-pill (28) card + circular (20) thumb — fully rounded, at rest.
+// Playing: 16 px card (matches dock radius) + 10 px thumb (half the card).
+// Shadow morphs in lockstep with the card via the same AnimatedContainer.
 const _kPausedRadius = 28.0;
-const _kPlayingRadius = 10.0;
-const _kThumbPaused = 20.0;   // near-circle on 40 px thumbnail
-const _kThumbPlaying = 6.0;   // squared off when playing
+const _kPlayingRadius = 16.0;   // matches _kDockRadius in main_shell
+const _kThumbPaused = 20.0;     // full circle on 40 px thumbnail
+const _kThumbPlaying = 10.0;    // ≈ half of _kPlayingRadius — same curvature family
 
 const _kShapeDuration = Duration(milliseconds: 400);
 const _kShapeCurve = Curves.easeInOutCubicEmphasized;
@@ -47,85 +48,83 @@ class FloatingMiniPlayer extends ConsumerWidget {
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
       child: GestureDetector(
         onTap: onOpen,
-        child: DecoratedBox(
-          // Shadow shape is fixed — 24 px blur hides the morph.
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16.0),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.42),
-                blurRadius: 24,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          // RepaintBoundary isolates shape-morph repaints from the surrounding
-          // dock so the animation doesn't dirty the dock's compositing layer.
-          child: RepaintBoundary(
-            child: AnimatedContainer(
-              duration: _kShapeDuration,
-              curve: _kShapeCurve,
-              clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(borderRadius: cardRadius),
-              // Blur+tint layer is intentionally left structurally unchanged.
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-                child: Container(
-                  height: 62,
-                  color: bgColor,
-                  child: Stack(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        child: Row(
-                          children: [
-                            TweenAnimationBuilder<double>(
-                              tween: Tween<double>(end: thumbRadius),
-                              duration: _kShapeDuration,
-                              curve: _kShapeCurve,
-                              // CoverArtImage owns the ClipRRect so it must
-                              // rebuild each tick — borderRadius drives the clip.
-                              builder: (_, r, __) => CoverArtImage(
-                                coverArtId: song.coverArt,
-                                externalUrl: song.externalCoverUrl,
-                                size: 40,
-                                borderRadius: r,
-                              ),
+        // RepaintBoundary isolates shape-morph repaints from the surrounding
+        // dock so the animation doesn't dirty the dock's compositing layer.
+        child: RepaintBoundary(
+          child: AnimatedContainer(
+            duration: _kShapeDuration,
+            curve: _kShapeCurve,
+            clipBehavior: Clip.antiAlias,
+            // Shadow lives on the same decoration as the card so it morphs
+            // in lockstep — a fixed-radius shadow drifted behind the card
+            // during the transition and read as a second, misaligned shape.
+            decoration: BoxDecoration(
+              borderRadius: cardRadius,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.42),
+                  blurRadius: 24,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+              child: Container(
+                height: 62,
+                color: bgColor,
+                child: Stack(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Row(
+                        children: [
+                          TweenAnimationBuilder<double>(
+                            tween: Tween<double>(end: thumbRadius),
+                            duration: _kShapeDuration,
+                            curve: _kShapeCurve,
+                            // CoverArtImage owns the ClipRRect so it must
+                            // rebuild each tick — borderRadius drives the clip.
+                            builder: (_, r, __) => CoverArtImage(
+                              coverArtId: song.coverArt,
+                              externalUrl: song.externalCoverUrl,
+                              size: 40,
+                              borderRadius: r,
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(song.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 13)),
-                                  Text(song.artist,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                          fontSize: 12,
-                                          color: scheme.onSurfaceVariant)),
-                                ],
-                              ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(song.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13)),
+                                Text(song.artist,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: scheme.onSurfaceVariant)),
+                              ],
                             ),
-                            const RepaintBoundary(child: _MiniPlayerControls()),
-                          ],
-                        ),
+                          ),
+                          const RepaintBoundary(child: _MiniPlayerControls()),
+                        ],
                       ),
-                      // Progress bar — painted at card bottom, clipped to card radius.
-                      const Positioned(
-                        bottom: 0,
-                        left: 0,
-                        right: 0,
-                        child: RepaintBoundary(child: _MiniPlayerProgress()),
-                      ),
-                    ],
-                  ),
+                    ),
+                    // Progress bar — painted at card bottom, clipped to card radius.
+                    const Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      child: RepaintBoundary(child: _MiniPlayerProgress()),
+                    ),
+                  ],
                 ),
               ),
             ),
