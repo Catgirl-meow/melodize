@@ -1,621 +1,888 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../core/utils/platform_dirs.dart';
 import '../../core/models/app_preferences.dart';
 import '../../core/providers.dart';
+import '../../core/utils/platform_dirs.dart';
 import '../../widgets/grouped_list_tile.dart';
 import 'downloaded_songs_screen.dart';
+
+const _streamQualityOptions = [
+  _ChoiceOption(
+    value: 'lossless',
+    title: 'Lossless (FLAC/ALAC)',
+    subtitle: 'Best quality, larger files',
+  ),
+  _ChoiceOption(
+    value: '320',
+    title: '320 kbps',
+    subtitle: 'High quality',
+  ),
+  _ChoiceOption(
+    value: '192',
+    title: '192 kbps',
+    subtitle: 'Good quality',
+  ),
+  _ChoiceOption(
+    value: '128',
+    title: '128 kbps',
+    subtitle: 'Smaller files',
+  ),
+];
+
+const _autoDownloadOptions = [
+  _ChoiceOption(
+    value: 'never',
+    title: 'Never',
+    subtitle: 'Songs are not downloaded automatically',
+  ),
+  _ChoiceOption(
+    value: 'on_play',
+    title: 'When played',
+    subtitle: 'Download each song after playback starts',
+  ),
+  _ChoiceOption(
+    value: 'all',
+    title: 'All songs',
+    subtitle: 'Download the entire library in the background',
+  ),
+];
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
-  Future<void> _changeServer(BuildContext context, WidgetRef ref) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Change server?'),
-        content: const Text(
-            'This will stop playback and permanently clear all cached songs, '
-            'downloaded files, and lyrics. Play history is kept so recommendations still work.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(
-                foregroundColor: Theme.of(context).colorScheme.error),
-            child: const Text('Clear & Change'),
-          ),
-        ],
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final prefs = ref.watch(preferencesNotifierProvider);
+    final activeDownloadCount = ref.watch(
+      downloadNotifierProvider.select(
+        (m) => m.values
+            .where((d) => d.status == 'downloading' || d.status == 'queued')
+            .length,
       ),
     );
-    if (confirmed != true) return;
+    final config = ref.watch(serverConfigProvider).valueOrNull;
 
-    // Stop playback and reset playback state
-    final handler = ref.read(audioHandlerNotifierProvider);
-    await handler?.stop();
-    await handler?.resetPlaybackModes();
-
-    // Delete downloaded files
-    try {
-      final dir = await getAppStorageDirectory();
-      final downloadsDir = Directory('${dir.path}/melodize_downloads');
-      if (await downloadsDir.exists()) {
-        await downloadsDir.delete(recursive: true);
-      }
-    } catch (_) {}
-
-    // Wipe entire database
-    await ref.read(databaseProvider).clearAllData();
-
-    // Invalidate providers — _StartupRouter will show SetupScreen automatically
-    // because serverConfigProvider now returns null.
-    ref.invalidate(serverConfigProvider);
-    ref.invalidate(downloadedSongsProvider);
-    ref.invalidate(downloadNotifierProvider);
-    ref.invalidate(allSongsProvider);
+    return _SettingsPageScaffold(
+      title: 'Settings',
+      automaticallyImplyLeading: false,
+      children: [
+        const _SectionHeader('Appearance'),
+        GroupedSection(
+          children: [
+            SwitchListTile.adaptive(
+              title: const Text('Floating navigation bar'),
+              subtitle: const Text('Use the floating pill dock'),
+              secondary: const Icon(Icons.dock_rounded),
+              value: prefs.floatingNavBar,
+              onChanged: (value) {
+                ref.read(preferencesNotifierProvider.notifier).update(
+                      prefs.copyWith(floatingNavBar: value),
+                    );
+              },
+            ),
+          ],
+        ),
+        const _SectionHeader('Playback'),
+        GroupedSection(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.high_quality_rounded),
+              title: const Text('Streaming quality'),
+              subtitle: Text(_qualityLabel(prefs.streamQuality)),
+              trailing: const _TileTrailing(),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => _ChoiceSettingScreen<String>(
+                      title: 'Streaming quality',
+                      currentValue: prefs.streamQuality,
+                      options: _streamQualityOptions,
+                      onSelected: (value) {
+                        ref.read(preferencesNotifierProvider.notifier).update(
+                              prefs.copyWith(streamQuality: value),
+                            );
+                      },
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+        const _SectionHeader('Downloads'),
+        GroupedSection(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.download_rounded),
+              title: const Text('Download quality'),
+              subtitle: Text(_qualityLabel(prefs.downloadQuality)),
+              trailing: const _TileTrailing(),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => _ChoiceSettingScreen<String>(
+                      title: 'Download quality',
+                      currentValue: prefs.downloadQuality,
+                      options: _streamQualityOptions,
+                      onSelected: (value) {
+                        ref.read(preferencesNotifierProvider.notifier).update(
+                              prefs.copyWith(downloadQuality: value),
+                            );
+                      },
+                    ),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.sync_rounded),
+              title: const Text('Auto-download'),
+              subtitle: Text(_autoDownloadLabel(prefs.autoDownload)),
+              trailing: const _TileTrailing(),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => _ChoiceSettingScreen<String>(
+                      title: 'Auto-download',
+                      currentValue: prefs.autoDownload,
+                      options: _autoDownloadOptions,
+                      onSelected: (value) {
+                        ref.read(preferencesNotifierProvider.notifier).update(
+                              prefs.copyWith(autoDownload: value),
+                            );
+                      },
+                    ),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_rounded),
+              title: const Text('Downloaded songs'),
+              subtitle: Text(
+                activeDownloadCount > 0
+                    ? '$activeDownloadCount downloading now'
+                    : 'Browse songs saved on this device',
+              ),
+              trailing: const _TileTrailing(),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const DownloadedSongsScreen(),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+        const _SectionHeader('Connections'),
+        GroupedSection(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.dns_rounded),
+              title: const Text('Library server'),
+              subtitle: Text(
+                config == null
+                    ? 'Not connected'
+                    : '${config.username} • ${_displayServerUrl(config.serverUrl)}',
+              ),
+              trailing: const _TileTrailing(),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const _ServerSettingsScreen(),
+                  ),
+                );
+              },
+            ),
+            const _DeezerOverviewTile(),
+            const _CompanionOverviewTile(),
+          ],
+        ),
+      ],
+    );
   }
+}
+
+class _ServerSettingsScreen extends ConsumerWidget {
+  const _ServerSettingsScreen();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final config = ref.watch(serverConfigProvider).valueOrNull;
+    final scheme = Theme.of(context).colorScheme;
+
+    return _SettingsPageScaffold(
+      title: 'Library server',
+      children: [
+        if (config != null) ...[
+          const _SectionHeader('Current connection'),
+          GroupedSection(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.link_rounded),
+                title: const Text('Server URL'),
+                subtitle: Text(config.serverUrl),
+              ),
+              ListTile(
+                leading: const Icon(Icons.person_rounded),
+                title: const Text('Username'),
+                subtitle: Text(config.username),
+              ),
+            ],
+          ),
+        ],
+        const _SectionHeader('Actions'),
+        GroupedSection(
+          children: [
+            ListTile(
+              leading: Icon(Icons.swap_horiz_rounded, color: scheme.error),
+              title: Text(
+                'Connect a different server',
+                style: TextStyle(color: scheme.error),
+              ),
+              subtitle: const Text('Clears cache and downloads on this device'),
+              onTap: () => _changeServer(context, ref),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _DeezerSettingsScreen extends ConsumerWidget {
+  const _DeezerSettingsScreen();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final prefs = ref.watch(preferencesNotifierProvider);
-    final scheme = Theme.of(context).colorScheme;
-    final activeDownloadCount = ref.watch(
-      downloadNotifierProvider.select((m) => m.values
-          .where((d) => d.status == 'downloading' || d.status == 'queued')
-          .length),
+    final statusAsync =
+        prefs.hasDeezerArl ? ref.watch(deezerArlStatusProvider) : null;
+
+    return _SettingsPageScaffold(
+      title: 'Deezer',
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Text(
+            'Connect a Deezer session if you want the companion to fetch full FLAC releases. Without it, Melodize stays in preview-only mode.',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        const _SectionHeader('Account'),
+        GroupedSection(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.account_circle_rounded),
+              title: const Text('ARL cookie'),
+              subtitle: Text(
+                _deezerSubtitle(
+                  prefs.hasDeezerArl,
+                  statusAsync?.valueOrNull,
+                  statusAsync?.isLoading ?? false,
+                  statusAsync?.hasError ?? false,
+                ),
+              ),
+              trailing: _TileTrailing(
+                status: _deezerStatusIcon(
+                  context,
+                  prefs.hasDeezerArl,
+                  statusAsync?.valueOrNull,
+                  statusAsync?.isLoading ?? false,
+                  statusAsync?.hasError ?? false,
+                ),
+              ),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => _TextSettingScreen(
+                      title: 'ARL cookie',
+                      initialValue: prefs.deezerArl,
+                      hintText: 'Paste your Deezer ARL cookie',
+                      helperText: 'Used only for companion downloads',
+                      obscureText: true,
+                      description:
+                          'The ARL is a Deezer session cookie. Melodize stores it locally on this device and sends it only to your own companion server when starting a Deezer download.',
+                      clearActionLabel:
+                          prefs.hasDeezerArl ? 'Disconnect' : null,
+                      onClear: prefs.hasDeezerArl
+                          ? () {
+                              ref
+                                  .read(preferencesNotifierProvider.notifier)
+                                  .update(prefs.copyWith(deezerArl: ''));
+                            }
+                          : null,
+                      onSaved: (value) {
+                        ref.read(preferencesNotifierProvider.notifier).update(
+                              prefs.copyWith(deezerArl: value.trim()),
+                            );
+                      },
+                      footer: Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const _DeezerHelpScreen(),
+                              ),
+                            );
+                          },
+                          icon:
+                              const Icon(Icons.help_outline_rounded, size: 18),
+                          label: const Text('How to find the ARL'),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.help_outline_rounded),
+              title: const Text('ARL help'),
+              subtitle: const Text('Step-by-step browser instructions'),
+              trailing: const _TileTrailing(),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const _DeezerHelpScreen(),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ],
     );
-    final config = ref.watch(serverConfigProvider).valueOrNull;
+  }
+}
+
+class _CompanionSettingsScreen extends ConsumerWidget {
+  const _CompanionSettingsScreen();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final prefs = ref.watch(preferencesNotifierProvider);
+    final serverUrl =
+        ref.watch(serverConfigProvider).valueOrNull?.serverUrl ?? '';
+    final statusAsync =
+        prefs.hasCompanion ? ref.watch(companionAvailableProvider) : null;
+
+    return _SettingsPageScaffold(
+      title: 'Melodize Companion',
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Text(
+            'The companion unlocks server-side downloads and delete-from-server actions. Point it at the same host as Navidrome unless you run it elsewhere.',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        const _SectionHeader('Connection'),
+        GroupedSection(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.hub_rounded),
+              title: const Text('Companion URL'),
+              subtitle: Text(
+                prefs.companionUrl.isEmpty
+                    ? 'Not configured'
+                    : prefs.companionUrl,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: const _TileTrailing(),
+              onTap: () {
+                final initialValue = prefs.companionUrl.isNotEmpty
+                    ? prefs.companionUrl
+                    : serverUrl;
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => _TextSettingScreen(
+                      title: 'Companion URL',
+                      initialValue: initialValue,
+                      hintText: 'https://your-navidrome-server.example.com',
+                      helperText:
+                          'Same URL as Navidrome, with no /companion suffix',
+                      keyboardType: TextInputType.url,
+                      description:
+                          'If you use an nginx/Caddy mux, the companion usually shares the same base URL as your Navidrome server.',
+                      onSaved: (value) {
+                        ref.read(preferencesNotifierProvider.notifier).update(
+                              prefs.copyWith(companionUrl: value.trim()),
+                            );
+                        ref.invalidate(companionAvailableProvider);
+                      },
+                    ),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.key_rounded),
+              title: const Text('API key'),
+              subtitle: Text(_maskApiKey(prefs.companionApiKey)),
+              trailing: const _TileTrailing(),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => _TextSettingScreen(
+                      title: 'API key',
+                      initialValue: prefs.companionApiKey,
+                      hintText: 'Paste the key from config.json',
+                      obscureText: true,
+                      description:
+                          'This key is sent with companion requests so your server can verify that Melodize is allowed to start downloads or delete files.',
+                      onSaved: (value) {
+                        ref.read(preferencesNotifierProvider.notifier).update(
+                              prefs.copyWith(companionApiKey: value.trim()),
+                            );
+                        ref.invalidate(companionAvailableProvider);
+                      },
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+        const _SectionHeader('Status'),
+        GroupedSection(
+          children: [
+            ListTile(
+              leading: _companionStatusIcon(context, prefs, statusAsync),
+              title: Text(_companionStatusTitle(prefs, statusAsync)),
+              subtitle: Text(_companionStatusSubtitle(prefs, statusAsync)),
+              trailing: prefs.hasCompanion
+                  ? IconButton(
+                      icon: const Icon(Icons.refresh_rounded),
+                      onPressed: () =>
+                          ref.invalidate(companionAvailableProvider),
+                    )
+                  : null,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _ChoiceSettingScreen<T> extends StatelessWidget {
+  final String title;
+  final T currentValue;
+  final List<_ChoiceOption<T>> options;
+  final ValueChanged<T> onSelected;
+
+  const _ChoiceSettingScreen({
+    required this.title,
+    required this.currentValue,
+    required this.options,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingsPageScaffold(
+      title: title,
+      children: [
+        RadioGroup<T>(
+          groupValue: currentValue,
+          onChanged: (value) {
+            if (value == null) return;
+            onSelected(value);
+            Navigator.pop(context);
+          },
+          child: GroupedSection(
+            children: [
+              for (final option in options)
+                RadioListTile<T>(
+                  value: option.value,
+                  title: Text(option.title),
+                  subtitle: Text(option.subtitle),
+                  selected: option.value == currentValue,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TextSettingScreen extends StatefulWidget {
+  final String title;
+  final String initialValue;
+  final String hintText;
+  final String? helperText;
+  final String? description;
+  final bool obscureText;
+  final TextInputType? keyboardType;
+  final ValueChanged<String> onSaved;
+  final String? clearActionLabel;
+  final VoidCallback? onClear;
+  final Widget? footer;
+
+  const _TextSettingScreen({
+    required this.title,
+    required this.initialValue,
+    required this.hintText,
+    required this.onSaved,
+    this.helperText,
+    this.description,
+    this.obscureText = false,
+    this.keyboardType,
+    this.clearActionLabel,
+    this.onClear,
+    this.footer,
+  });
+
+  @override
+  State<_TextSettingScreen> createState() => _TextSettingScreenState();
+}
+
+class _TextSettingScreenState extends State<_TextSettingScreen> {
+  late final TextEditingController _controller;
+  late bool _obscure;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue);
+    _controller.addListener(() => setState(() {}));
+    _obscure = widget.obscureText;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  bool get _canSave => _controller.text.trim() != widget.initialValue.trim();
+
+  void _save() {
+    widget.onSaved(_controller.text);
+    Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return _SettingsPageScaffold(
+      title: widget.title,
+      actions: [
+        TextButton(
+          onPressed: _canSave ? _save : null,
+          child: const Text('Save'),
+        ),
+      ],
+      children: [
+        if (widget.description != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: Text(
+              widget.description!,
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            ),
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: TextField(
+            controller: _controller,
+            decoration: InputDecoration(
+              hintText: widget.hintText,
+              helperText: widget.helperText,
+              helperMaxLines: 2,
+              border: const OutlineInputBorder(),
+              filled: true,
+              fillColor: scheme.surfaceContainerLow,
+              suffixIcon: widget.obscureText
+                  ? IconButton(
+                      icon: Icon(
+                        _obscure
+                            ? Icons.visibility_off_rounded
+                            : Icons.visibility_rounded,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _obscure = !_obscure;
+                        });
+                      },
+                    )
+                  : null,
+            ),
+            keyboardType: widget.keyboardType,
+            autocorrect: false,
+            enableSuggestions: !widget.obscureText,
+            obscureText: _obscure,
+            maxLines: 1,
+            autofocus: true,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) {
+              if (_canSave) _save();
+            },
+          ),
+        ),
+        if (widget.footer != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+            child: widget.footer!,
+          ),
+        if (widget.clearActionLabel != null && widget.onClear != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: () {
+                  widget.onClear!();
+                  Navigator.pop(context);
+                },
+                style: TextButton.styleFrom(
+                  foregroundColor: scheme.error,
+                ),
+                child: Text(widget.clearActionLabel!),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _DeezerHelpScreen extends StatelessWidget {
+  const _DeezerHelpScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const _SettingsPageScaffold(
+      title: 'ARL help',
+      children: [
+        Padding(
+          padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Text(
+            'The ARL is a Deezer session cookie that lets the companion download lossless releases using your existing Deezer subscription.',
+          ),
+        ),
+        _SectionHeader('Steps'),
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            children: [
+              _Step(
+                n: 1,
+                text: 'Open deezer.com in a desktop browser and sign in.',
+              ),
+              _Step(
+                n: 2,
+                text: 'Open Developer Tools with F12.',
+              ),
+              _Step(
+                n: 3,
+                text: 'Go to Application in Chrome/Edge or Storage in Firefox.',
+              ),
+              _Step(
+                n: 4,
+                text: 'Open Cookies and select https://www.deezer.com.',
+              ),
+              _Step(
+                n: 5,
+                text: 'Find the cookie named arl and copy its value.',
+              ),
+              _Step(
+                n: 6,
+                text: 'Paste that value into the ARL cookie field in Melodize.',
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Text(
+            'The cookie usually stays valid for a long time, but if Deezer logs you out you may need to paste a fresh one.',
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DeezerOverviewTile extends ConsumerWidget {
+  const _DeezerOverviewTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final prefs = ref.watch(preferencesNotifierProvider);
+    final statusAsync =
+        prefs.hasDeezerArl ? ref.watch(deezerArlStatusProvider) : null;
+
+    return ListTile(
+      leading: const Icon(Icons.graphic_eq_rounded),
+      title: const Text('Deezer'),
+      subtitle: Text(
+        _deezerSubtitle(
+          prefs.hasDeezerArl,
+          statusAsync?.valueOrNull,
+          statusAsync?.isLoading ?? false,
+          statusAsync?.hasError ?? false,
+        ),
+      ),
+      trailing: _TileTrailing(
+        status: _deezerStatusIcon(
+          context,
+          prefs.hasDeezerArl,
+          statusAsync?.valueOrNull,
+          statusAsync?.isLoading ?? false,
+          statusAsync?.hasError ?? false,
+        ),
+      ),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const _DeezerSettingsScreen(),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _CompanionOverviewTile extends ConsumerWidget {
+  const _CompanionOverviewTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final prefs = ref.watch(preferencesNotifierProvider);
+    final statusAsync =
+        prefs.hasCompanion ? ref.watch(companionAvailableProvider) : null;
+
+    return ListTile(
+      leading: const Icon(Icons.hub_rounded),
+      title: const Text('Melodize Companion'),
+      subtitle: Text(_companionStatusSubtitle(prefs, statusAsync)),
+      trailing: _TileTrailing(
+        status: _companionStatusIcon(context, prefs, statusAsync),
+      ),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const _CompanionSettingsScreen(),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SettingsPageScaffold extends StatelessWidget {
+  final String title;
+  final bool automaticallyImplyLeading;
+  final List<Widget> children;
+  final List<Widget>? actions;
+
+  const _SettingsPageScaffold({
+    required this.title,
+    required this.children,
+    this.actions,
+    this.automaticallyImplyLeading = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Settings'),
-        automaticallyImplyLeading: false,
+        title: Text(title),
+        automaticallyImplyLeading: automaticallyImplyLeading,
         backgroundColor: scheme.surface,
         surfaceTintColor: Colors.transparent,
         scrolledUnderElevation: 0,
+        actions: actions,
       ),
-      body: ListView(
-        children: [
-              // --- Appearance ---
-              _SectionHeader('Appearance'),
-              GroupedSection(children: [
-                SwitchListTile(
-                  title: const Text('Floating navigation bar'),
-                  subtitle: const Text('Pill-shaped dock at the bottom'),
-                  secondary: const Icon(Icons.dock_rounded),
-                  value: prefs.floatingNavBar,
-                  onChanged: (v) => ref
-                      .read(preferencesNotifierProvider.notifier)
-                      .update(prefs.copyWith(floatingNavBar: v)),
-                ),
-              ]),
-
-              // --- Playback ---
-              _SectionHeader('Playback'),
-              GroupedSection(children: [
-                ListTile(
-                  title: const Text('Streaming quality'),
-                  subtitle: Text(_qualityLabel(prefs.streamQuality)),
-                  leading: const Icon(Icons.high_quality_rounded),
-                  onTap: () => _showQualityPicker(
-                    context,
-                    ref,
-                    title: 'Streaming quality',
-                    current: prefs.streamQuality,
-                    onSelected: (q) => ref
-                        .read(preferencesNotifierProvider.notifier)
-                        .update(prefs.copyWith(streamQuality: q)),
-                  ),
-                ),
-              ]),
-
-              // --- Downloads ---
-              _SectionHeader('Downloads'),
-              GroupedSection(children: [
-                ListTile(
-                  title: const Text('Download quality'),
-                  subtitle: Text(_qualityLabel(prefs.downloadQuality)),
-                  leading: const Icon(Icons.download_rounded),
-                  onTap: () => _showQualityPicker(
-                    context,
-                    ref,
-                    title: 'Download quality',
-                    current: prefs.downloadQuality,
-                    onSelected: (q) => ref
-                        .read(preferencesNotifierProvider.notifier)
-                        .update(prefs.copyWith(downloadQuality: q)),
-                  ),
-                ),
-                ListTile(
-                  title: const Text('Auto-download'),
-                  subtitle: Text(_autoDownloadLabel(prefs.autoDownload)),
-                  leading: const Icon(Icons.sync_rounded),
-                  onTap: () => _showAutoDownloadPicker(context, ref, prefs),
-                ),
-                ListTile(
-                  title: const Text('Downloaded songs'),
-                  subtitle: Text(
-                    activeDownloadCount > 0
-                        ? '$activeDownloadCount downloading...'
-                        : 'View and manage downloaded songs',
-                  ),
-                  leading: const Icon(Icons.folder_rounded),
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const DownloadedSongsScreen(),
-                    ),
-                  ),
-                ),
-              ]),
-
-              // --- Server ---
-              _SectionHeader('Server'),
-              GroupedSection(children: [
-                if (config != null)
-                  ListTile(
-                    title: Text(
-                      config.serverUrl,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(config.username),
-                    leading: const Icon(Icons.dns_rounded),
-                  ),
-                ListTile(
-                  title: const Text('Change server'),
-                  subtitle: const Text('Clears all cache and downloaded files'),
-                  leading: const Icon(Icons.swap_horiz_rounded),
-                  onTap: () => _changeServer(context, ref),
-                ),
-              ]),
-
-              // --- Deezer ---
-              _SectionHeader('Deezer'),
-              GroupedSection(children: [
-                _DeezerAccountTile(
-                  prefs: prefs,
-                  onEdit: () => _editDeezerArl(context, ref, prefs),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.help_outline_rounded),
-                  title: const Text('How to connect'),
-                  subtitle: const Text('Step-by-step instructions'),
-                  onTap: () => _showDeezerInstructions(context),
-                ),
-              ]),
-
-              // --- Companion ---
-              _SectionHeader('Melodize Companion'),
-              GroupedSection(children: [
-                ListTile(
-                  title: const Text('Companion URL'),
-                  subtitle: Text(
-                    prefs.companionUrl.isEmpty ? 'Not configured' : prefs.companionUrl,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  leading: const Icon(Icons.hub_rounded),
-                  onTap: () => _editCompanionUrl(context, ref, prefs),
-                ),
-                ListTile(
-                  title: const Text('API Key'),
-                  subtitle: Text(
-                    prefs.companionApiKey.isEmpty
-                        ? 'Not set'
-                        : '••••••••${prefs.companionApiKey.substring(prefs.companionApiKey.length.clamp(8, prefs.companionApiKey.length) - 8)}',
-                  ),
-                  leading: const Icon(Icons.key_rounded),
-                  onTap: () => _editCompanionApiKey(context, ref, prefs),
-                ),
-                if (prefs.hasCompanion) _CompanionStatusTile(),
-              ]),
-
-              // Bottom clearance — dock + mini player + breathing room.
+      body: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720),
+          child: ListView(
+            children: [
+              ...children,
               SizedBox(height: MediaQuery.paddingOf(context).bottom + 16),
             ],
-      ),
-    );
-  }
-
-  String _qualityLabel(String quality) {
-    switch (quality) {
-      case 'lossless':
-        return 'Lossless (FLAC/ALAC)';
-      case '320':
-        return '320 kbps';
-      case '192':
-        return '192 kbps';
-      case '128':
-        return '128 kbps';
-      default:
-        return quality;
-    }
-  }
-
-  String _autoDownloadLabel(String mode) {
-    switch (mode) {
-      case 'never':
-        return 'Never';
-      case 'on_play':
-        return 'When played';
-      case 'all':
-        return 'All songs';
-      default:
-        return mode;
-    }
-  }
-
-  void _showQualityPicker(
-    BuildContext context,
-    WidgetRef ref, {
-    required String title,
-    required String current,
-    required void Function(String) onSelected,
-  }) {
-    final options = [
-      ('lossless', 'Lossless (FLAC/ALAC)', 'Best quality, larger files'),
-      ('320', '320 kbps', 'High quality'),
-      ('192', '192 kbps', 'Good quality'),
-      ('128', '128 kbps', 'Smaller files'),
-    ];
-    showModalBottomSheet(
-      context: context,
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(title,
-                  style: Theme.of(context).textTheme.titleMedium),
-            ),
-            for (final (value, label, sublabel) in options)
-              ListTile(
-                title: Text(label),
-                subtitle: Text(sublabel),
-                trailing: current == value
-                    ? Icon(Icons.check_rounded,
-                        color: Theme.of(context).colorScheme.primary)
-                    : null,
-                onTap: () {
-                  onSelected(value);
-                  Navigator.pop(context);
-                },
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _editDeezerArl(
-      BuildContext context, WidgetRef ref, AppPreferences prefs) {
-    final ctrl = TextEditingController(text: prefs.deezerArl);
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Deezer ARL Cookie'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: ctrl,
-              decoration: const InputDecoration(
-                hintText: 'Paste your ARL cookie here',
-                border: OutlineInputBorder(),
-              ),
-              autocorrect: false,
-              obscureText: true,
-              maxLines: 1,
-            ),
-            const SizedBox(height: 8),
-            TextButton.icon(
-              onPressed: () => _showDeezerInstructions(context),
-              icon: const Icon(Icons.help_outline_rounded, size: 16),
-              label: const Text('How to get your ARL'),
-            ),
-          ],
-        ),
-        actions: [
-          if (prefs.hasDeezerArl)
-            TextButton(
-              onPressed: () {
-                ref.read(preferencesNotifierProvider.notifier)
-                    .update(prefs.copyWith(deezerArl: ''));
-                Navigator.pop(context);
-              },
-              style: TextButton.styleFrom(
-                  foregroundColor: Theme.of(context).colorScheme.error),
-              child: const Text('Disconnect'),
-            ),
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
-          TextButton(
-            onPressed: () {
-              ref.read(preferencesNotifierProvider.notifier)
-                  .update(prefs.copyWith(deezerArl: ctrl.text.trim()));
-              Navigator.pop(context);
-            },
-            child: const Text('Save'),
           ),
-        ],
-      ),
-    );
-  }
-
-  void _showDeezerInstructions(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('How to get your Deezer ARL'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: const [
-              Text(
-                'The ARL is a session cookie that lets Melodize download '
-                'lossless FLAC tracks via your Deezer HiFi subscription.',
-                style: TextStyle(fontSize: 13),
-              ),
-              SizedBox(height: 16),
-              _Step(n: 1, text: 'Open deezer.com in a desktop browser and log in.'),
-              _Step(n: 2, text: 'Press F12 to open Developer Tools.'),
-              _Step(n: 3, text: 'Go to the Application tab (Chrome/Edge) or Storage tab (Firefox).'),
-              _Step(n: 4, text: 'Expand Cookies → click on https://www.deezer.com'),
-              _Step(n: 5, text: 'Find the cookie named "arl" and copy its Value (a long hex string).'),
-              _Step(n: 6, text: 'Paste it in the ARL field in Settings → Deezer Account.'),
-              SizedBox(height: 12),
-              Text(
-                'The ARL is valid as long as your session is active (typically months). '
-                'It is stored locally on this device and sent only to your own '
-                'Melodize Companion server when downloading songs.',
-                style: TextStyle(fontSize: 12),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Got it'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _editCompanionUrl(
-      BuildContext context, WidgetRef ref, AppPreferences prefs) {
-    final serverUrl = ref.read(serverConfigProvider).valueOrNull?.serverUrl ?? '';
-    // Default to the same URL as Navidrome — the nginx mux routes /health and
-    // /api/songs to the companion without any path prefix.  Do NOT append
-    // '/companion' — that path is not handled by the companion and health
-    // checks will fail.
-    final defaultUrl = prefs.companionUrl.isNotEmpty
-        ? prefs.companionUrl
-        : serverUrl;
-    final ctrl = TextEditingController(text: defaultUrl);
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Companion URL'),
-        content: TextField(
-          controller: ctrl,
-          decoration: const InputDecoration(
-            hintText: 'https://your-navidrome-server.example.com',
-            helperText: 'Same URL as your Navidrome server (no /companion suffix)',
-            helperMaxLines: 2,
-            border: OutlineInputBorder(),
-          ),
-          keyboardType: TextInputType.url,
-          autocorrect: false,
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
-          TextButton(
-            onPressed: () {
-              ref.read(preferencesNotifierProvider.notifier).update(
-                  prefs.copyWith(companionUrl: ctrl.text.trim()));
-              ref.invalidate(companionAvailableProvider);
-              Navigator.pop(context);
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _editCompanionApiKey(
-      BuildContext context, WidgetRef ref, AppPreferences prefs) {
-    final ctrl = TextEditingController(text: prefs.companionApiKey);
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('API Key'),
-        content: TextField(
-          controller: ctrl,
-          decoration: const InputDecoration(
-            hintText: 'Paste the key from config.json',
-            border: OutlineInputBorder(),
-          ),
-          autocorrect: false,
-          obscureText: true,
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
-          TextButton(
-            onPressed: () {
-              ref.read(preferencesNotifierProvider.notifier).update(
-                  prefs.copyWith(companionApiKey: ctrl.text.trim()));
-              ref.invalidate(companionAvailableProvider);
-              Navigator.pop(context);
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showAutoDownloadPicker(
-      BuildContext context, WidgetRef ref, dynamic prefs) {
-    final options = [
-      ('never', 'Never', 'Songs are not downloaded automatically'),
-      ('on_play', 'When played', 'Download each song when you play it'),
-      ('all', 'All songs', 'Download entire library in background'),
-    ];
-    showModalBottomSheet(
-      context: context,
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text('Auto-download',
-                  style: Theme.of(context).textTheme.titleMedium),
-            ),
-            for (final (value, label, sublabel) in options)
-              ListTile(
-                title: Text(label),
-                subtitle: Text(sublabel),
-                trailing: prefs.autoDownload == value
-                    ? Icon(Icons.check_rounded,
-                        color: Theme.of(context).colorScheme.primary)
-                    : null,
-                onTap: () {
-                  ref
-                      .read(preferencesNotifierProvider.notifier)
-                      .update(prefs.copyWith(autoDownload: value));
-                  Navigator.pop(context);
-                },
-              ),
-          ],
         ),
       ),
     );
   }
 }
 
-// Replaces the plain ARL tile with one that surfaces live validation status,
-// so the user finds out an expired ARL from Settings (or the Home banner)
-// rather than from a mystery "download failed" five seconds after tapping
-// Add to library.
-class _DeezerAccountTile extends ConsumerWidget {
-  final AppPreferences prefs;
-  final VoidCallback onEdit;
-  const _DeezerAccountTile({required this.prefs, required this.onEdit});
+class _TileTrailing extends StatelessWidget {
+  final Widget? status;
+
+  const _TileTrailing({this.status});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
-
-    if (!prefs.hasDeezerArl) {
-      return ListTile(
-        leading: const Icon(Icons.account_circle_rounded),
-        title: const Text('Deezer Account'),
-        subtitle: const Text('Not connected — 30s previews only'),
-        onTap: onEdit,
-      );
-    }
-
-    final statusAsync = ref.watch(deezerArlStatusProvider);
-    final (String subtitle, Widget trailing) = statusAsync.when(
-      loading: () => (
-        'Checking Deezer session…',
-        const SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2)),
-      ),
-      error: (_, __) => (
-        'Could not verify (check internet)',
-        Icon(Icons.help_outline_rounded, color: scheme.onSurfaceVariant),
-      ),
-      data: (status) => switch (status) {
-        DeezerArlStatus.valid => (
-          'Connected — FLAC downloads enabled',
-          const Icon(Icons.check_circle_rounded, color: Colors.green),
-        ),
-        DeezerArlStatus.invalid => (
-          'Session expired — tap to paste a fresh ARL',
-          Icon(Icons.error_rounded, color: scheme.error),
-        ),
-        DeezerArlStatus.notSet => (
-          'Not connected — 30s previews only',
-          const SizedBox.shrink(),
-        ),
-      },
-    );
-
-    return ListTile(
-      leading: const Icon(Icons.account_circle_rounded),
-      title: const Text('Deezer Account'),
-      subtitle: Text(subtitle),
-      trailing: trailing,
-      onTap: onEdit,
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (status != null) ...[
+          status!,
+          const SizedBox(width: 4),
+        ],
+        const Icon(Icons.chevron_right_rounded),
+      ],
     );
   }
 }
 
-class _CompanionStatusTile extends ConsumerWidget {
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
-    final status = ref.watch(companionAvailableProvider);
-    return ListTile(
-      leading: status.when(
-        data: (ok) => Icon(
-          ok ? Icons.check_circle_rounded : Icons.error_rounded,
-          color: ok ? Colors.green : scheme.error,
-        ),
-        loading: () => const SizedBox(
-            width: 20, height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2)),
-        error: (_, __) =>
-            Icon(Icons.error_rounded, color: scheme.error),
-      ),
-      title: status.when(
-        data: (ok) => Text(ok ? 'Connected' : 'Cannot reach companion'),
-        loading: () => const Text('Checking...'),
-        error: (_, __) => const Text('Connection error'),
-      ),
-      subtitle: status.maybeWhen(
-        data: (ok) => ok
-            ? const Text('Server management available')
-            : const Text('Check URL and API key'),
-        orElse: () => null,
-      ),
-      trailing: IconButton(
-        icon: const Icon(Icons.refresh_rounded),
-        onPressed: () => ref.invalidate(companionAvailableProvider),
-      ),
-    );
-  }
+class _ChoiceOption<T> {
+  final T value;
+  final String title;
+  final String subtitle;
+
+  const _ChoiceOption({
+    required this.value,
+    required this.title,
+    required this.subtitle,
+  });
 }
 
 class _Step extends StatelessWidget {
   final int n;
   final String text;
-  const _Step({required this.n, required this.text});
+
+  const _Step({
+    required this.n,
+    required this.text,
+  });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
@@ -633,13 +900,16 @@ class _Step extends StatelessWidget {
               child: Text(
                 '$n',
                 style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: scheme.onPrimary),
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: scheme.onPrimary,
+                ),
               ),
             ),
           ),
-          Expanded(child: Text(text, style: const TextStyle(fontSize: 13))),
+          Expanded(
+            child: Text(text, style: const TextStyle(fontSize: 13)),
+          ),
         ],
       ),
     );
@@ -648,22 +918,212 @@ class _Step extends StatelessWidget {
 
 class _SectionHeader extends StatelessWidget {
   final String title;
+
   const _SectionHeader(this.title);
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 6),
       child: Text(
-        title.toUpperCase(),
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: scheme.primary,
-          letterSpacing: 0.8,
-        ),
+        title,
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: scheme.primary,
+              fontWeight: FontWeight.w700,
+            ),
       ),
     );
   }
+}
+
+Future<void> _changeServer(BuildContext context, WidgetRef ref) async {
+  final scheme = Theme.of(context).colorScheme;
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (_) => AlertDialog.adaptive(
+      title: const Text('Connect a different server?'),
+      content: const Text(
+        'This stops playback and permanently clears cached songs, downloaded files, and lyrics on this device. Play history is kept so recommendations still work.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, true),
+          style: TextButton.styleFrom(foregroundColor: scheme.error),
+          child: const Text('Continue'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return;
+
+  final handler = ref.read(audioHandlerNotifierProvider);
+  await handler?.stop();
+  await handler?.resetPlaybackModes();
+
+  try {
+    final dir = await getAppStorageDirectory();
+    final downloadsDir = Directory('${dir.path}/melodize_downloads');
+    if (await downloadsDir.exists()) {
+      await downloadsDir.delete(recursive: true);
+    }
+  } catch (_) {}
+
+  await ref.read(databaseProvider).clearAllData();
+
+  ref.invalidate(serverConfigProvider);
+  ref.invalidate(downloadedSongsProvider);
+  ref.invalidate(downloadNotifierProvider);
+  ref.invalidate(allSongsProvider);
+}
+
+String _qualityLabel(String quality) {
+  switch (quality) {
+    case 'lossless':
+      return 'Lossless (FLAC/ALAC)';
+    case '320':
+      return '320 kbps';
+    case '192':
+      return '192 kbps';
+    case '128':
+      return '128 kbps';
+    default:
+      return quality;
+  }
+}
+
+String _autoDownloadLabel(String mode) {
+  switch (mode) {
+    case 'never':
+      return 'Never';
+    case 'on_play':
+      return 'When played';
+    case 'all':
+      return 'All songs';
+    default:
+      return mode;
+  }
+}
+
+String _maskApiKey(String apiKey) {
+  if (apiKey.isEmpty) return 'Not set';
+  if (apiKey.length <= 8) return '••••••••';
+  return '••••••••${apiKey.substring(apiKey.length - 8)}';
+}
+
+String _displayServerUrl(String url) {
+  final trimmed = url.replaceAll(RegExp(r'/+$'), '');
+  final uri = Uri.tryParse(trimmed);
+  if (uri == null || uri.host.isEmpty) {
+    return trimmed.replaceFirst(RegExp(r'^https?://'), '');
+  }
+  final host = uri.hasPort ? '${uri.host}:${uri.port}' : uri.host;
+  final path = (uri.path.isEmpty || uri.path == '/') ? '' : uri.path;
+  return '$host$path';
+}
+
+String _deezerSubtitle(
+  bool hasArl,
+  DeezerArlStatus? status,
+  bool isLoading,
+  bool hasError,
+) {
+  if (!hasArl) return 'Not connected • 30s previews only';
+  if (isLoading) return 'Checking session…';
+  if (hasError) return 'Could not verify right now';
+  switch (status) {
+    case DeezerArlStatus.valid:
+      return 'Connected • FLAC downloads enabled';
+    case DeezerArlStatus.invalid:
+      return 'Session expired • update required';
+    case DeezerArlStatus.notSet:
+    case null:
+      return 'Not connected • 30s previews only';
+  }
+}
+
+Widget? _deezerStatusIcon(
+  BuildContext context,
+  bool hasArl,
+  DeezerArlStatus? status,
+  bool isLoading,
+  bool hasError,
+) {
+  final scheme = Theme.of(context).colorScheme;
+  if (!hasArl) return null;
+  if (isLoading) {
+    return const SizedBox(
+      width: 18,
+      height: 18,
+      child: CircularProgressIndicator(strokeWidth: 2),
+    );
+  }
+  if (hasError) {
+    return Icon(Icons.help_outline_rounded, color: scheme.onSurfaceVariant);
+  }
+  switch (status) {
+    case DeezerArlStatus.valid:
+      return const Icon(Icons.check_circle_rounded, color: Colors.green);
+    case DeezerArlStatus.invalid:
+      return Icon(Icons.error_rounded, color: scheme.error);
+    case DeezerArlStatus.notSet:
+    case null:
+      return null;
+  }
+}
+
+String _companionStatusTitle(
+  AppPreferences prefs,
+  AsyncValue<bool>? statusAsync,
+) {
+  if (!prefs.hasCompanion) return 'Not configured';
+  return statusAsync?.when(
+        data: (ok) => ok ? 'Connected' : 'Cannot reach companion',
+        loading: () => 'Checking connection…',
+        error: (_, __) => 'Connection error',
+      ) ??
+      'Checking connection…';
+}
+
+String _companionStatusSubtitle(
+  AppPreferences prefs,
+  AsyncValue<bool>? statusAsync,
+) {
+  if (!prefs.hasCompanion) {
+    return 'Add the URL and API key to enable server downloads';
+  }
+  return statusAsync?.maybeWhen(
+        data: (ok) => ok
+            ? 'Server downloads and delete-from-server are available'
+            : 'Check the URL and API key',
+        orElse: () => 'Waiting for companion status',
+      ) ??
+      'Waiting for companion status';
+}
+
+Widget? _companionStatusIcon(
+  BuildContext context,
+  AppPreferences prefs,
+  AsyncValue<bool>? statusAsync,
+) {
+  final scheme = Theme.of(context).colorScheme;
+  if (!prefs.hasCompanion) return null;
+  return statusAsync?.when(
+        data: (ok) => Icon(
+          ok ? Icons.check_circle_rounded : Icons.error_rounded,
+          color: ok ? Colors.green : scheme.error,
+        ),
+        loading: () => const SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+        error: (_, __) => Icon(Icons.error_rounded, color: scheme.error),
+      ) ??
+      const SizedBox.shrink();
 }
