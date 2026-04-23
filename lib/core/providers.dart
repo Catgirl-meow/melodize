@@ -450,6 +450,32 @@ final deezerSearchProvider =
   return ref.watch(deezerClientProvider).search(query);
 });
 
+// Deezer top tracks for a specific artist — used on the artist detail page to
+// surface songs the user doesn't own yet. Resolves the artist name → Deezer ID
+// first (searchBestArtist), then fetches real top tracks (not the radio mix).
+// Tracks already in the library are filtered out so this section is discovery-
+// only; library tracks are already visible in Albums / Songs.
+final deezerArtistTracksProvider =
+    FutureProvider.autoDispose.family<List<RecommendedTrack>, String>(
+        (ref, artistName) async {
+  if (artistName.trim().isEmpty) return [];
+  final deezer = ref.watch(deezerClientProvider);
+
+  final artistId = await deezer.searchBestArtist(artistName: artistName);
+  if (artistId == null) return [];
+
+  final tracks = await deezer.artistTopTracks(artistId, limit: 15);
+  if (tracks.isEmpty) return [];
+
+  // Cross-check against the cached library to skip tracks the user already owns.
+  final library = ref.read(allSongsProvider).valueOrNull ?? const <Song>[];
+  final owned = <String>{
+    for (final s in library) keyFor(s.title, s.artist),
+  };
+
+  return tracks.where((t) => !owned.contains(keyFor(t.title, t.artist))).toList();
+});
+
 final downloadedSongsProvider = FutureProvider<List<Song>>((ref) async {
   final db = ref.watch(databaseProvider);
   final rows = await db.getDownloadedSongs();

@@ -101,6 +101,28 @@ class DeezerClient {
     }
   }
 
+  /// Fetch an artist's actual top tracks from Deezer (distinct from the radio,
+  /// which is a curated mix of *similar* artists). Used on the artist detail
+  /// page so the user can preview tracks they don't own yet.
+  ///
+  /// Only returns entries with a preview URL (no preview = not playable in-app).
+  Future<List<RecommendedTrack>> artistTopTracks(
+    int artistId, {
+    int limit = 15,
+  }) async {
+    try {
+      final resp = await _dio.get('/artist/$artistId/top?limit=$limit');
+      final tracks = (resp.data as Map<String, dynamic>?)?['data'] as List?;
+      if (tracks == null) return [];
+      return tracks
+          .map((t) => RecommendedTrack.fromDeezerJson(t as Map<String, dynamic>))
+          .where((t) => t.previewUrl != null && t.previewUrl!.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   /// Validate an ARL cookie by calling Deezer's gw-light endpoint with it
   /// and checking whether the returned user object has a non-zero USER_ID.
   ///

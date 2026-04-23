@@ -7,6 +7,7 @@ import '../../core/utils/platform_dirs.dart';
 import '../../shared/utils/snack.dart';
 import '../../shared/utils/song_actions.dart';
 import '../../shared/widgets/cover_art_image.dart';
+import '../../shared/widgets/deezer_track_tile.dart';
 import '../../shared/widgets/song_tile.dart';
 import 'album_detail_screen.dart';
 
@@ -20,10 +21,12 @@ class ArtistDetailScreen extends ConsumerWidget {
     final albumsAsync = ref.watch(artistAlbumsProvider(artist.id));
     final topSongsAsync = ref.watch(artistTopSongsProvider(artist.name));
     final allSongsAsync = ref.watch(artistAllSongsProvider(artist.id));
+    final deezerAsync = ref.watch(deezerArtistTracksProvider(artist.name));
 
     final allSongs = allSongsAsync.valueOrNull;
     final topSongs = (topSongsAsync.valueOrNull ?? const []).take(5).toList();
     final albums = albumsAsync.valueOrNull ?? const [];
+    final deezerTracks = deezerAsync.valueOrNull ?? const [];
 
     Future<void> downloadAll() async {
       final songs = allSongsAsync.valueOrNull;
@@ -169,6 +172,30 @@ class ArtistDetailScreen extends ConsumerWidget {
               ),
             ),
           ],
+
+          // ── On Deezer ────────────────────────────────────────────────────
+          // Shows tracks the user doesn't own yet — preview or save to server.
+          // Hidden while loading or when all tracks are already in the library.
+          if (deezerAsync.isLoading)
+            const SliverToBoxAdapter(child: SizedBox.shrink()),
+          if (!deezerAsync.isLoading && deezerTracks.isNotEmpty)
+            SliverMainAxisGroup(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: _SectionHeader(
+                    'On Deezer',
+                    trailing: '${deezerTracks.length}',
+                    icon: Icons.headphones_rounded,
+                  ),
+                ),
+                SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (_, i) => DeezerTrackTile(track: deezerTracks[i]),
+                    childCount: deezerTracks.length,
+                  ),
+                ),
+              ],
+            ),
 
           // ── Albums ───────────────────────────────────────────────────────
           SliverToBoxAdapter(
@@ -339,7 +366,8 @@ class _AlbumCard extends ConsumerWidget {
 class _SectionHeader extends StatelessWidget {
   final String title;
   final String? trailing;
-  const _SectionHeader(this.title, {this.trailing});
+  final IconData? icon;
+  const _SectionHeader(this.title, {this.trailing, this.icon});
 
   @override
   Widget build(BuildContext context) {
@@ -348,6 +376,10 @@ class _SectionHeader extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 6),
       child: Row(
         children: [
+          if (icon != null) ...[
+            Icon(icon, size: 18, color: scheme.primary),
+            const SizedBox(width: 6),
+          ],
           Text(
             title,
             style: Theme.of(context)
@@ -359,8 +391,7 @@ class _SectionHeader extends StatelessWidget {
             const SizedBox(width: 8),
             Text(
               trailing!,
-              style: TextStyle(
-                  fontSize: 13, color: scheme.onSurfaceVariant),
+              style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
             ),
           ],
         ],
