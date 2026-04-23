@@ -331,22 +331,43 @@ final recommendationsProvider =
     for (final s in library) s.id: s.genre,
   };
 
+  // Build history seeds (always — used both for normal mode and as fallback
+  // when "More like this" override exhausts its candidates).
+  final history = await db.getRecentHistory(limit: 30);
+  final byArtist = <String, PlayHistoryData>{};
+  for (final h in history) {
+    byArtist.putIfAbsent(h.artist, () => h);
+  }
+  final distinctHistory = byArtist.values.toList()..shuffle();
+
   final seeds = <RecommendationSeed>[];
   if (override != null) {
+    // Override artist goes first so it dominates the mix.
     seeds.add(override);
+    // Add 3 history seeds from different artists as resilience backup:
+    // if the override artist isn't on Deezer, or all their radio tracks
+    // are already owned, history seeds fill the gap instead of erroring.
+    final overrideNorm = normalize(override.artist);
+    for (final h in distinctHistory) {
+      if (seeds.length >= 4) break;
+      if (normalize(h.artist) == overrideNorm) continue;
+      seeds.add((
+        artist: h.artist,
+        title: h.songTitle,
+        genre: genreBySongId[h.songId],
+      ));
+    }
+    // If there's no history at all and the override also fails, return
+    // a graceful empty rather than crashing.
+    if (seeds.length == 1 && history.isEmpty) {
+      return const RecsEmptyNoHistory();
+    }
   } else {
-    final history = await db.getRecentHistory(limit: 30);
     if (history.isEmpty) return const RecsEmptyNoHistory();
-
     // Dedupe by artist so 6 seeds cover 6 different artists; avoids the
     // "played the same track 6 times today = 6 identical seeds = 1 radio"
     // degenerate case.
-    final byArtist = <String, PlayHistoryData>{};
-    for (final h in history) {
-      byArtist.putIfAbsent(h.artist, () => h);
-    }
-    final distinct = byArtist.values.toList()..shuffle();
-    for (final h in distinct.take(6)) {
+    for (final h in distinctHistory.take(6)) {
       seeds.add((
         artist: h.artist,
         title: h.songTitle,
@@ -356,6 +377,9 @@ final recommendationsProvider =
     if (seeds.isEmpty) return const RecsEmptyNoHistory();
   }
 
+  // Fetch radio for each seed in parallel. Use a larger limit so the
+  // library cross-check (below) has more candidates to work with —
+  // users with large libraries need more raw tracks to find new ones.
   Future<List<RecommendedTrack>> fanOut(RecommendationSeed seed) async {
     final id = await deezer.searchBestArtist(
       artistName: seed.artist,
@@ -363,7 +387,7 @@ final recommendationsProvider =
       genreHint: seed.genre,
     );
     if (id == null) return const [];
-    return deezer.artistRadio(id, limit: 10);
+    return deezer.artistRadio(id, limit: 20);
   }
 
   var results = await Future.wait(seeds.map(fanOut));
