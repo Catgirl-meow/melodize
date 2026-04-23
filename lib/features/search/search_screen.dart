@@ -9,6 +9,7 @@ import '../../shared/utils/snack.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/song_tile.dart';
 import '../library/album_detail_screen.dart';
+import '../library/artist_detail_screen.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key});
@@ -111,10 +112,18 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                                         borderRadius: 22),
                                     title: Text(a.name),
                                     subtitle: Text(
-                                        '${a.albumCount} albums',
+                                        '${a.albumCount} ${a.albumCount == 1 ? 'album' : 'albums'}',
                                         style: TextStyle(
-                                            color:
-                                                scheme.onSurfaceVariant)),
+                                            color: scheme.onSurfaceVariant)),
+                                    trailing: const Icon(
+                                        Icons.chevron_right_rounded),
+                                    onTap: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            ArtistDetailScreen(artist: a),
+                                      ),
+                                    ),
                                   )),
                             ],
                             if (results.albums.isNotEmpty) ...[

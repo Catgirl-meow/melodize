@@ -178,6 +178,18 @@ class SubsonicClient {
         .toList();
   }
 
+  Future<List<Song>> getTopSongs(String artistName, {int count = 10}) async {
+    try {
+      final resp = await _get('getTopSongs', {'artist': artistName, 'count': count});
+      final songs = resp['topSongs']?['song'] as List? ?? [];
+      return songs
+          .map((s) => Song.fromSubsonicJson(s as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   // --- Artists ---
   Future<List<Artist>> getArtists() async {
     final resp = await _get('getArtists');

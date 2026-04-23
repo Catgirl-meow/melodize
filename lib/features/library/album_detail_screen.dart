@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/album.dart';
 import '../../core/providers.dart';
+import '../../shared/utils/song_actions.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/song_tile.dart';
 
@@ -59,21 +60,33 @@ class AlbumDetailScreen extends ConsumerWidget {
               ),
             ),
           ),
-          // Play all button
+          // Play all + Download album buttons
           SliverToBoxAdapter(
             child: Padding(
               padding:
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: songsAsync.whenOrNull(
-                data: (songs) => FilledButton.icon(
-                  icon: const Icon(Icons.play_arrow_rounded),
-                  label: Text('Play all · ${songs.length} songs'),
-                  onPressed: () {
-                    ref
-                        .read(audioHandlerNotifierProvider)
-                        ?.loadQueue(songs);
-                    Navigator.pop(context);
-                  },
+                data: (songs) => Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        icon: const Icon(Icons.play_arrow_rounded),
+                        label: Text('Play all · ${songs.length} songs'),
+                        onPressed: () {
+                          ref
+                              .read(audioHandlerNotifierProvider)
+                              ?.loadQueue(songs);
+                          Navigator.pop(context);
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton.outlined(
+                      icon: const Icon(Icons.download_rounded),
+                      tooltip: 'Download album',
+                      onPressed: () => downloadAlbum(context, ref, album),
+                    ),
+                  ],
                 ),
               ),
             ),

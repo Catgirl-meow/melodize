@@ -7,6 +7,7 @@ import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/offline_banner.dart';
 import '../../shared/widgets/song_tile.dart';
 import 'album_detail_screen.dart';
+import 'artist_detail_screen.dart';
 
 // ---------------------------------------------------------------------------
 // Song sorting
@@ -671,8 +672,8 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab>
                       onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => _ArtistDetailScreen(
-                              artistId: artist.id, artistName: artist.name),
+                          builder: (_) =>
+                              ArtistDetailScreen(artist: artist),
                         ),
                       ),
                     ),
@@ -688,78 +689,3 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab>
   }
 }
 
-class _ArtistDetailScreen extends ConsumerWidget {
-  final String artistId;
-  final String artistName;
-  const _ArtistDetailScreen(
-      {required this.artistId, required this.artistName});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final albumsAsync = ref.watch(artistAlbumsProvider(artistId));
-    return Scaffold(
-      appBar: AppBar(title: Text(artistName)),
-      body: albumsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('$e')),
-        data: (albums) => GridView.builder(
-          padding: const EdgeInsets.all(12),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            childAspectRatio: 0.78,
-            crossAxisSpacing: 8,
-            mainAxisSpacing: 8,
-          ),
-          itemCount: albums.length,
-          itemBuilder: (_, i) {
-            final album = albums[i];
-            final scheme = Theme.of(context).colorScheme;
-            return RepaintBoundary(
-              child: InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => AlbumDetailScreen(album: album),
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: CoverArtImage(
-                        coverArtId: album.coverArt,
-                        size: double.infinity,
-                        borderRadius: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(album.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w600, fontSize: 13)),
-                          if (album.year != null)
-                            Text('${album.year}',
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    color: scheme.onSurfaceVariant)),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}

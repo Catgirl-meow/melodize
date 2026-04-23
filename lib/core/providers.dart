@@ -529,6 +529,30 @@ final artistAlbumsProvider =
   }
 });
 
+// Top songs for an artist by name (Navidrome/Last.fm backed — may return [] on servers
+// without Last.fm integration; callers should handle empty gracefully).
+final artistTopSongsProvider =
+    FutureProvider.family<List<Song>, String>((ref, artistName) async {
+  final client = ref.watch(subsonicClientProvider);
+  if (client == null) return [];
+  return client.getTopSongs(artistName);
+});
+
+// All songs by an artist — fetches each album's tracks in parallel.
+final artistAllSongsProvider =
+    FutureProvider.family<List<Song>, String>((ref, artistId) async {
+  final client = ref.watch(subsonicClientProvider);
+  if (client == null) return [];
+  try {
+    final albums = await client.getArtistAlbums(artistId);
+    final perAlbum =
+        await Future.wait(albums.map((a) => client.getAlbumSongs(a.id)));
+    return perAlbum.expand((songs) => songs).toList();
+  } catch (_) {
+    return [];
+  }
+});
+
 // --- Playlists ---
 final playlistsProvider = FutureProvider((ref) async {
   final client = ref.watch(subsonicClientProvider);

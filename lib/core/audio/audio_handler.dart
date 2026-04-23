@@ -552,9 +552,24 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   // Returns true if a text-input widget currently has keyboard focus.
   // Used to suppress vim shortcuts while the user is typing.
+  //
+  // In Flutter 3.27+, EditableText wraps its FocusNode in an inner Focus
+  // widget, so primaryFocus.context.widget is Focus (not EditableText).
+  // visitAncestorElements from that Focus context walks up and finds the
+  // enclosing EditableText, making the check reliable across Flutter versions.
   bool _isTextFieldFocused() {
     final focus = FocusManager.instance.primaryFocus;
-    return focus?.context?.widget is EditableText;
+    if (focus == null) return false;
+    if (focus.context?.widget is EditableText) return true;
+    bool found = false;
+    focus.context?.visitAncestorElements((element) {
+      if (element.widget is EditableText) {
+        found = true;
+        return false;
+      }
+      return true;
+    });
+    return found;
   }
 
   void _seekRelative(Duration delta) {
