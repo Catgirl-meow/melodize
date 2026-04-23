@@ -54,6 +54,10 @@ Pass 2 is split into seven standalone sub-plans under [`docs/pass-2/`](pass-2/).
 
 Current execution order (picked by user to benchmark Opus 4.7 on a meaty item first): **2a now**, remaining order TBD after.
 
+### Features shipped outside the pass-2 plan (v1.8.5, 2026-04-22)
+- **Downloaded songs overhaul** — live search (title/artist/album/genre/format), lossless/lossy filter, sort by name/artist/album/recently added (asc/desc); empty and no-results states.
+- **Settings sub-pages** — Library server, Deezer, and Companion settings each moved to their own `_SettingsPageScaffold` sub-screen instead of being inline in the main settings scroll.
+
 ---
 
 ## Pass 3 — Material 3 Expressive upgrade (later)

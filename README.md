@@ -9,7 +9,7 @@ on lossless playback, a polished Material 3 UI, and offline support.
 ## Features
 
 - **Lossless playback** — streams original FLAC/OPUS/MP3 without re-encoding
-- **Offline / downloads** — download songs to device for playback without a connection; batch "download all" option
+- **Offline / downloads** — download songs to device for playback without a connection; batch "download all" option; browse downloads with live search, lossless/lossy filter, and multi-field sort
 - **Synced lyrics** — fetches time-synced LRC lyrics from LRClib, auto-scrolls with the song
 - **Now Playing screen** — album-art colour-extracted gradient, swipe between player and lyrics
 - **Queue management** — drag to reorder, play next, add to queue
@@ -22,7 +22,7 @@ on lossless playback, a polished Material 3 UI, and offline support.
 - **Scrobbling** — submits plays to the server (Navidrome can forward to Last.fm if configured server-side)
 - **Delete from server** — remove songs directly from your Navidrome library via the companion service
 - **Dock toggle** — switch between classic Material `NavigationBar` and the new floating pill dock (Settings → Appearance)
-- **Android 15-style grouped settings tiles** — rounded clustered rows in the Settings screen
+- **Android 15-style grouped settings tiles** — rounded clustered rows in the Settings screen; server, Deezer, and companion settings each on their own sub-page
 - **Origin Island / MediaSession** — Android lock-screen + notification controls wired automatically
 - **Linux MPRIS2** — exposes playback to `playerctl`, niri / Hyprland media keybindings, KDE / GNOME media widgets
 - **Keyboard shortcuts** — space play/pause, `j`/`k` prev/next, `l`/`h` seek, `n`/`p` prev/next, `s` shuffle, `r` repeat, XF86 media keys; `1`/`2`/`3`/`4` switch nav tabs; `Esc` closes the Now Playing screen
@@ -220,6 +220,10 @@ Work is organized into three passes. Full detail in [`docs/three-pass-plan.md`](
 - **Auto-download idempotency** — guard `ref.listen(allSongsProvider)` with a song-list signature
 - **Mini-player + dock redesign** — shape-morph radius consistency + dock pill geometry shipped in v1.8.4; app-bar geometry + grouped-settings-tile visual pass still pending
 - **Menu + visual-glitch triage** — per-screen iteration
+
+### v1.8.5 additions (outside pass plan)
+- **Downloaded songs overhaul** — live search (title/artist/album/genre/format), lossless/lossy filter, sort by name/artist/album/recently added with ascending/descending toggle
+- **Settings sub-pages** — library server, Deezer, and companion settings moved to dedicated sub-screens
 
 ### Pass 3 — Material 3 Expressive upgrade
 Driven by [`Material 3 Expressive Roadmap.html`](Material 3 Expressive Roadmap.html):
