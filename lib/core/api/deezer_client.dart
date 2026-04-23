@@ -27,56 +27,53 @@ class DeezerClient {
 
   /// Resolve a Deezer artist ID for a given seed.
   ///
-  /// Fuzzy-matches across the first 5 search hits to avoid the `tracks.first`
-  /// failure mode on common song titles (e.g. searching "Creep" by Radiohead
-  /// used to pick a random cover's artist). Returns null when no plausible
-  /// match is found rather than guessing.
+  /// Strategy (two-pass):
+  ///   1. Query /search/artist — Deezer's dedicated artist-name search.
+  ///      Results are ranked by name relevance, not track popularity, so
+  ///      this reliably surfaces the right artist for niche/non-mainstream acts.
+  ///   2. Fall back to /search (track search) only if pass 1 returns nothing.
+  ///      Accept a result ONLY when the artist name fuzzy-matches; never use
+  ///      a popularity-ranked "first result" as that was the root cause of
+  ///      unrelated pop recommendations.
   ///
-  /// [genreHint] biases the search query when a non-empty genre is known
-  /// from the user's library entry — measurable quality lift on seeds that
-  /// share a title with unrelated tracks in other genres.
+  /// Returns null when no confident match is found — the caller should skip
+  /// this seed rather than guessing a random popular artist.
   Future<int?> searchBestArtist({
     required String artistName,
     String? trackTitle,
     String? genreHint,
   }) async {
+    final seedNorm = normalize(artistName);
+    bool _matches(String? name) {
+      if (name == null) return false;
+      final h = normalize(name);
+      return h == seedNorm || h.contains(seedNorm) || seedNorm.contains(h);
+    }
+
     try {
+      // Pass 1: artist-name search — no popularity bias.
+      final q1 = Uri.encodeQueryComponent(artistName);
+      final r1 = await _dio.get('/search/artist?q=$q1&limit=8');
+      for (final a in (r1.data?['data'] as List? ?? [])) {
+        final id = (a as Map<String, dynamic>)['id'] as int?;
+        if (id != null && _matches(a['name'] as String?)) return id;
+      }
+
+      // Pass 2: track search fallback — strict name-match only, no fallback ID.
       final qParts = <String>[
         if (trackTitle != null && trackTitle.isNotEmpty) trackTitle,
         artistName,
-        if (genreHint != null && genreHint.isNotEmpty) genreHint,
       ];
-      final q = Uri.encodeQueryComponent(qParts.join(' '));
-      final resp = await _dio.get('/search?q=$q&limit=5');
-      final tracks = (resp.data as Map<String, dynamic>?)?['data'] as List?;
-      if (tracks == null || tracks.isEmpty) return null;
-
-      final seedNorm = normalize(artistName);
-
-      int? fallbackId;
-      for (final raw in tracks) {
-        final t = raw as Map<String, dynamic>;
-        final artistObj = t['artist'] as Map<String, dynamic>?;
+      final q2 = Uri.encodeQueryComponent(qParts.join(' '));
+      final r2 = await _dio.get('/search?q=$q2&limit=8');
+      for (final t in (r2.data?['data'] as List? ?? [])) {
+        final artistObj = (t as Map<String, dynamic>)['artist']
+            as Map<String, dynamic>?;
         final id = artistObj?['id'] as int?;
-        final name = artistObj?['name'] as String?;
-        if (id == null) continue;
-
-        fallbackId ??= id; // first result in case no fuzzy match wins
-
-        if (name == null) continue;
-        final hitNorm = normalize(name);
-        if (hitNorm == seedNorm ||
-            hitNorm.contains(seedNorm) ||
-            seedNorm.contains(hitNorm)) {
-          return id;
-        }
+        if (id != null && _matches(artistObj?['name'] as String?)) return id;
       }
-      // No fuzzy winner — only return the first hit if no better choice
-      // existed. Better a mediocre radio than a blocked seed.
-      return fallbackId;
-    } catch (_) {
-      return null;
-    }
+    } catch (_) {}
+    return null;
   }
 
   /// Fetch an artist's Deezer radio — a curated list of similar-sounding

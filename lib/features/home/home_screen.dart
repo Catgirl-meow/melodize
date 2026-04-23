@@ -18,6 +18,10 @@ class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   Future<void> _refresh(WidgetRef ref) async {
+    // Clear any active "More like this" seed override — otherwise the override
+    // persists through pull-to-refresh and re-triggers the same single-seed
+    // run (which errors out if that artist can't be resolved on Deezer).
+    ref.read(recommendationsSeedOverrideProvider.notifier).state = null;
     ref.invalidate(newestAlbumsProvider);
     ref.invalidate(randomSongsProvider);
     ref.invalidate(recentlyPlayedProvider);
