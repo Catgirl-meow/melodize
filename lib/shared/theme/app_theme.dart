@@ -21,6 +21,7 @@ class AppTheme {
         ColorScheme.fromSeed(
           seedColor: const Color(0xFF6750A4),
           brightness: Brightness.dark,
+          dynamicSchemeVariant: DynamicSchemeVariant.expressive,
         );
 
     return ThemeData(
@@ -70,6 +71,7 @@ class AppTheme {
         ColorScheme.fromSeed(
           seedColor: const Color(0xFF6750A4),
           brightness: Brightness.light,
+          dynamicSchemeVariant: DynamicSchemeVariant.expressive,
         );
 
     return ThemeData(

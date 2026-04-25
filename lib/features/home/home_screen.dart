@@ -14,6 +14,16 @@ import '../library/album_detail_screen.dart';
 import '../library/playlist_detail_screen.dart';
 import '../settings/settings_screen.dart';
 
+// M3 Expressive emphasized-decelerate curve (entrance motion spec).
+const _kEmphasizedDecelerate = Cubic(0.05, 0.7, 0.1, 1.0);
+const _kEmphasizedDuration = Duration(milliseconds: 350);
+
+// Uniform horizontal-carousel geometry — all rows use the same card width,
+// image size, and row height so the page feels visually consistent.
+const _kCardExtent = 160.0;     // CarouselView itemExtent
+const _kCardImageSize = 152.0;  // image width (160 – 2×4 px side padding)
+const _kCarouselHeight = 200.0; // SizedBox height wrapping each CarouselView
+
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
@@ -28,7 +38,6 @@ class HomeScreen extends ConsumerWidget {
     ref.invalidate(allSongsProvider);
     ref.invalidate(serverReachableProvider);
     ref.invalidate(recommendationsProvider);
-    // Give providers a moment to start fetching before we declare done
     await Future.delayed(const Duration(milliseconds: 600));
   }
 
@@ -44,241 +53,259 @@ class HomeScreen extends ConsumerWidget {
     final serverReachable =
         ref.watch(serverReachableProvider).valueOrNull ?? true;
     final arlStatus = ref.watch(deezerArlStatusProvider).valueOrNull;
-
     final scheme = Theme.of(context).colorScheme;
 
     return SafeArea(
       top: false,
       bottom: false,
       child: RefreshIndicator(
-      onRefresh: () => _refresh(ref),
-      child: CustomScrollView(
-        // Always scrollable so pull-to-refresh works even with little content
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-        // Offline banner — before the greeting so it sits at the very top.
-        const SliverToBoxAdapter(child: OfflineBanner()),
+        onRefresh: () => _refresh(ref),
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            // Offline banner — before the app bar so it shows at the absolute
+            // top edge; AnimatedSize makes it zero-height when online.
+            const SliverToBoxAdapter(child: OfflineBanner()),
 
-        // Greeting — status-bar clearance via viewPadding.top, no SliverAppBar
-        // so there's no empty toolbar gap above the title.
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              16,
-              MediaQuery.of(context).viewPadding.top + 16,
-              16,
-              0,
+            // Collapsing large app bar (M3E recommended pattern for home
+            // screens). The greeting is the expanded title; it collapses to
+            // a smaller toolbar-height version on scroll.
+            SliverAppBar.large(
+              pinned: true,
+              floating: false,
+              automaticallyImplyLeading: false,
+              scrolledUnderElevation: 0,
+              surfaceTintColor: scheme.surfaceContainer,
+              title: Text(_greeting(username)),
             ),
-            child: Text(
-              _greeting(username),
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineMedium
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-          ),
-        ),
 
-        // Deezer ARL expired banner — appears only when ARL is set but
-        // Deezer's own /getUserData returned USER_ID=0. Preempts the mystery
-        // "download failed" snacks users would otherwise see when adding
-        // recommendations to the library.
-        if (arlStatus == DeezerArlStatus.invalid)
-          const SliverToBoxAdapter(child: _DeezerExpiredBanner()),
+            // Deezer ARL expiry banner — appears only when ARL is set but
+            // Deezer's own /getUserData returned USER_ID=0.
+            if (arlStatus == DeezerArlStatus.invalid)
+              const SliverToBoxAdapter(child: _DeezerExpiredBanner()),
 
-        // Server unreachable chip (only when device is online but server is down)
-        if (isOnline && !serverReachable)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Row(
-                children: [
-                  Icon(Icons.cloud_off_rounded,
-                      size: 13,
-                      color: scheme.onSurfaceVariant),
-                  const SizedBox(width: 5),
-                  Text(
-                    'Server unreachable — pull to retry',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: scheme.onSurfaceVariant,
+            // Server unreachable — AssistChip gives the status a proper M3
+            // interactive component with a built-in retry affordance.
+            if (isOnline && !serverReachable)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: ActionChip(
+                      avatar: Icon(Icons.cloud_off_rounded,
+                          size: 16, color: scheme.onSurfaceVariant),
+                      label: const Text('Server unreachable — tap to retry'),
+                      onPressed: () => _refresh(ref),
                     ),
                   ),
-                ],
+                ),
               ),
-            ),
-          ),
 
-        // Playlists
-        playlistsAsync.when(
-          skipLoadingOnRefresh: true,
-          loading: () => const SliverToBoxAdapter(child: SizedBox.shrink()),
-          error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
-          data: (playlists) {
-            if (playlists.isEmpty) {
-              return const SliverToBoxAdapter(child: SizedBox.shrink());
-            }
-            return SliverToBoxAdapter(
-              child: _Section(
-                title: 'Playlists',
-                child: SizedBox(
-                  height: 152,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: playlists.length,
-                    itemBuilder: (_, i) => _PlaylistCard(
-                      playlist: playlists[i],
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => PlaylistDetailScreen(
-                              playlist: playlists[i]),
-                        ),
+            // Playlists
+            playlistsAsync.when(
+              skipLoadingOnRefresh: true,
+              loading: () =>
+                  const SliverToBoxAdapter(child: SizedBox.shrink()),
+              error: (_, __) =>
+                  const SliverToBoxAdapter(child: SizedBox.shrink()),
+              data: (playlists) {
+                if (playlists.isEmpty) {
+                  return const SliverToBoxAdapter(child: SizedBox.shrink());
+                }
+                return SliverToBoxAdapter(
+                  child: _fadeIn(
+                    child: _Section(
+                      title: 'Playlists',
+                      child: SizedBox(
+                        height: _kCarouselHeight,
+                        child: _buildCarousel(children: [
+                          for (final p in playlists)
+                            _PlaylistCard(
+                              playlist: p,
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      PlaylistDetailScreen(playlist: p),
+                                ),
+                              ),
+                            ),
+                        ]),
                       ),
                     ),
                   ),
-                ),
-              ),
-            );
-          },
-        ),
+                );
+              },
+            ),
 
-        // Newly added albums
-        newestAsync.when(
-          skipLoadingOnRefresh: true,
-          skipError: true,
-          loading: () => const SliverToBoxAdapter(child: SizedBox.shrink()),
-          error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
-          data: (albums) {
-            if (albums.isEmpty) {
-              return const SliverToBoxAdapter(child: SizedBox.shrink());
-            }
-            return SliverToBoxAdapter(
-              child: _Section(
-                title: 'Recently Added',
-                child: SizedBox(
-                  height: 176,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: albums.length,
-                    itemBuilder: (_, i) => _AlbumCard(
-                      album: albums[i],
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              AlbumDetailScreen(album: albums[i]),
-                        ),
+            // Newly added albums
+            newestAsync.when(
+              skipLoadingOnRefresh: true,
+              skipError: true,
+              loading: () =>
+                  const SliverToBoxAdapter(child: SizedBox.shrink()),
+              error: (_, __) =>
+                  const SliverToBoxAdapter(child: SizedBox.shrink()),
+              data: (albums) {
+                if (albums.isEmpty) {
+                  return const SliverToBoxAdapter(child: SizedBox.shrink());
+                }
+                return SliverToBoxAdapter(
+                  child: _fadeIn(
+                    child: _Section(
+                      title: 'Recently Added',
+                      child: SizedBox(
+                        height: _kCarouselHeight,
+                        child: _buildCarousel(children: [
+                          for (final album in albums)
+                            _AlbumCard(
+                              album: album,
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      AlbumDetailScreen(album: album),
+                                ),
+                              ),
+                            ),
+                        ]),
                       ),
                     ),
                   ),
+                );
+              },
+            ),
+
+            // Discover — random songs
+            randomAsync.when(
+              skipLoadingOnRefresh: true,
+              skipError: true,
+              loading: () => const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 48),
+                  child: Center(child: CircularProgressIndicator()),
                 ),
               ),
-            );
-          },
-        ),
-
-        // Discover — random songs
-        randomAsync.when(
-          skipLoadingOnRefresh: true,
-          skipError: true,
-          loading: () => const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 48),
-              child: Center(child: CircularProgressIndicator()),
-            ),
-          ),
-          error: (_, __) => SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Center(
-                child: Column(
-                  children: [
-                    Icon(Icons.wifi_off_rounded,
-                        size: 48,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Could not connect to server',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          data: (songs) => SliverToBoxAdapter(
-            child: _Section(
-              title: 'Discover',
-              child: SizedBox(
-                height: 176,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: songs.length,
-                  itemBuilder: (_, i) => _SongCard(
-                    song: songs[i],
-                    onTap: () => _playSongs(ref, songs, i),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-
-        // Recommended for You — Deezer artist-radio discoveries filtered
-        // against the library. Surface is state-driven so we can distinguish
-        // loading / empty-history / error / ready instead of silently hiding.
-        _buildRecsSection(context, ref, recsAsync),
-
-        // Recently played
-        recentAsync.when(
-          skipLoadingOnRefresh: true,
-          loading: () => const SliverToBoxAdapter(child: SizedBox.shrink()),
-          error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
-          data: (songs) {
-            if (songs.isEmpty) {
-              return const SliverToBoxAdapter(child: SizedBox.shrink());
-            }
-            return SliverToBoxAdapter(
-              child: _Section(
-                title: 'Recently Played',
-                child: SizedBox(
-                  height: 176,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: songs.length,
-                    itemBuilder: (_, i) => _SongCard(
-                      song: songs[i],
-                      onTap: () => _playSongs(ref, songs, i),
+              error: (_, __) => SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Center(
+                    child: Column(
+                      children: [
+                        Icon(Icons.wifi_off_rounded,
+                            size: 48,
+                            color: scheme.onSurfaceVariant),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Could not connect to server',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
-            );
-          },
-        ),
+              data: (songs) => SliverToBoxAdapter(
+                child: _fadeIn(
+                  child: _Section(
+                    title: 'Discover',
+                    child: SizedBox(
+                      height: _kCarouselHeight,
+                      child: _buildCarousel(children: [
+                        for (int i = 0; i < songs.length; i++)
+                          _SongCard(
+                            song: songs[i],
+                            onTap: () => _playSongs(ref, songs, i),
+                          ),
+                      ]),
+                    ),
+                  ),
+                ),
+              ),
+            ),
 
-        // Bottom clearance = injected MediaQuery.padding.bottom (dock + mini
-        // player heights from main_shell) + 16 px breathing room.
-        // CustomScrollView does NOT auto-apply MediaQuery.padding (unlike
-        // ListView/GridView which extend BoxScrollView), so we read it here.
-        SliverPadding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.paddingOf(context).bottom + 16,
-          ),
+            // Recommended for You
+            _buildRecsSection(context, ref, recsAsync),
+
+            // Recently played
+            recentAsync.when(
+              skipLoadingOnRefresh: true,
+              loading: () =>
+                  const SliverToBoxAdapter(child: SizedBox.shrink()),
+              error: (_, __) =>
+                  const SliverToBoxAdapter(child: SizedBox.shrink()),
+              data: (songs) {
+                if (songs.isEmpty) {
+                  return const SliverToBoxAdapter(child: SizedBox.shrink());
+                }
+                return SliverToBoxAdapter(
+                  child: _fadeIn(
+                    child: _Section(
+                      title: 'Recently Played',
+                      child: SizedBox(
+                        height: _kCarouselHeight,
+                        child: _buildCarousel(children: [
+                          for (int i = 0; i < songs.length; i++)
+                            _SongCard(
+                              song: songs[i],
+                              onTap: () => _playSongs(ref, songs, i),
+                            ),
+                        ]),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+
+            SliverPadding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.paddingOf(context).bottom + 16,
+              ),
+            ),
+          ],
         ),
-      ],
       ),
-    ),
     );
   }
 
   void _playSongs(WidgetRef ref, List<Song> songs, int index) {
     ref.read(audioHandlerNotifierProvider)?.loadQueue(songs, startIndex: index);
+  }
+
+  // Shared CarouselView factory — all home-screen horizontal rows use the same
+  // snap / shrink / padding / transparency configuration.
+  static Widget _buildCarousel({required List<Widget> children}) {
+    return CarouselView(
+      itemExtent: _kCardExtent,
+      itemSnapping: true,
+      shrinkExtent: 40,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      shape: const RoundedRectangleBorder(),
+      overlayColor: WidgetStateProperty.all(Colors.transparent),
+      children: children,
+    );
+  }
+
+  // Fade + upward slide on first build — M3E "emphasized decelerate" entrance.
+  // Plays once when a section's AsyncValue first transitions to .data.
+  static Widget _fadeIn({required Widget child}) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: _kEmphasizedDuration,
+      curve: _kEmphasizedDecelerate,
+      builder: (_, value, ch) => Opacity(
+        opacity: value,
+        child: Transform.translate(
+          offset: Offset(0, 16 * (1 - value)),
+          child: ch,
+        ),
+      ),
+      child: child,
+    );
   }
 
   Widget _buildRecsSection(
@@ -300,7 +327,7 @@ class HomeScreen extends ConsumerWidget {
       error: (_, __) => SliverToBoxAdapter(
         child: _Section(
           title: 'Recommended for You',
-          trailing: IconButton(
+          trailing: IconButton.filledTonal(
             tooltip: 'Retry',
             icon: const Icon(Icons.refresh_rounded),
             onPressed: refresh,
@@ -326,7 +353,7 @@ class HomeScreen extends ConsumerWidget {
             return SliverToBoxAdapter(
               child: _Section(
                 title: 'Recommended for You',
-                trailing: IconButton(
+                trailing: IconButton.filledTonal(
                   tooltip: 'Retry',
                   icon: const Icon(Icons.refresh_rounded),
                   onPressed: refresh,
@@ -336,24 +363,24 @@ class HomeScreen extends ConsumerWidget {
             );
           case RecsReady(songs: final songs):
             return SliverToBoxAdapter(
-              child: _Section(
-                title: 'Recommended for You',
-                trailing: IconButton(
-                  tooltip: 'Refresh recommendations',
-                  icon: const Icon(Icons.refresh_rounded),
-                  onPressed: refresh,
-                ),
-                child: SizedBox(
-                  height: 176,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: songs.length,
-                    itemBuilder: (_, i) => _RecommendationCard(
-                      song: songs[i],
-                      queue: songs,
-                      index: i,
-                    ),
+              child: _fadeIn(
+                child: _Section(
+                  title: 'Recommended for You',
+                  trailing: IconButton.filledTonal(
+                    tooltip: 'Refresh recommendations',
+                    icon: const Icon(Icons.refresh_rounded),
+                    onPressed: refresh,
+                  ),
+                  child: SizedBox(
+                    height: _kCarouselHeight,
+                    child: _buildCarousel(children: [
+                      for (int i = 0; i < songs.length; i++)
+                        _RecommendationCard(
+                          song: songs[i],
+                          queue: songs,
+                          index: i,
+                        ),
+                    ]),
                   ),
                 ),
               ),
@@ -401,10 +428,10 @@ class _Section extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontWeight: FontWeight.bold),
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.1,
+                      ),
                 ),
               ),
               if (trailing != null) trailing!,
@@ -429,29 +456,28 @@ class _SongCard extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: SizedBox(
-        width: 130,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CoverArtImage(
-                  coverArtId: song.coverArt, size: 130, borderRadius: 12),
-              const SizedBox(height: 8),
-              Text(song.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w600)),
-              Text(song.artist,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 12, color: scheme.onSurfaceVariant)),
-            ],
-          ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CoverArtImage(
+                coverArtId: song.coverArt,
+                size: _kCardImageSize,
+                borderRadius: 12),
+            const SizedBox(height: 8),
+            Text(song.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600)),
+            Text(song.artist,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 12, color: scheme.onSurfaceVariant)),
+          ],
         ),
       ),
     );
@@ -470,29 +496,28 @@ class _AlbumCard extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: SizedBox(
-        width: 130,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CoverArtImage(
-                  coverArtId: album.coverArt, size: 130, borderRadius: 12),
-              const SizedBox(height: 8),
-              Text(album.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w600)),
-              Text(album.artist,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 12, color: scheme.onSurfaceVariant)),
-            ],
-          ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CoverArtImage(
+                coverArtId: album.coverArt,
+                size: _kCardImageSize,
+                borderRadius: 12),
+            const SizedBox(height: 8),
+            Text(album.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600)),
+            Text(album.artist,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 12, color: scheme.onSurfaceVariant)),
+          ],
         ),
       ),
     );
@@ -511,29 +536,26 @@ class _PlaylistCard extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: SizedBox(
-        width: 110,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CoverArtImage(
-                  coverArtId: playlist.coverArt as String?,
-                  size: 110,
-                  borderRadius: 12),
-              const SizedBox(height: 6),
-              Text(playlist.name as String,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.w600)),
-              Text('${playlist.songCount} songs',
-                  style: TextStyle(
-                      fontSize: 11, color: scheme.onSurfaceVariant)),
-            ],
-          ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CoverArtImage(
+                coverArtId: playlist.coverArt as String?,
+                size: _kCardImageSize,
+                borderRadius: 12),
+            const SizedBox(height: 6),
+            Text(playlist.name as String,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w600)),
+            Text('${playlist.songCount} songs',
+                style: TextStyle(
+                    fontSize: 11, color: scheme.onSurfaceVariant)),
+          ],
         ),
       ),
     );
@@ -623,6 +645,7 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
   void _openMenu() {
     final canDownload = ref.read(canDeleteFromServerProvider);
     debugPrint('[rec] _openMenu canDownload=$canDownload song=${widget.song.id}');
+    final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -630,6 +653,56 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Song header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: widget.song.externalCoverUrl != null
+                        ? CachedNetworkImage(
+                            imageUrl: widget.song.externalCoverUrl!,
+                            width: 44,
+                            height: 44,
+                            fit: BoxFit.cover,
+                          )
+                        : Consumer(
+                            builder: (_, ref, __) => CoverArtImage(
+                              coverArtId: widget.song.coverArt,
+                              size: 44,
+                              borderRadius: 6,
+                            ),
+                          ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.song.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(ctx).textTheme.titleSmall,
+                        ),
+                        Text(
+                          widget.song.artist,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Divider(height: 1, indent: 16, endIndent: 16,
+                color: scheme.outlineVariant),
+            const SizedBox(height: 4),
             if (canDownload)
               ListTile(
                 leading: const Icon(Icons.library_add_rounded),
@@ -649,6 +722,7 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
                 _moreLikeThis();
               },
             ),
+            const SizedBox(height: 8),
           ],
         ),
       ),
@@ -666,8 +740,8 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
         borderRadius: BorderRadius.circular(12),
         child: CachedNetworkImage(
           imageUrl: widget.song.externalCoverUrl!,
-          width: 130,
-          height: 130,
+          width: _kCardImageSize,
+          height: _kCardImageSize,
           fit: BoxFit.cover,
           placeholder: (_, __) => _coverPlaceholder(scheme),
           errorWidget: (_, __, ___) => _coverPlaceholder(scheme),
@@ -676,7 +750,7 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
     } else {
       cover = CoverArtImage(
         coverArtId: widget.song.coverArt,
-        size: 130,
+        size: _kCardImageSize,
         borderRadius: 12,
       );
     }
@@ -687,82 +761,79 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
     // menu never opened and companion downloads never fired.
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: SizedBox(
-        width: 130,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Stack(
-              children: [
-                InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: _play,
-                  child: cover,
-                ),
-                if (isPreview)
-                  Positioned(
-                    bottom: 6,
-                    left: 6,
-                    child: IgnorePointer(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 5, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: const Text(
-                          'PREVIEW',
-                          style: TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white),
-                        ),
-                      ),
-                    ),
-                  ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Stack(
+            children: [
+              InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: _play,
+                child: cover,
+              ),
+              if (isPreview)
                 Positioned(
-                  top: 2,
-                  right: 2,
-                  child: Material(
-                    color: Colors.black38,
-                    shape: const CircleBorder(),
-                    clipBehavior: Clip.antiAlias,
-                    child: InkWell(
-                      customBorder: const CircleBorder(),
-                      onTap: _openMenu,
-                      child: const Padding(
-                        padding: EdgeInsets.all(4),
-                        child: Icon(Icons.more_vert_rounded,
-                            size: 18, color: Colors.white),
+                  bottom: 6,
+                  left: 6,
+                  child: IgnorePointer(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: scheme.inverseSurface,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'PREVIEW',
+                        style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            color: scheme.onInverseSurface),
                       ),
                     ),
                   ),
                 ),
+              Positioned(
+                top: 2,
+                right: 2,
+                child: Material(
+                  color: Colors.black38,
+                  shape: const CircleBorder(),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: _openMenu,
+                    child: const Padding(
+                      padding: EdgeInsets.all(4),
+                      child: Icon(Icons.more_vert_rounded,
+                          size: 18, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          InkWell(
+            borderRadius: BorderRadius.circular(6),
+            onTap: _play,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(widget.song.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600)),
+                Text(widget.song.artist,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 12, color: scheme.onSurfaceVariant)),
               ],
             ),
-            const SizedBox(height: 8),
-            InkWell(
-              borderRadius: BorderRadius.circular(6),
-              onTap: _play,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(widget.song.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.w600)),
-                  Text(widget.song.artist,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 12, color: scheme.onSurfaceVariant)),
-                ],
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -770,20 +841,20 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
   Widget _coverPlaceholder(ColorScheme scheme) => ClipRRect(
         borderRadius: BorderRadius.circular(12),
         child: Container(
-          width: 130,
-          height: 130,
+          width: _kCardImageSize,
+          height: _kCardImageSize,
           color: scheme.surfaceContainerHigh,
           child: Icon(Icons.music_note_rounded,
-              size: 52, color: scheme.onSurfaceVariant),
+              size: 60, color: scheme.onSurfaceVariant),
         ),
       );
 }
 
 // ---------------------------------------------------------------------------
 
-// Inline error row rendered inside the "Recommended for You" section —
-// not a dialog / snackbar, deliberately. Goes away the moment the retry
-// succeeds; never blocks the rest of the Home screen.
+// Inline error row rendered inside the "Recommended for You" section.
+// Uses errorContainer so all error states in the app share the same visual
+// language (consistent with _DeezerExpiredBanner above).
 class _RecsInlineError extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
@@ -797,22 +868,24 @@ class _RecsInlineError extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: scheme.surfaceContainerHigh,
+          color: scheme.errorContainer,
           borderRadius: BorderRadius.circular(14),
         ),
         child: Row(
           children: [
             Icon(Icons.error_outline_rounded,
-                size: 18, color: scheme.onSurfaceVariant),
+                size: 18, color: scheme.onErrorContainer),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 message,
                 style: TextStyle(
-                    fontSize: 13, color: scheme.onSurfaceVariant),
+                    fontSize: 13, color: scheme.onErrorContainer),
               ),
             ),
             TextButton(
+              style: TextButton.styleFrom(
+                  foregroundColor: scheme.onErrorContainer),
               onPressed: onRetry,
               child: const Text('Retry'),
             ),
