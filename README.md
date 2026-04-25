@@ -14,8 +14,8 @@ on lossless playback, a polished Material 3 UI, and offline support.
 - **Now Playing screen** — album-art colour-extracted gradient, swipe between player and lyrics
 - **Queue management** — drag to reorder, play next, add to queue
 - **Library sorting** — sort by name, artist, recently added, downloaded
-- **Home screen** — time-aware greeting, recently added albums, random picks
-- **Discovery / Recommendations** — Deezer-powered "Recommended for You" based on your listening history, surfacing new tracks you don't already have; tap to play a 30s preview, long-press to download the full FLAC to your Navidrome server
+- **Home screen** — collapsing large app bar with time-aware greeting, snap-to-card carousels (recently added, random picks, recently played, playlists), M3 Expressive entrance animations
+- **Discovery / Recommendations** — Deezer-powered "Recommended for You" based on your listening history, surfacing new tracks you don't already have; tap to play a 30s preview, long-press to download the full FLAC to your Navidrome server; "More like this" on any card seeds the whole section from that artist
 - **Deezer search** — search the Deezer catalog from the Search tab; play previews or save to server
 - **Deezer account (ARL)** — paste your Deezer `arl` cookie in Settings to unlock full-FLAC downloads via the companion
 - **Sleep timer**
@@ -218,22 +218,32 @@ Work is organized into three passes. Full detail in [`docs/three-pass-plan.md`](
 - **Download reliability + notifications** — audit companion polling, snackbar on every completion / failure, de-jank library refresh
 - **Companion availability** — periodic re-check instead of one-shot `FutureProvider`
 - **Auto-download idempotency** — guard `ref.listen(allSongsProvider)` with a song-list signature
-- **Mini-player + dock redesign** — shape-morph radius consistency + dock pill geometry shipped in v1.8.4; app-bar geometry + grouped-settings-tile visual pass still pending
+- **Mini-player + dock redesign** — shape-morph radius consistency + dock pill geometry shipped in v1.8.4; grouped-settings-tile visual pass still pending
 - **Menu + visual-glitch triage** — per-screen iteration
 
 ### v1.8.5 additions (outside pass plan)
 - **Downloaded songs overhaul** — live search (title/artist/album/genre/format), lossless/lossy filter, sort by name/artist/album/recently added with ascending/descending toggle
 - **Settings sub-pages** — library server, Deezer, and companion settings moved to dedicated sub-screens
 
+### v1.9.0 — M3 Expressive home screen redesign
+- **Collapsing large app bar** — greeting expands/collapses on scroll (`SliverAppBar.large`); Home screen is now M3E-compliant (Pass 3 item 02 ✅ for Home)
+- **Snap carousels** — all horizontal rows converted to `CarouselView` with 160 px cards and snap-to-card physics; partially-visible next card acts as scroll affordance
+- **Section header typography** — `titleLarge w700` matching M3E spec (Pass 3 item 07 partial ✅)
+- **Section entrance motion** — fade + 16 px upward slide on first data load using M3E emphasized-decelerate curve
+- **Error state tokens** — recommendation errors use `errorContainer` / `onErrorContainer` for consistent visual language; server-unreachable becomes an `ActionChip` with built-in retry
+- **`DynamicSchemeVariant.expressive`** — fallback color scheme (no Material You) uses the expressive tonal palette (Pass 3 item 05 ✅)
+- **PREVIEW badge** — `inverseSurface` / `onInverseSurface` tokens (theme-aware, works in light mode)
+- **Recommendations refresh** — `IconButton.filledTonal` for visual weight; bottom sheet context menu gains song title/artist header
+
 ### Pass 3 — Material 3 Expressive upgrade
 Driven by [`Material 3 Expressive Roadmap.html`](Material 3 Expressive Roadmap.html):
 1. Shape-morphing mini player (P0, rework)
-2. Large / medium `SliverAppBar` (P0, rework)
+2. Large / medium `SliverAppBar` (P0) — ✅ Home done in v1.9.0; Library + Settings pending
 3. Grouped settings tiles (P0, visual pass)
 4. Wavy progress + FAB shape morph (P1, Flutter 3.27+)
-5. `DynamicSchemeVariant.expressive` (P1)
-6. Motion tokens (P1, codebase-wide)
-7. `displayLargeEmphasized` typography (P2)
+5. `DynamicSchemeVariant.expressive` (P1) — ✅ done in v1.9.0
+6. Motion tokens (P1, codebase-wide) — entrance motion landed on Home in v1.9.0; full token refactor pending
+7. `displayLargeEmphasized` typography (P2) — section headers landed in v1.9.0; Now Playing title pending
 8. Haptics w/ opt-out preference (P2)
 
 ### Optional / future

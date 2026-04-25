@@ -54,9 +54,28 @@ Pass 2 is split into seven standalone sub-plans under [`docs/pass-2/`](pass-2/).
 
 Current execution order (picked by user to benchmark Opus 4.7 on a meaty item first): **2a now**, remaining order TBD after.
 
-### Features shipped outside the pass-2 plan (v1.8.5, 2026-04-22)
+### Features shipped outside the pass-2 plan
+
+**v1.8.5 (2026-04-22)**
 - **Downloaded songs overhaul** — live search (title/artist/album/genre/format), lossless/lossy filter, sort by name/artist/album/recently added (asc/desc); empty and no-results states.
 - **Settings sub-pages** — Library server, Deezer, and Companion settings each moved to their own `_SettingsPageScaffold` sub-screen instead of being inline in the main settings scroll.
+
+**v1.8.6–1.8.9 (2026-04-23 to 2026-04-26)**
+- Vim keybinds no longer fire in text fields (Flutter 3.27 `visitAncestorElements` fix).
+- Full artist detail screen: top songs (Subsonic), Deezer discovery tracks, all albums grid, all songs list, download album one-tap.
+- Deezer two-pass artist search — `/search/artist` first (name-relevance), fallback `/search` with strict match; no more pop-biased first-result. Fixes bad recommendations.
+- More Like This error on pull-to-refresh fixed — `_refresh` now clears the seed override.
+- More Like This now prepends override as seed[0] with 3 history backup seeds; radio pool raised 10→20 for large libraries.
+
+**v1.9.0 (2026-04-26)**
+- `SliverAppBar.large` collapsing greeting on Home (Pass 3 item 02 — Home ✅).
+- All Home horizontal rows → `CarouselView` (160 px cards, snap-to-card).
+- Section headers `titleLarge w700` (Pass 3 item 07 — Home section headers ✅).
+- Section entrance: fade + 16 px upward slide, M3E emphasized-decelerate curve (Pass 3 item 06 — partial ✅).
+- `DynamicSchemeVariant.expressive` on fallback `ColorScheme.fromSeed` (Pass 3 item 05 ✅).
+- Error states: recs error uses `errorContainer`; server-unreachable → `ActionChip` with retry.
+- Recs refresh button → `IconButton.filledTonal`; PREVIEW badge → `inverseSurface` tokens.
+- Bottom sheet context menu adds song title/artist header.
 
 ---
 
@@ -67,13 +86,13 @@ Driven entirely by `Material 3 Expressive Roadmap.html` (8 items, ~20 h total).
 | # | Item | Priority | Est. | Status |
 |---|------|----------|------|--------|
 | 01 | Shape-morphing mini player | P0 | ~4 h | shipped, rework in Pass 2f |
-| 02 | Large / medium `SliverAppBar` | P0 | ~3 h | shipped, rework in Pass 2f |
+| 02 | Large / medium `SliverAppBar` | P0 | ~3 h | ✅ Home done v1.9.0 — Library + Settings pending |
 | 03 | Grouped settings tiles | P0 | ~2 h | shipped, visual pass in Pass 2f |
-| 04 | Wavy progress + FAB shape morph | P1 | ~3 h | new — Flutter 3.27+ |
-| 05 | `DynamicSchemeVariant.expressive` | P1 | ~1 h | new |
-| 06 | Motion tokens | P1 | ~4 h | new — codebase-wide refactor |
-| 07 | `displayLargeEmphasized` typography | P2 | ~2 h | new |
-| 08 | Haptics (with opt-out preference) | P2 | ~1 h | new |
+| 04 | Wavy progress + FAB shape morph | P1 | ~3 h | pending — Flutter 3.27+ |
+| 05 | `DynamicSchemeVariant.expressive` | P1 | ~1 h | ✅ done v1.9.0 |
+| 06 | Motion tokens | P1 | ~4 h | partial — Home entrance motion v1.9.0; codebase-wide pending |
+| 07 | `displayLargeEmphasized` typography | P2 | ~2 h | partial — Home section headers v1.9.0; Now Playing title pending |
+| 08 | Haptics (with opt-out preference) | P2 | ~1 h | pending |
 
 Pass 3 starts after Pass 2 stabilizes. The HTML roadmap has per-item Claude Code prompts ready to paste.
 
