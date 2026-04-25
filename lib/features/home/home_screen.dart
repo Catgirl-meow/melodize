@@ -18,10 +18,9 @@ import '../settings/settings_screen.dart';
 const _kEmphasizedDecelerate = Cubic(0.05, 0.7, 0.1, 1.0);
 const _kEmphasizedDuration = Duration(milliseconds: 350);
 
-// Uniform horizontal-carousel geometry — all rows use the same card width,
-// image size, and row height so the page feels visually consistent.
+// Uniform horizontal-carousel geometry.
 const _kCardExtent = 160.0;     // CarouselView itemExtent
-const _kCardImageSize = 152.0;  // image width (160 – 2×4 px side padding)
+const _kCardImageSize = 152.0;  // square image (160 – 2×4 px side padding)
 const _kCarouselHeight = 200.0; // SizedBox height wrapping each CarouselView
 
 class HomeScreen extends ConsumerWidget {
@@ -67,10 +66,9 @@ class HomeScreen extends ConsumerWidget {
             // top edge; AnimatedSize makes it zero-height when online.
             const SliverToBoxAdapter(child: OfflineBanner()),
 
-            // Collapsing large app bar (M3E recommended pattern for home
-            // screens). The greeting is the expanded title; it collapses to
-            // a smaller toolbar-height version on scroll.
-            SliverAppBar.large(
+            // Collapsing medium app bar — smaller expansion than large so the
+            // gap above the greeting matches the original ~16 px clearance.
+            SliverAppBar.medium(
               pinned: true,
               floating: false,
               automaticallyImplyLeading: false,
@@ -79,13 +77,11 @@ class HomeScreen extends ConsumerWidget {
               title: Text(_greeting(username)),
             ),
 
-            // Deezer ARL expiry banner — appears only when ARL is set but
-            // Deezer's own /getUserData returned USER_ID=0.
+            // Deezer ARL expiry banner
             if (arlStatus == DeezerArlStatus.invalid)
               const SliverToBoxAdapter(child: _DeezerExpiredBanner()),
 
-            // Server unreachable — AssistChip gives the status a proper M3
-            // interactive component with a built-in retry affordance.
+            // Server unreachable — ActionChip with built-in retry affordance.
             if (isOnline && !serverReachable)
               SliverToBoxAdapter(
                 child: Padding(
@@ -119,19 +115,18 @@ class HomeScreen extends ConsumerWidget {
                       title: 'Playlists',
                       child: SizedBox(
                         height: _kCarouselHeight,
-                        child: _buildCarousel(children: [
-                          for (final p in playlists)
-                            _PlaylistCard(
-                              playlist: p,
-                              onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                                      PlaylistDetailScreen(playlist: p),
-                                ),
-                              ),
+                        child: _buildCarousel(
+                          onItemTap: (i) => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => PlaylistDetailScreen(
+                                  playlist: playlists[i]),
                             ),
-                        ]),
+                          ),
+                          children: [
+                            for (final p in playlists) _PlaylistCard(playlist: p),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -157,19 +152,18 @@ class HomeScreen extends ConsumerWidget {
                       title: 'Recently Added',
                       child: SizedBox(
                         height: _kCarouselHeight,
-                        child: _buildCarousel(children: [
-                          for (final album in albums)
-                            _AlbumCard(
-                              album: album,
-                              onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                                      AlbumDetailScreen(album: album),
-                                ),
-                              ),
+                        child: _buildCarousel(
+                          onItemTap: (i) => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => AlbumDetailScreen(album: albums[i]),
                             ),
-                        ]),
+                          ),
+                          children: [
+                            for (final album in albums)
+                              _AlbumCard(album: album),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -194,13 +188,10 @@ class HomeScreen extends ConsumerWidget {
                     child: Column(
                       children: [
                         Icon(Icons.wifi_off_rounded,
-                            size: 48,
-                            color: scheme.onSurfaceVariant),
+                            size: 48, color: scheme.onSurfaceVariant),
                         const SizedBox(height: 8),
-                        Text(
-                          'Could not connect to server',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
+                        Text('Could not connect to server',
+                            style: Theme.of(context).textTheme.bodySmall),
                       ],
                     ),
                   ),
@@ -212,13 +203,12 @@ class HomeScreen extends ConsumerWidget {
                     title: 'Discover',
                     child: SizedBox(
                       height: _kCarouselHeight,
-                      child: _buildCarousel(children: [
-                        for (int i = 0; i < songs.length; i++)
-                          _SongCard(
-                            song: songs[i],
-                            onTap: () => _playSongs(ref, songs, i),
-                          ),
-                      ]),
+                      child: _buildCarousel(
+                        onItemTap: (i) => _playSongs(ref, songs, i),
+                        children: [
+                          for (final s in songs) _SongCard(song: s),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -245,13 +235,12 @@ class HomeScreen extends ConsumerWidget {
                       title: 'Recently Played',
                       child: SizedBox(
                         height: _kCarouselHeight,
-                        child: _buildCarousel(children: [
-                          for (int i = 0; i < songs.length; i++)
-                            _SongCard(
-                              song: songs[i],
-                              onTap: () => _playSongs(ref, songs, i),
-                            ),
-                        ]),
+                        child: _buildCarousel(
+                          onItemTap: (i) => _playSongs(ref, songs, i),
+                          children: [
+                            for (final s in songs) _SongCard(song: s),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -274,9 +263,13 @@ class HomeScreen extends ConsumerWidget {
     ref.read(audioHandlerNotifierProvider)?.loadQueue(songs, startIndex: index);
   }
 
-  // Shared CarouselView factory — all home-screen horizontal rows use the same
-  // snap / shrink / padding / transparency configuration.
-  static Widget _buildCarousel({required List<Widget> children}) {
+  // Taps are handled at the carousel level (onItemTap) rather than inside
+  // individual card widgets. This avoids tap-interception conflicts between
+  // CarouselView's own gesture layer and nested InkWells.
+  static Widget _buildCarousel({
+    required List<Widget> children,
+    void Function(int)? onItemTap,
+  }) {
     return CarouselView(
       itemExtent: _kCardExtent,
       itemSnapping: true,
@@ -286,12 +279,12 @@ class HomeScreen extends ConsumerWidget {
       elevation: 0,
       shape: const RoundedRectangleBorder(),
       overlayColor: WidgetStateProperty.all(Colors.transparent),
+      onTap: onItemTap,
       children: children,
     );
   }
 
   // Fade + upward slide on first build — M3E "emphasized decelerate" entrance.
-  // Plays once when a section's AsyncValue first transitions to .data.
   static Widget _fadeIn({required Widget child}) {
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
@@ -314,9 +307,6 @@ class HomeScreen extends ConsumerWidget {
     AsyncValue<RecommendationsState> recsAsync,
   ) {
     void refresh() {
-      // Clear any active "More like this" override so the refresh falls
-      // back to history-based seeds instead of re-running the same single
-      // seed the user clicked earlier.
       ref.read(recommendationsSeedOverrideProvider.notifier).state = null;
       ref.invalidate(recommendationsProvider);
     }
@@ -373,14 +363,14 @@ class HomeScreen extends ConsumerWidget {
                   ),
                   child: SizedBox(
                     height: _kCarouselHeight,
-                    child: _buildCarousel(children: [
-                      for (int i = 0; i < songs.length; i++)
-                        _RecommendationCard(
-                          song: songs[i],
-                          queue: songs,
-                          index: i,
-                        ),
-                    ]),
+                    child: _buildCarousel(
+                      onItemTap: (i) => ref
+                          .read(audioHandlerNotifierProvider)
+                          ?.loadQueue(songs, startIndex: i),
+                      children: [
+                        for (final s in songs) _RecommendationCard(song: s),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -445,40 +435,41 @@ class _Section extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
+// Card widgets — intentionally no InkWell / tap handler of their own.
+// CarouselView.onTap handles all taps at the carousel level to avoid
+// gesture conflicts with the carousel's own scroll/snap recogniser.
+// ---------------------------------------------------------------------------
 
 class _SongCard extends ConsumerWidget {
   final Song song;
-  final VoidCallback onTap;
-  const _SongCard({required this.song, required this.onTap});
+  const _SongCard({required this.song});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CoverArtImage(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // SizedBox.square enforces 1:1 regardless of parent constraints.
+          SizedBox.square(
+            dimension: _kCardImageSize,
+            child: CoverArtImage(
                 coverArtId: song.coverArt,
                 size: _kCardImageSize,
                 borderRadius: 12),
-            const SizedBox(height: 8),
-            Text(song.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w600)),
-            Text(song.artist,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 12, color: scheme.onSurfaceVariant)),
-          ],
-        ),
+          ),
+          const SizedBox(height: 8),
+          Text(song.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(song.artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+        ],
       ),
     );
   }
@@ -488,37 +479,33 @@ class _SongCard extends ConsumerWidget {
 
 class _AlbumCard extends ConsumerWidget {
   final Album album;
-  final VoidCallback onTap;
-  const _AlbumCard({required this.album, required this.onTap});
+  const _AlbumCard({required this.album});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CoverArtImage(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox.square(
+            dimension: _kCardImageSize,
+            child: CoverArtImage(
                 coverArtId: album.coverArt,
                 size: _kCardImageSize,
                 borderRadius: 12),
-            const SizedBox(height: 8),
-            Text(album.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w600)),
-            Text(album.artist,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 12, color: scheme.onSurfaceVariant)),
-          ],
-        ),
+          ),
+          const SizedBox(height: 8),
+          Text(album.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(album.artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+        ],
       ),
     );
   }
@@ -528,35 +515,33 @@ class _AlbumCard extends ConsumerWidget {
 
 class _PlaylistCard extends ConsumerWidget {
   final dynamic playlist;
-  final VoidCallback onTap;
-  const _PlaylistCard({required this.playlist, required this.onTap});
+  const _PlaylistCard({required this.playlist});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CoverArtImage(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox.square(
+            dimension: _kCardImageSize,
+            child: CoverArtImage(
                 coverArtId: playlist.coverArt as String?,
                 size: _kCardImageSize,
                 borderRadius: 12),
-            const SizedBox(height: 6),
-            Text(playlist.name as String,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600)),
-            Text('${playlist.songCount} songs',
-                style: TextStyle(
-                    fontSize: 11, color: scheme.onSurfaceVariant)),
-          ],
-        ),
+          ),
+          const SizedBox(height: 6),
+          Text(playlist.name as String,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w600)),
+          Text('${playlist.songCount} songs',
+              style: TextStyle(
+                  fontSize: 11, color: scheme.onSurfaceVariant)),
+        ],
       ),
     );
   }
@@ -564,18 +549,11 @@ class _PlaylistCard extends ConsumerWidget {
 
 // ---------------------------------------------------------------------------
 
+// Recommendation card — only handles the 3-dot context menu.
+// Play is triggered via CarouselView.onTap at the carousel level.
 class _RecommendationCard extends ConsumerStatefulWidget {
   final Song song;
-  // Full recommendations list so tapping this card starts sequential
-  // playback of the whole row; shuffle / loop in the player then operate
-  // over every recommendation, not the single tapped track.
-  final List<Song> queue;
-  final int index;
-  const _RecommendationCard({
-    required this.song,
-    required this.queue,
-    required this.index,
-  });
+  const _RecommendationCard({required this.song});
 
   @override
   ConsumerState<_RecommendationCard> createState() =>
@@ -584,14 +562,7 @@ class _RecommendationCard extends ConsumerStatefulWidget {
 
 class _RecommendationCardState extends ConsumerState<_RecommendationCard>
     with DownloadPollingMixin {
-  void _play() {
-    ref
-        .read(audioHandlerNotifierProvider)
-        ?.loadQueue(widget.queue, startIndex: widget.index);
-  }
-
   Future<void> _addToLibrary() async {
-    debugPrint('[rec] _addToLibrary for ${widget.song.id} "${widget.song.title}"');
     final companion = ref.read(companionClientProvider);
     if (companion == null) {
       showStyledSnack(context,
@@ -600,9 +571,6 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
       return;
     }
     final prefs = ref.read(preferencesNotifierProvider);
-    // Deemix fails hard without a valid ARL — preflight here so the user
-    // gets an actionable message instead of a "Download failed: Aborted!"
-    // snack five seconds later from the server-side polling path.
     if (!prefs.hasDeezerArl) {
       showStyledSnack(context,
           'Add Deezer ARL in Settings — required for server downloads',
@@ -618,9 +586,7 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
     }
     final deezerTrackId = widget.song.id.substring('deezer:'.length);
     final url = 'https://www.deezer.com/track/$deezerTrackId';
-
     showStyledSnack(context, 'Sending to server (FLAC)…');
-
     try {
       final jobId =
           await companion.startDownload(url, deezerArl: prefs.deezerArl);
@@ -636,7 +602,6 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
     ref.read(recommendationsSeedOverrideProvider.notifier).state = (
       artist: widget.song.artist,
       title: widget.song.title,
-      // Deezer-sourced song — no library genre to bias the search with.
       genre: null,
     );
     ref.invalidate(recommendationsProvider);
@@ -644,7 +609,6 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
 
   void _openMenu() {
     final canDownload = ref.read(canDeleteFromServerProvider);
-    debugPrint('[rec] _openMenu canDownload=$canDownload song=${widget.song.id}');
     final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet<void>(
       context: context,
@@ -680,27 +644,26 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          widget.song.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(ctx).textTheme.titleSmall,
-                        ),
-                        Text(
-                          widget.song.artist,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                                color: scheme.onSurfaceVariant,
-                              ),
-                        ),
+                        Text(widget.song.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(ctx).textTheme.titleSmall),
+                        Text(widget.song.artist,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                )),
                       ],
                     ),
                   ),
                 ],
               ),
             ),
-            Divider(height: 1, indent: 16, endIndent: 16,
+            Divider(
+                height: 1,
+                indent: 16,
+                endIndent: 16,
                 color: scheme.outlineVariant),
             const SizedBox(height: 4),
             if (canDownload)
@@ -734,9 +697,9 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
     final scheme = Theme.of(context).colorScheme;
     final isPreview = widget.song.externalStreamUrl != null;
 
-    Widget cover;
+    Widget coverWidget;
     if (widget.song.externalCoverUrl != null) {
-      cover = ClipRRect(
+      coverWidget = ClipRRect(
         borderRadius: BorderRadius.circular(12),
         child: CachedNetworkImage(
           imageUrl: widget.song.externalCoverUrl!,
@@ -748,17 +711,13 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
         ),
       );
     } else {
-      cover = CoverArtImage(
+      coverWidget = CoverArtImage(
         coverArtId: widget.song.coverArt,
         size: _kCardImageSize,
         borderRadius: 12,
       );
     }
 
-    // Two separate tap zones (cover + text block) instead of one outer
-    // InkWell wrapping the 3-dot button. Nested InkWells inside a Stack
-    // were swallowing the 3-dot tap and routing it to _play, so the
-    // menu never opened and companion downloads never fired.
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Column(
@@ -766,10 +725,11 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
         children: [
           Stack(
             children: [
-              InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: _play,
-                child: cover,
+              // SizedBox.square guarantees 1:1 cover art regardless of
+              // what height constraint CarouselView passes to this item.
+              SizedBox.square(
+                dimension: _kCardImageSize,
+                child: coverWidget,
               ),
               if (isPreview)
                 Positioned(
@@ -793,6 +753,9 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
                     ),
                   ),
                 ),
+              // 3-dot button — has its own Material so its InkWell wins
+              // the gesture arena when tapped, preventing CarouselView.onTap
+              // from firing a play action for a menu tap.
               Positioned(
                 top: 2,
                 right: 2,
@@ -814,25 +777,16 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
             ],
           ),
           const SizedBox(height: 8),
-          InkWell(
-            borderRadius: BorderRadius.circular(6),
-            onTap: _play,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(widget.song.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w600)),
-                Text(widget.song.artist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 12, color: scheme.onSurfaceVariant)),
-              ],
-            ),
-          ),
+          Text(widget.song.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(widget.song.artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: 12, color: scheme.onSurfaceVariant)),
         ],
       ),
     );
@@ -852,9 +806,6 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
 
 // ---------------------------------------------------------------------------
 
-// Inline error row rendered inside the "Recommended for You" section.
-// Uses errorContainer so all error states in the app share the same visual
-// language (consistent with _DeezerExpiredBanner above).
 class _RecsInlineError extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
@@ -877,11 +828,9 @@ class _RecsInlineError extends StatelessWidget {
                 size: 18, color: scheme.onErrorContainer),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(
-                message,
-                style: TextStyle(
-                    fontSize: 13, color: scheme.onErrorContainer),
-              ),
+              child: Text(message,
+                  style: TextStyle(
+                      fontSize: 13, color: scheme.onErrorContainer)),
             ),
             TextButton(
               style: TextButton.styleFrom(
@@ -896,9 +845,6 @@ class _RecsInlineError extends StatelessWidget {
   }
 }
 
-// Surfaces Deezer ARL expiry as an actionable top-of-home banner. Tapping
-// routes to Settings so the user can paste a fresh ARL without hunting
-// through the nav.
 class _DeezerExpiredBanner extends StatelessWidget {
   const _DeezerExpiredBanner();
 
@@ -925,20 +871,15 @@ class _DeezerExpiredBanner extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      Text('Deezer session expired',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: scheme.onErrorContainer)),
                       Text(
-                        'Deezer session expired',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: scheme.onErrorContainer,
-                        ),
-                      ),
-                      Text(
-                        'Paste a fresh ARL in Settings to re-enable server downloads.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: scheme.onErrorContainer,
-                        ),
-                      ),
+                          'Paste a fresh ARL in Settings to re-enable server downloads.',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: scheme.onErrorContainer)),
                     ],
                   ),
                 ),
@@ -953,7 +894,6 @@ class _DeezerExpiredBanner extends StatelessWidget {
   }
 }
 
-// Shown when the user has no play history yet — can't build seeds.
 class _RecsEmptyHint extends StatelessWidget {
   const _RecsEmptyHint();
 
@@ -976,8 +916,8 @@ class _RecsEmptyHint extends StatelessWidget {
             Expanded(
               child: Text(
                 'Play a few songs — recommendations appear after some listening history.',
-                style: TextStyle(
-                    fontSize: 13, color: scheme.onSurfaceVariant),
+                style:
+                    TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
               ),
             ),
           ],
