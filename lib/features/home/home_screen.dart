@@ -21,7 +21,7 @@ const _kEmphasizedDuration = Duration(milliseconds: 350);
 // Uniform horizontal-carousel geometry.
 const _kCardExtent = 160.0;     // CarouselView itemExtent
 const _kCardImageSize = 152.0;  // square image (160 – 2×4 px side padding)
-const _kCarouselHeight = 200.0; // SizedBox height wrapping each CarouselView
+const _kCarouselHeight = 160.0; // SizedBox height = card extent → square cards
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -66,15 +66,17 @@ class HomeScreen extends ConsumerWidget {
             // top edge; AnimatedSize makes it zero-height when online.
             const SliverToBoxAdapter(child: OfflineBanner()),
 
-            // Collapsing medium app bar — smaller expansion than large so the
-            // gap above the greeting matches the original ~16 px clearance.
-            SliverAppBar.medium(
+            SliverAppBar(
               pinned: true,
               floating: false,
               automaticallyImplyLeading: false,
               scrolledUnderElevation: 0,
-              surfaceTintColor: scheme.surfaceContainer,
-              title: Text(_greeting(username)),
+              title: Text(
+                _greeting(username),
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
 
             // Deezer ARL expiry banner
@@ -435,41 +437,63 @@ class _Section extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
+// Shared gradient overlay for card titles.
+Widget _titleGradient(String text) => Container(
+  padding: const EdgeInsets.fromLTRB(8, 24, 8, 8),
+  decoration: const BoxDecoration(
+    gradient: LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [Colors.transparent, Colors.black54],
+    ),
+  ),
+  child: Text(
+    text,
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: const TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+      color: Colors.white,
+    ),
+  ),
+);
+
+// ---------------------------------------------------------------------------
 // Card widgets — intentionally no InkWell / tap handler of their own.
 // CarouselView.onTap handles all taps at the carousel level to avoid
 // gesture conflicts with the carousel's own scroll/snap recogniser.
+// Cards are square (_kCardExtent × _kCardExtent) with a full-bleed image
+// and title overlaid at the bottom.
 // ---------------------------------------------------------------------------
 
-class _SongCard extends ConsumerWidget {
+class _SongCard extends StatelessWidget {
   final Song song;
   const _SongCard({required this.song});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
+  Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // SizedBox.square enforces 1:1 regardless of parent constraints.
-          SizedBox.square(
-            dimension: _kCardImageSize,
-            child: CoverArtImage(
+      padding: const EdgeInsets.all(4),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox.square(
+          dimension: _kCardImageSize,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              CoverArtImage(
                 coverArtId: song.coverArt,
                 size: _kCardImageSize,
-                borderRadius: 12),
+                borderRadius: 0,
+              ),
+              Positioned(
+                bottom: 0, left: 0, right: 0,
+                child: _titleGradient(song.title),
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
-          Text(song.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-          Text(song.artist,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
-        ],
+        ),
       ),
     );
   }
@@ -477,35 +501,33 @@ class _SongCard extends ConsumerWidget {
 
 // ---------------------------------------------------------------------------
 
-class _AlbumCard extends ConsumerWidget {
+class _AlbumCard extends StatelessWidget {
   final Album album;
   const _AlbumCard({required this.album});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
+  Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox.square(
-            dimension: _kCardImageSize,
-            child: CoverArtImage(
+      padding: const EdgeInsets.all(4),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox.square(
+          dimension: _kCardImageSize,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              CoverArtImage(
                 coverArtId: album.coverArt,
                 size: _kCardImageSize,
-                borderRadius: 12),
+                borderRadius: 0,
+              ),
+              Positioned(
+                bottom: 0, left: 0, right: 0,
+                child: _titleGradient(album.name),
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
-          Text(album.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-          Text(album.artist,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
-        ],
+        ),
       ),
     );
   }
@@ -513,35 +535,33 @@ class _AlbumCard extends ConsumerWidget {
 
 // ---------------------------------------------------------------------------
 
-class _PlaylistCard extends ConsumerWidget {
+class _PlaylistCard extends StatelessWidget {
   final dynamic playlist;
   const _PlaylistCard({required this.playlist});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
+  Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox.square(
-            dimension: _kCardImageSize,
-            child: CoverArtImage(
+      padding: const EdgeInsets.all(4),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox.square(
+          dimension: _kCardImageSize,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              CoverArtImage(
                 coverArtId: playlist.coverArt as String?,
                 size: _kCardImageSize,
-                borderRadius: 12),
+                borderRadius: 0,
+              ),
+              Positioned(
+                bottom: 0, left: 0, right: 0,
+                child: _titleGradient(playlist.name as String),
+              ),
+            ],
           ),
-          const SizedBox(height: 6),
-          Text(playlist.name as String,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w600)),
-          Text('${playlist.songCount} songs',
-              style: TextStyle(
-                  fontSize: 11, color: scheme.onSurfaceVariant)),
-        ],
+        ),
       ),
     );
   }
@@ -697,43 +717,43 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
     final scheme = Theme.of(context).colorScheme;
     final isPreview = widget.song.externalStreamUrl != null;
 
-    Widget coverWidget;
+    Widget coverChild;
     if (widget.song.externalCoverUrl != null) {
-      coverWidget = ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: CachedNetworkImage(
-          imageUrl: widget.song.externalCoverUrl!,
-          width: _kCardImageSize,
-          height: _kCardImageSize,
-          fit: BoxFit.cover,
-          placeholder: (_, __) => _coverPlaceholder(scheme),
-          errorWidget: (_, __, ___) => _coverPlaceholder(scheme),
-        ),
+      coverChild = CachedNetworkImage(
+        imageUrl: widget.song.externalCoverUrl!,
+        width: _kCardImageSize,
+        height: _kCardImageSize,
+        fit: BoxFit.cover,
+        placeholder: (_, __) => _coverPlaceholder(scheme),
+        errorWidget: (_, __, ___) => _coverPlaceholder(scheme),
       );
     } else {
-      coverWidget = CoverArtImage(
+      coverChild = CoverArtImage(
         coverArtId: widget.song.coverArt,
         size: _kCardImageSize,
-        borderRadius: 12,
+        borderRadius: 0,
       );
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Stack(
+      padding: const EdgeInsets.all(4),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox.square(
+          dimension: _kCardImageSize,
+          child: Stack(
+            fit: StackFit.expand,
             children: [
-              // SizedBox.square guarantees 1:1 cover art regardless of
-              // what height constraint CarouselView passes to this item.
-              SizedBox.square(
-                dimension: _kCardImageSize,
-                child: coverWidget,
+              coverChild,
+              // Title gradient overlay at bottom
+              Positioned(
+                bottom: 0, left: 0, right: 0,
+                child: _titleGradient(widget.song.title),
               ),
+              // PREVIEW badge — top-left so it doesn't clash with title
               if (isPreview)
                 Positioned(
-                  bottom: 6,
+                  top: 6,
                   left: 6,
                   child: IgnorePointer(
                     child: Container(
@@ -776,31 +796,17 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(widget.song.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w600)),
-          Text(widget.song.artist,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: 12, color: scheme.onSurfaceVariant)),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _coverPlaceholder(ColorScheme scheme) => ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          width: _kCardImageSize,
-          height: _kCardImageSize,
-          color: scheme.surfaceContainerHigh,
-          child: Icon(Icons.music_note_rounded,
-              size: 60, color: scheme.onSurfaceVariant),
-        ),
+  Widget _coverPlaceholder(ColorScheme scheme) => Container(
+        width: _kCardImageSize,
+        height: _kCardImageSize,
+        color: scheme.surfaceContainerHigh,
+        child: Icon(Icons.music_note_rounded,
+            size: 60, color: scheme.onSurfaceVariant),
       );
 }
 
