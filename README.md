@@ -225,8 +225,13 @@ Work is organized into three passes. Full detail in [`docs/three-pass-plan.md`](
 - **Downloaded songs overhaul** — live search (title/artist/album/genre/format), lossless/lossy filter, sort by name/artist/album/recently added with ascending/descending toggle
 - **Settings sub-pages** — library server, Deezer, and companion settings moved to dedicated sub-screens
 
+### v1.9.1 — Home screen bug fixes
+- **Cover art ratio** — carousel cards now enforce 1:1 square images (CarouselView was stretching covers to full card height)
+- **Greeting gap** — switched to `SliverAppBar.medium`; removes the oversized gap introduced by v1.9.0's `SliverAppBar.large`
+- **Carousel tap** — moved all tap handling to `CarouselView.onTap`; inner InkWells were intercepting gestures and silently eating taps
+
 ### v1.9.0 — M3 Expressive home screen redesign
-- **Collapsing large app bar** — greeting expands/collapses on scroll (`SliverAppBar.large`); Home screen is now M3E-compliant (Pass 3 item 02 ✅ for Home)
+- **Collapsing app bar** — greeting expands/collapses on scroll (`SliverAppBar.medium`); Home screen is now M3E-compliant (Pass 3 item 02 ✅ for Home)
 - **Snap carousels** — all horizontal rows converted to `CarouselView` with 160 px cards and snap-to-card physics; partially-visible next card acts as scroll affordance
 - **Section header typography** — `titleLarge w700` matching M3E spec (Pass 3 item 07 partial ✅)
 - **Section entrance motion** — fade + 16 px upward slide on first data load using M3E emphasized-decelerate curve

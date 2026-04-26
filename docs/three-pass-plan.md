@@ -67,8 +67,13 @@ Current execution order (picked by user to benchmark Opus 4.7 on a meaty item fi
 - More Like This error on pull-to-refresh fixed — `_refresh` now clears the seed override.
 - More Like This now prepends override as seed[0] with 3 history backup seeds; radio pool raised 10→20 for large libraries.
 
+**v1.9.1 (2026-04-26)**
+- Cover art 1:1 ratio fix — `SizedBox.square` wrapping all carousel images.
+- Greeting gap reduced — `SliverAppBar.large` → `SliverAppBar.medium`.
+- Carousel taps fixed — tap handling moved to `CarouselView.onTap`; inner InkWells were swallowing gestures.
+
 **v1.9.0 (2026-04-26)**
-- `SliverAppBar.large` collapsing greeting on Home (Pass 3 item 02 — Home ✅).
+- `SliverAppBar.medium` collapsing greeting on Home (Pass 3 item 02 — Home ✅).
 - All Home horizontal rows → `CarouselView` (160 px cards, snap-to-card).
 - Section headers `titleLarge w700` (Pass 3 item 07 — Home section headers ✅).
 - Section entrance: fade + 16 px upward slide, M3E emphasized-decelerate curve (Pass 3 item 06 — partial ✅).
