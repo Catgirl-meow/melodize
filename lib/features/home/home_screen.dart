@@ -462,10 +462,13 @@ class _SongCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CoverArtImage(
-            coverArtId: song.coverArt,
-            size: _kCardImageSize,
-            borderRadius: 12,
+          AspectRatio(
+            aspectRatio: 1,
+            child: CoverArtImage(
+              coverArtId: song.coverArt,
+              size: _kCardImageSize,
+              borderRadius: 12,
+            ),
           ),
           const SizedBox(height: 8),
           Text(song.title,
@@ -496,10 +499,13 @@ class _AlbumCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CoverArtImage(
-            coverArtId: album.coverArt,
-            size: _kCardImageSize,
-            borderRadius: 12,
+          AspectRatio(
+            aspectRatio: 1,
+            child: CoverArtImage(
+              coverArtId: album.coverArt,
+              size: _kCardImageSize,
+              borderRadius: 12,
+            ),
           ),
           const SizedBox(height: 8),
           Text(album.name,
@@ -530,10 +536,13 @@ class _PlaylistCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CoverArtImage(
-            coverArtId: playlist.coverArt as String?,
-            size: _kCardImageSize,
-            borderRadius: 12,
+          AspectRatio(
+            aspectRatio: 1,
+            child: CoverArtImage(
+              coverArtId: playlist.coverArt as String?,
+              size: _kCardImageSize,
+              borderRadius: 12,
+            ),
           ),
           const SizedBox(height: 6),
           Text(playlist.name as String,
@@ -724,8 +733,11 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Stack(
-            children: [
+          AspectRatio(
+            aspectRatio: 1,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
               cover,
               if (isPreview)
                 Positioned(
@@ -771,6 +783,7 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
                 ),
               ),
             ],
+            ),
           ),
           const SizedBox(height: 8),
           Text(widget.song.title,
