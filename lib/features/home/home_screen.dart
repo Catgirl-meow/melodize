@@ -18,10 +18,11 @@ import '../settings/settings_screen.dart';
 const _kEmphasizedDecelerate = Cubic(0.05, 0.7, 0.1, 1.0);
 const _kEmphasizedDuration = Duration(milliseconds: 350);
 
-// Uniform horizontal-carousel geometry.
-const _kCardExtent = 160.0;     // CarouselView itemExtent
-const _kCardImageSize = 152.0;  // square image (160 – 2×4 px side padding)
-const _kCarouselHeight = 160.0; // SizedBox height = card extent → square cards
+// Carousel geometry matching pre-v1.9.0 proportions — image is explicit
+// 130×130 in a column with text below; carousel height = 176 to fit.
+const _kCardExtent = 138.0;     // CarouselView itemExtent (image 130 + 2×4 padding)
+const _kCardImageSize = 130.0;  // explicit square — CoverArtImage(size: 130) → 130×130
+const _kCarouselHeight = 176.0; // image 130 + gap 8 + title 16 + artist 14 + slack 8
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -66,15 +67,21 @@ class HomeScreen extends ConsumerWidget {
             // top edge; AnimatedSize makes it zero-height when online.
             const SliverToBoxAdapter(child: OfflineBanner()),
 
-            SliverAppBar(
-              pinned: true,
-              floating: false,
-              automaticallyImplyLeading: false,
-              scrolledUnderElevation: 0,
-              title: Text(
-                _greeting(username),
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
+            // Greeting — no SliverAppBar; status-bar gap via viewPadding.top.
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  16,
+                  MediaQuery.of(context).viewPadding.top + 16,
+                  16,
+                  0,
+                ),
+                child: Text(
+                  _greeting(username),
+                  style: Theme.of(context)
+                      .textTheme
+                      .headlineMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
                 ),
               ),
             ),
@@ -437,63 +444,39 @@ class _Section extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Shared gradient overlay for card titles.
-Widget _titleGradient(String text) => Container(
-  padding: const EdgeInsets.fromLTRB(8, 24, 8, 8),
-  decoration: const BoxDecoration(
-    gradient: LinearGradient(
-      begin: Alignment.topCenter,
-      end: Alignment.bottomCenter,
-      colors: [Colors.transparent, Colors.black54],
-    ),
-  ),
-  child: Text(
-    text,
-    maxLines: 1,
-    overflow: TextOverflow.ellipsis,
-    style: const TextStyle(
-      fontSize: 12,
-      fontWeight: FontWeight.w600,
-      color: Colors.white,
-    ),
-  ),
-);
-
-// ---------------------------------------------------------------------------
 // Card widgets — intentionally no InkWell / tap handler of their own.
 // CarouselView.onTap handles all taps at the carousel level to avoid
 // gesture conflicts with the carousel's own scroll/snap recogniser.
-// Cards are square (_kCardExtent × _kCardExtent) with a full-bleed image
-// and title overlaid at the bottom.
+// Layout mirrors pre-v1.9.0: explicit square image + title/artist below.
 // ---------------------------------------------------------------------------
 
-class _SongCard extends StatelessWidget {
+class _SongCard extends ConsumerWidget {
   final Song song;
   const _SongCard({required this.song});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.all(4),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: SizedBox.square(
-          dimension: _kCardImageSize,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              CoverArtImage(
-                coverArtId: song.coverArt,
-                size: _kCardImageSize,
-                borderRadius: 0,
-              ),
-              Positioned(
-                bottom: 0, left: 0, right: 0,
-                child: _titleGradient(song.title),
-              ),
-            ],
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CoverArtImage(
+            coverArtId: song.coverArt,
+            size: _kCardImageSize,
+            borderRadius: 12,
           ),
-        ),
+          const SizedBox(height: 8),
+          Text(song.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(song.artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+        ],
       ),
     );
   }
@@ -501,33 +484,33 @@ class _SongCard extends StatelessWidget {
 
 // ---------------------------------------------------------------------------
 
-class _AlbumCard extends StatelessWidget {
+class _AlbumCard extends ConsumerWidget {
   final Album album;
   const _AlbumCard({required this.album});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.all(4),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: SizedBox.square(
-          dimension: _kCardImageSize,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              CoverArtImage(
-                coverArtId: album.coverArt,
-                size: _kCardImageSize,
-                borderRadius: 0,
-              ),
-              Positioned(
-                bottom: 0, left: 0, right: 0,
-                child: _titleGradient(album.name),
-              ),
-            ],
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CoverArtImage(
+            coverArtId: album.coverArt,
+            size: _kCardImageSize,
+            borderRadius: 12,
           ),
-        ),
+          const SizedBox(height: 8),
+          Text(album.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(album.artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+        ],
       ),
     );
   }
@@ -535,33 +518,31 @@ class _AlbumCard extends StatelessWidget {
 
 // ---------------------------------------------------------------------------
 
-class _PlaylistCard extends StatelessWidget {
+class _PlaylistCard extends ConsumerWidget {
   final dynamic playlist;
   const _PlaylistCard({required this.playlist});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.all(4),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: SizedBox.square(
-          dimension: _kCardImageSize,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              CoverArtImage(
-                coverArtId: playlist.coverArt as String?,
-                size: _kCardImageSize,
-                borderRadius: 0,
-              ),
-              Positioned(
-                bottom: 0, left: 0, right: 0,
-                child: _titleGradient(playlist.name as String),
-              ),
-            ],
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CoverArtImage(
+            coverArtId: playlist.coverArt as String?,
+            size: _kCardImageSize,
+            borderRadius: 12,
           ),
-        ),
+          const SizedBox(height: 6),
+          Text(playlist.name as String,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+          Text('${playlist.songCount} songs',
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+        ],
       ),
     );
   }
@@ -717,43 +698,38 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
     final scheme = Theme.of(context).colorScheme;
     final isPreview = widget.song.externalStreamUrl != null;
 
-    Widget coverChild;
+    Widget cover;
     if (widget.song.externalCoverUrl != null) {
-      coverChild = CachedNetworkImage(
-        imageUrl: widget.song.externalCoverUrl!,
-        width: _kCardImageSize,
-        height: _kCardImageSize,
-        fit: BoxFit.cover,
-        placeholder: (_, __) => _coverPlaceholder(scheme),
-        errorWidget: (_, __, ___) => _coverPlaceholder(scheme),
+      cover = ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: CachedNetworkImage(
+          imageUrl: widget.song.externalCoverUrl!,
+          width: _kCardImageSize,
+          height: _kCardImageSize,
+          fit: BoxFit.cover,
+          placeholder: (_, __) => _coverPlaceholder(scheme),
+          errorWidget: (_, __, ___) => _coverPlaceholder(scheme),
+        ),
       );
     } else {
-      coverChild = CoverArtImage(
+      cover = CoverArtImage(
         coverArtId: widget.song.coverArt,
         size: _kCardImageSize,
-        borderRadius: 0,
+        borderRadius: 12,
       );
     }
 
     return Padding(
-      padding: const EdgeInsets.all(4),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: SizedBox.square(
-          dimension: _kCardImageSize,
-          child: Stack(
-            fit: StackFit.expand,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Stack(
             children: [
-              coverChild,
-              // Title gradient overlay at bottom
-              Positioned(
-                bottom: 0, left: 0, right: 0,
-                child: _titleGradient(widget.song.title),
-              ),
-              // PREVIEW badge — top-left so it doesn't clash with title
+              cover,
               if (isPreview)
                 Positioned(
-                  top: 6,
+                  bottom: 6,
                   left: 6,
                   child: IgnorePointer(
                     child: Container(
@@ -796,17 +772,29 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 8),
+          Text(widget.song.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(widget.song.artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+        ],
       ),
     );
   }
 
-  Widget _coverPlaceholder(ColorScheme scheme) => Container(
-        width: _kCardImageSize,
-        height: _kCardImageSize,
-        color: scheme.surfaceContainerHigh,
-        child: Icon(Icons.music_note_rounded,
-            size: 60, color: scheme.onSurfaceVariant),
+  Widget _coverPlaceholder(ColorScheme scheme) => ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: _kCardImageSize,
+          height: _kCardImageSize,
+          color: scheme.surfaceContainerHigh,
+          child: Icon(Icons.music_note_rounded,
+              size: 52, color: scheme.onSurfaceVariant),
+        ),
       );
 }
 
