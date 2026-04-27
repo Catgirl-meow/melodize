@@ -40,18 +40,14 @@ final isOnlineProvider = StreamProvider<bool>((ref) async* {
       .map((results) => results.any((r) => r != ConnectivityResult.none));
 });
 
-// True = Navidrome/Subsonic server responded to ping while device is online.
+// Resolves to a ServerReachability value.
 // Re-runs automatically whenever isOnlineProvider or serverConfig changes.
-final serverReachableProvider = FutureProvider<bool>((ref) async {
+final serverReachableProvider = FutureProvider<ServerReachability>((ref) async {
   final isOnline = ref.watch(isOnlineProvider).valueOrNull ?? true;
-  if (!isOnline) return false;
+  if (!isOnline) return ServerReachability.offline;
   final client = ref.watch(subsonicClientProvider);
-  if (client == null) return false;
-  try {
-    return await client.ping();
-  } catch (_) {
-    return false;
-  }
+  if (client == null) return ServerReachability.unreachable;
+  return client.pingDetailed();
 });
 
 // --- Server Config ---
@@ -84,11 +80,22 @@ final companionClientProvider = Provider<CompanionClient?>((ref) {
   );
 });
 
-// True when the companion is configured and responds to /health.
-final companionAvailableProvider = FutureProvider<bool>((ref) async {
+// Streams companion availability, re-checking every 30 s.
+// Using StreamProvider so the UI reflects companion going offline mid-session.
+final companionAvailableProvider = StreamProvider<bool>((ref) async* {
   final client = ref.watch(companionClientProvider);
-  if (client == null) return false;
-  return client.checkHealth();
+  if (client == null) {
+    yield false;
+    return;
+  }
+  while (true) {
+    try {
+      yield await client.checkHealth();
+    } catch (_) {
+      yield false;
+    }
+    await Future.delayed(const Duration(seconds: 30));
+  }
 });
 
 final canDeleteFromServerProvider = Provider<bool>((ref) =>

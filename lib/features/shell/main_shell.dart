@@ -235,7 +235,15 @@ class _MainShellState extends ConsumerState<MainShell>
             _safeSnack('"${entry.value.song.title}" downloaded',
                 bottomOffset: snackBottom + 12);
           }
-          if (prevItem?.status != 'error' && entry.value.status == 'error') {
+          // Surface on state transition into 'error' AND on errorMessage
+          // change while already in 'error' (handles same-song re-failure
+          // after the user retries — the second failure was previously
+          // silent because status didn't change).
+          final wasError = prevItem?.status == 'error';
+          final isError = entry.value.status == 'error';
+          final errMsgChanged = wasError &&
+              prevItem?.errorMessage != entry.value.errorMessage;
+          if (isError && (!wasError || errMsgChanged)) {
             final errMsg = entry.value.errorMessage;
             final msg = errMsg != null
                 ? 'Download failed: $errMsg'

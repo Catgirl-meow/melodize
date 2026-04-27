@@ -44,13 +44,15 @@ Pass 2 is split into seven standalone sub-plans under [`docs/pass-2/`](pass-2/).
 
 | # | Topic | File | Status |
 |---|-------|------|--------|
-| 2a | Recommendations quality rewrite | [pass-2/2a-recommendations.md](pass-2/2a-recommendations.md) | in progress — awaiting user decisions |
-| 2b | Connection-error specificity on Home | [pass-2/2b-connection-errors.md](pass-2/2b-connection-errors.md) | pending |
-| 2c | Download reliability + notifications | [pass-2/2c-download-reliability.md](pass-2/2c-download-reliability.md) | pending |
-| 2d | `companionAvailableProvider` staleness | [pass-2/2d-companion-freshness.md](pass-2/2d-companion-freshness.md) | pending |
-| 2e | Auto-download `'all'` idempotency | [pass-2/2e-auto-download-idempotency.md](pass-2/2e-auto-download-idempotency.md) | pending |
+| 2a | Recommendations quality rewrite | [pass-2/2a-recommendations.md](pass-2/2a-recommendations.md) | ✅ shipped (multi-session) |
+| 2b | Connection-error specificity on Home | [pass-2/2b-connection-errors.md](pass-2/2b-connection-errors.md) | ✅ shipped v1.9.6 |
+| 2c | Download reliability + notifications | [pass-2/2c-download-reliability.md](pass-2/2c-download-reliability.md) | ✅ shipped v1.9.9 (timeout + connection-loss + re-failure snacks; OS-level notifications still future) |
+| 2d | `companionAvailableProvider` staleness | [pass-2/2d-companion-freshness.md](pass-2/2d-companion-freshness.md) | ✅ shipped v1.9.6 |
+| 2e | Auto-download `'all'` idempotency | [pass-2/2e-auto-download-idempotency.md](pass-2/2e-auto-download-idempotency.md) | ✅ shipped v1.9.6 |
 | 2f | Mini-player + dock design fixes | [pass-2/2f-miniplayer-dock.md](pass-2/2f-miniplayer-dock.md) | shape/radius pass shipped in v1.8.4 — tiles + app bars still pending |
-| 2g | Menu + visual-glitch triage | [pass-2/2g-menu-triage.md](pass-2/2g-menu-triage.md) | pending (needs screenshots) |
+| 2g | Menu + visual-glitch triage | [pass-2/2g-menu-triage.md](pass-2/2g-menu-triage.md) | ✅ shipped v1.9.9 (song tile + now-playing menus get header + drag handle; library sorts + sleep timer fixed) |
+
+**Standing visual-polish backlog:** [design-consistency.md](design-consistency.md) — drift across screens (app bars, cover radii, header typography, deprecated APIs). Pick from there during polish passes.
 
 Current execution order (picked by user to benchmark Opus 4.7 on a meaty item first): **2a now**, remaining order TBD after.
 
@@ -66,6 +68,18 @@ Current execution order (picked by user to benchmark Opus 4.7 on a meaty item fi
 - Deezer two-pass artist search — `/search/artist` first (name-relevance), fallback `/search` with strict match; no more pop-biased first-result. Fixes bad recommendations.
 - More Like This error on pull-to-refresh fixed — `_refresh` now clears the seed override.
 - More Like This now prepends override as seed[0] with 3 history backup seeds; radio pool raised 10→20 for large libraries.
+
+**v1.9.5 (2026-04-27)**
+- **SliverAppBar.medium restored** — collapsing greeting back on Home; expanded state uses `headlineMedium bold` via `FlexibleSpaceBar`, collapsed state uses `titleLarge bold`. Previous removal (v1.9.3/1.9.4) was a regression fix workaround.
+- **Staggered section entrance** — sections cascade in with 60 ms gaps (Playlists → Recently Added → Discover → Recs → Recently Played) instead of all animating simultaneously.
+- **400 ms entrance duration** — up from 350 ms to match M3E spec; `Interval` curve bakes delay into tween.
+- **Carousel trailing affordance** — padding changed from symmetric 16 px to leading-only 16 px; trailing partial card now visible as scroll hint.
+- **Section header tracking** — `letterSpacing` tightened from `-0.1` to `-0.2` matching `titleLargeEmphasized` spec.
+- **Card/banner radii** — error container, empty hint, Deezer expired banner all bumped 14 → 16 px (M3E medium shape token).
+
+**v1.9.2–v1.9.4 (2026-04-27)**
+- Three successive attempts to fix portrait carousel covers introduced by v1.9.0's `CarouselView`.
+- Root cause: `CarouselView(shrinkExtent: 40)` passes tight width to edge items but loose height — explicit `size: 130` only controlled height. Fix: `AspectRatio(1.0)` wrapping every cover image forces `height = width` unconditionally.
 
 **v1.9.1 (2026-04-26)**
 - Cover art 1:1 ratio fix — `SizedBox.square` wrapping all carousel images.
@@ -95,8 +109,8 @@ Driven entirely by `Material 3 Expressive Roadmap.html` (8 items, ~20 h total).
 | 03 | Grouped settings tiles | P0 | ~2 h | shipped, visual pass in Pass 2f |
 | 04 | Wavy progress + FAB shape morph | P1 | ~3 h | pending — Flutter 3.27+ |
 | 05 | `DynamicSchemeVariant.expressive` | P1 | ~1 h | ✅ done v1.9.0 |
-| 06 | Motion tokens | P1 | ~4 h | partial — Home entrance motion v1.9.0; codebase-wide pending |
-| 07 | `displayLargeEmphasized` typography | P2 | ~2 h | partial — Home section headers v1.9.0; Now Playing title pending |
+| 06 | Motion tokens | P1 | ~4 h | partial — Home stagger + 400 ms v1.9.5; codebase-wide pending |
+| 07 | `displayLargeEmphasized` typography | P2 | ~2 h | partial — Home section headers tracking -0.2 v1.9.5; Now Playing title pending |
 | 08 | Haptics (with opt-out preference) | P2 | ~1 h | pending |
 
 Pass 3 starts after Pass 2 stabilizes. The HTML roadmap has per-item Claude Code prompts ready to paste.

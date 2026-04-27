@@ -103,6 +103,9 @@ class _StartupRouter extends ConsumerStatefulWidget {
 
 class _StartupRouterState extends ConsumerState<_StartupRouter> {
   StreamSubscription<Song>? _historySubscription;
+  // Signature of last allSongs list passed to _downloadAll. Guards against
+  // refiring on every cache/fresh emission with the same content.
+  int? _lastAutoDownloadSig;
 
   @override
   void initState() {
@@ -199,11 +202,16 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
     });
 
     // If the app starts with autoDownload='all' and songs arrive, download them.
+    // Guard against re-firing on every cache/fresh emission with same songs.
     ref.listen(allSongsProvider, (_, next) {
       final prefs = ref.read(preferencesNotifierProvider);
-      if (prefs.autoDownload == 'all') {
+      if (prefs.autoDownload != 'all') return;
+      next.whenData((songs) {
+        final sig = Object.hashAll(songs.map((s) => s.id));
+        if (sig == _lastAutoDownloadSig) return;
+        _lastAutoDownloadSig = sig;
         _downloadAll(ref);
-      }
+      });
     });
 
     return configAsync.when(

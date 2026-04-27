@@ -225,6 +225,43 @@ Work is organized into three passes. Full detail in [`docs/three-pass-plan.md`](
 - **Downloaded songs overhaul** — live search (title/artist/album/genre/format), lossless/lossy filter, sort by name/artist/album/recently added with ascending/descending toggle
 - **Settings sub-pages** — library server, Deezer, and companion settings moved to dedicated sub-screens
 
+### v1.9.9 — Pass 2c download polish + 2g menu pass
+**2c — Companion download reliability:**
+- **Timeout snackbar** — 5-min poll budget exhaustion now surfaces "Download timed out" instead of silently dropping the job
+- **Connection-loss snackbar** — 3 consecutive poll errors (≈30 s) trigger a one-time "Lost connection to companion — still trying…" so the user knows
+- **Re-failure snackbar fix** — main shell listener now re-fires when the same song fails a second time after retry (was checking only status transitions, missed identical-status repeated errors)
+- **Single library refresh** — dropped the redundant immediate `ref.invalidate(allSongsProvider)` after companion completion; only the 12 s delayed one now (the immediate one always missed because Navidrome hadn't indexed the song yet — pure jank)
+
+**2g — Menu visual pass:**
+- **Song tile context menu** — added drag handle + cover/title/artist header (matches recommendation card pattern)
+- **Now Playing 3-dot menu** — same drag handle + song header treatment
+- **Library sort sheets** (3) — added `showDragHandle: true`
+- **Sleep timer sheet** — corner radius bumped 20 → 28 dp (M3 spec)
+
+### v1.9.8 — Home greeting + Linux log noise
+- **Greeting clipping fix** — v1.9.5 manually overrode `flexibleSpace` on `SliverAppBar.medium`, breaking the framework's smart expanded↔collapsed interpolation and forcing `headlineMedium` size on the collapsed bar. Now passes only `fontWeight: bold` so the variant-aware `_ScrollUnderFlexibleSpace` controls sizing — clean transition, no clipping
+- **Linux shuffle log spam gone** — `addAll(items)` triggered a bug in `just_audio_media_kit` 2.1.0's `concatenatingInsertAll` (loop reads stale `request.index` against growing playlist length, emitting bogus `playlist-move` per item). Replaced with a `.add()`-per-item loop that takes the single-item path through the same code, skipping the buggy move branch
+
+### v1.9.7 — Linux shuffle no longer kills audio
+- **In-place shuffle/unshuffle** — `_toggleShuffleLinux` previously called `setAudioSource()` which forced mpv to reopen PipeWire/PulseAudio: audio muted, jumped to track start, and froze for 2+ s. New path mutates only the *upcoming* portion of the queue via `removeRange` + `addAll` (one batched op each, not N moves), so the currently-playing source is untouched. No mute, no seek, no freeze.
+- Gapless prefetch (`JustAudioMediaKit.prefetchPlaylist = true`) was already enabled — verified intact.
+
+### v1.9.6 — Pass 2 bug fixes
+- **Connection-error specificity (2b)** — `serverReachableProvider` now returns a typed `ServerReachability` enum (offline / unreachable / TLS / 401 / 403 / 5xx); Home chip shows specific message + matching icon per failure mode
+- **Companion staleness (2d)** — `companionAvailableProvider` migrated `FutureProvider<bool>` → `StreamProvider<bool>` re-checking every 30 s, so UI reflects companion going offline mid-session
+- **Auto-download idempotency (2e)** — `ref.listen(allSongsProvider)` guarded by song-ID hash signature; no longer re-fires `downloadBatch` on every cache/fresh emission
+
+### v1.9.5 — Home screen M3 Expressive polish
+- **Collapsing greeting restored** — `SliverAppBar.medium` back on Home; expanded state `headlineMedium bold`, collapsed `titleLarge bold`
+- **Staggered section entrance** — sections cascade in with 60 ms gaps instead of all animating at once
+- **400 ms entrance duration** — matches M3E emphasized-decelerate spec (was 350 ms)
+- **Carousel trailing affordance** — leading-only padding so the next card peeks from the right edge
+- **Section header tracking** — tightened to `-0.2` matching `titleLargeEmphasized` spec
+- **Card radii** — error/empty/banner containers bumped to 16 px (M3E medium shape token)
+
+### v1.9.2–v1.9.4 — Square cover art fixes
+- Three-release fix for portrait carousel covers introduced by v1.9.0; root cause was `CarouselView(shrinkExtent: 40)` passing tight width to edge items — fixed with `AspectRatio(1.0)` wrapping every cover image
+
 ### v1.9.1 — Home screen bug fixes
 - **Cover art ratio** — carousel cards now enforce 1:1 square images (CarouselView was stretching covers to full card height)
 - **Greeting gap** — switched to `SliverAppBar.medium`; removes the oversized gap introduced by v1.9.0's `SliverAppBar.large`
@@ -247,8 +284,8 @@ Driven by [`Material 3 Expressive Roadmap.html`](Material 3 Expressive Roadmap.h
 3. Grouped settings tiles (P0, visual pass)
 4. Wavy progress + FAB shape morph (P1, Flutter 3.27+)
 5. `DynamicSchemeVariant.expressive` (P1) — ✅ done in v1.9.0
-6. Motion tokens (P1, codebase-wide) — entrance motion landed on Home in v1.9.0; full token refactor pending
-7. `displayLargeEmphasized` typography (P2) — section headers landed in v1.9.0; Now Playing title pending
+6. Motion tokens (P1, codebase-wide) — Home stagger + 400 ms landed v1.9.5; full token refactor pending
+7. `displayLargeEmphasized` typography (P2) — section header tracking -0.2 landed v1.9.5; Now Playing title pending
 8. Haptics w/ opt-out preference (P2)
 
 ### Optional / future

@@ -373,63 +373,80 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     await player.setShuffleModeEnabled(!player.shuffleModeEnabled);
   }
 
-  // Rebuilds the ConcatenatingAudioSource in the desired order so that both
-  // just_audio and mpv always agree on what is playing — bypassing mpv's
-  // native shuffle whose order diverges from just_audio's shuffleIndices.
+  // In-place shuffle/unshuffle that mutates only the *upcoming* portion of
+  // the queue, leaving the currently-playing source untouched. This avoids
+  // the setAudioSource() reload that previously muted audio, jumped to the
+  // beginning, and froze the UI for ~2 s while mpv reopened the audio device.
+  //
+  // Implementation note: just_audio_media_kit 2.1.0's concatenatingInsertAll
+  // has a bug where the loop body uses request.index against the growing
+  // playlist length, generating one bogus playlist-move per item after the
+  // first. Workaround: append items one-by-one via .add(), which routes each
+  // through concatenatingInsertAll(length, [single]) — no moves emitted.
   Future<void> _toggleShuffleLinux() async {
     final song = currentSong;
+    final currentIdx = player.currentIndex ?? 0;
+    final queueLen = _playlistSource.length;
 
-    List<Song> orderedSongs;
+    Future<void> appendOneByOne(List<Song> songs) async {
+      for (final s in songs) {
+        await _playlistSource.add(_songToSource(s));
+      }
+    }
 
     if (_linuxShuffled) {
-      // Restore the pre-shuffle order.
+      // Unshuffle: replace upcoming portion with the original tail.
       _linuxShuffled = false;
-      orderedSongs = _preShuffleOrder;
+      _linuxShuffleCtrl.add(false);
+
+      if (song == null || _preShuffleOrder.isEmpty) {
+        _preShuffleOrder = [];
+        return;
+      }
+
+      final origIdx = _preShuffleOrder.indexWhere((s) => s.id == song.id);
+      if (origIdx < 0) {
+        _preShuffleOrder = [];
+        return;
+      }
+
+      final tail = _preShuffleOrder.sublist(origIdx + 1);
+      try {
+        if (currentIdx + 1 < queueLen) {
+          await _playlistSource.removeRange(currentIdx + 1, queueLen);
+        }
+        await appendOneByOne(tail);
+      } catch (e) {
+        debugPrint('unshuffle error: $e');
+      }
       _preShuffleOrder = [];
     } else {
-      // Snapshot current queue order, then shuffle with current song first.
+      // Shuffle on: snapshot full order, then shuffle upcoming portion only.
       _linuxShuffled = true;
+      _linuxShuffleCtrl.add(true);
+
       final seqSongs = player.sequenceState?.effectiveSequence
               .map((s) => s.tag)
               .whereType<Song>()
               .toList() ??
           [];
       _preShuffleOrder = seqSongs;
-      orderedSongs = List<Song>.from(seqSongs);
-      if (song != null) {
-        orderedSongs.removeWhere((s) => s.id == song.id);
-        orderedSongs.shuffle();
-        orderedSongs.insert(0, song);
-      } else {
-        orderedSongs.shuffle();
+
+      if (song == null) return;
+
+      final shuffled = seqSongs
+          .where((s) => s.id != song.id)
+          .toList()
+        ..shuffle();
+
+      try {
+        if (currentIdx + 1 < queueLen) {
+          await _playlistSource.removeRange(currentIdx + 1, queueLen);
+        }
+        await appendOneByOne(shuffled);
+      } catch (e) {
+        debugPrint('shuffle error: $e');
       }
-    }
-
-    // Emit the new shuffle state immediately so the button lights up at once.
-    _linuxShuffleCtrl.add(_linuxShuffled);
-
-    // Rebuild the ConcatenatingAudioSource in the desired order and reload it.
-    //
-    // The previous approach (removeRange + insertAll) issued N playlist-move
-    // commands to MPV for an N-song queue.  MPV's event queue overflows and
-    // all moves fail silently, leaving a 1-song queue that stops after the
-    // current track.  setAudioSource avoids that: it issues a single loadlist
-    // command and seeks back to the saved position, causing only a brief gap
-    // (~1 s on LAN) instead of a silently broken queue.
-    final pos = player.position;
-    _holdSongNull = true;
-    _playlistSource = ConcatenatingAudioSource(
-      children: orderedSongs.map(_songToSource).toList(),
-      useLazyPreparation: true,
-    );
-    try {
-      await player.setAudioSource(_playlistSource, initialIndex: 0, preload: true);
-      await player.seek(pos);
-      await player.play();
-    } catch (e) {
-      debugPrint('toggleShuffle error: $e');
-    } finally {
-      _holdSongNull = false;
     }
   }
 

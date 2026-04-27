@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/api/subsonic_client.dart' show ServerReachability;
 import '../../core/models/album.dart';
 import '../../core/models/recommendations_state.dart';
 import '../../core/models/song.dart';
@@ -14,9 +15,52 @@ import '../library/album_detail_screen.dart';
 import '../library/playlist_detail_screen.dart';
 import '../settings/settings_screen.dart';
 
-// M3 Expressive emphasized-decelerate curve (entrance motion spec).
+// M3 Expressive motion tokens.
 const _kEmphasizedDecelerate = Cubic(0.05, 0.7, 0.1, 1.0);
-const _kEmphasizedDuration = Duration(milliseconds: 350);
+const _kEmphasizedDuration = Duration(milliseconds: 400);
+
+// Stagger delays per section (cascading entrance).
+const _kStagger0 = Duration.zero;
+const _kStagger1 = Duration(milliseconds: 60);
+const _kStagger2 = Duration(milliseconds: 120);
+const _kStagger3 = Duration(milliseconds: 180);
+const _kStagger4 = Duration(milliseconds: 240);
+
+IconData _reachabilityIcon(ServerReachability r) {
+  switch (r) {
+    case ServerReachability.offline:
+      return Icons.signal_wifi_off_rounded;
+    case ServerReachability.unauthorized:
+    case ServerReachability.forbidden:
+      return Icons.lock_outline_rounded;
+    case ServerReachability.tlsError:
+      return Icons.gpp_bad_outlined;
+    case ServerReachability.serverError:
+      return Icons.error_outline_rounded;
+    case ServerReachability.unreachable:
+    case ServerReachability.reachable:
+      return Icons.cloud_off_rounded;
+  }
+}
+
+String _reachabilityMessage(ServerReachability r) {
+  switch (r) {
+    case ServerReachability.offline:
+      return 'No internet connection';
+    case ServerReachability.unauthorized:
+      return 'Login rejected — update password in Settings';
+    case ServerReachability.forbidden:
+      return 'Access forbidden — check server permissions';
+    case ServerReachability.tlsError:
+      return 'Server TLS error — certificate issue';
+    case ServerReachability.serverError:
+      return 'Server error — tap to retry';
+    case ServerReachability.unreachable:
+      return 'Server not reachable — tap to retry';
+    case ServerReachability.reachable:
+      return '';
+  }
+}
 
 // Carousel geometry matching pre-v1.9.0 proportions — image is explicit
 // 130×130 in a column with text below; carousel height = 176 to fit.
@@ -50,8 +94,8 @@ class HomeScreen extends ConsumerWidget {
     final recsAsync = ref.watch(recommendationsProvider);
     final username = ref.watch(serverConfigProvider).valueOrNull?.username;
     final isOnline = ref.watch(isOnlineProvider).valueOrNull ?? true;
-    final serverReachable =
-        ref.watch(serverReachableProvider).valueOrNull ?? true;
+    final reachability = ref.watch(serverReachableProvider).valueOrNull ??
+        ServerReachability.reachable;
     final arlStatus = ref.watch(deezerArlStatusProvider).valueOrNull;
     final scheme = Theme.of(context).colorScheme;
 
@@ -67,22 +111,16 @@ class HomeScreen extends ConsumerWidget {
             // top edge; AnimatedSize makes it zero-height when online.
             const SliverToBoxAdapter(child: OfflineBanner()),
 
-            // Greeting — no SliverAppBar; status-bar gap via viewPadding.top.
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                  16,
-                  MediaQuery.of(context).viewPadding.top + 16,
-                  16,
-                  0,
-                ),
-                child: Text(
-                  _greeting(username),
-                  style: Theme.of(context)
-                      .textTheme
-                      .headlineMedium
-                      ?.copyWith(fontWeight: FontWeight.bold),
-                ),
+            // M3E collapsing greeting — medium app bar collapses on scroll.
+            // Pass only fontWeight; size/letterSpacing come from the framework's
+            // variant-aware ScrollUnderFlexibleSpace so expanded → collapsed
+            // interpolates correctly without clipping.
+            SliverAppBar.medium(
+              automaticallyImplyLeading: false,
+              scrolledUnderElevation: 0,
+              title: Text(
+                _greeting(username),
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
             ),
 
@@ -90,17 +128,17 @@ class HomeScreen extends ConsumerWidget {
             if (arlStatus == DeezerArlStatus.invalid)
               const SliverToBoxAdapter(child: _DeezerExpiredBanner()),
 
-            // Server unreachable — ActionChip with built-in retry affordance.
-            if (isOnline && !serverReachable)
+            // Server status — specific message per failure mode.
+            if (isOnline && reachability != ServerReachability.reachable)
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                   child: Align(
                     alignment: Alignment.centerLeft,
                     child: ActionChip(
-                      avatar: Icon(Icons.cloud_off_rounded,
+                      avatar: Icon(_reachabilityIcon(reachability),
                           size: 16, color: scheme.onSurfaceVariant),
-                      label: const Text('Server unreachable — tap to retry'),
+                      label: Text(_reachabilityMessage(reachability)),
                       onPressed: () => _refresh(ref),
                     ),
                   ),
@@ -120,11 +158,13 @@ class HomeScreen extends ConsumerWidget {
                 }
                 return SliverToBoxAdapter(
                   child: _fadeIn(
+                    delay: _kStagger0,
                     child: _Section(
                       title: 'Playlists',
                       child: SizedBox(
                         height: _kCarouselHeight,
                         child: _buildCarousel(
+                          context: context,
                           onItemTap: (i) => Navigator.push(
                             context,
                             MaterialPageRoute(
@@ -157,11 +197,13 @@ class HomeScreen extends ConsumerWidget {
                 }
                 return SliverToBoxAdapter(
                   child: _fadeIn(
+                    delay: _kStagger1,
                     child: _Section(
                       title: 'Recently Added',
                       child: SizedBox(
                         height: _kCarouselHeight,
                         child: _buildCarousel(
+                          context: context,
                           onItemTap: (i) => Navigator.push(
                             context,
                             MaterialPageRoute(
@@ -208,11 +250,13 @@ class HomeScreen extends ConsumerWidget {
               ),
               data: (songs) => SliverToBoxAdapter(
                 child: _fadeIn(
+                  delay: _kStagger2,
                   child: _Section(
                     title: 'Discover',
                     child: SizedBox(
                       height: _kCarouselHeight,
                       child: _buildCarousel(
+                        context: context,
                         onItemTap: (i) => _playSongs(ref, songs, i),
                         children: [
                           for (final s in songs) _SongCard(song: s),
@@ -240,11 +284,13 @@ class HomeScreen extends ConsumerWidget {
                 }
                 return SliverToBoxAdapter(
                   child: _fadeIn(
+                    delay: _kStagger4,
                     child: _Section(
                       title: 'Recently Played',
                       child: SizedBox(
                         height: _kCarouselHeight,
                         child: _buildCarousel(
+                          context: context,
                           onItemTap: (i) => _playSongs(ref, songs, i),
                           children: [
                             for (final s in songs) _SongCard(song: s),
@@ -276,29 +322,42 @@ class HomeScreen extends ConsumerWidget {
   // individual card widgets. This avoids tap-interception conflicts between
   // CarouselView's own gesture layer and nested InkWells.
   static Widget _buildCarousel({
+    required BuildContext context,
     required List<Widget> children,
     void Function(int)? onItemTap,
   }) {
-    return CarouselView(
-      itemExtent: _kCardExtent,
-      itemSnapping: true,
-      shrinkExtent: 40,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      shape: const RoundedRectangleBorder(),
-      overlayColor: WidgetStateProperty.all(Colors.transparent),
-      onTap: onItemTap,
-      children: children,
+    // Scope a no-scrollbar ScrollConfiguration around the carousel: the base
+    // ScrollBehavior adds a RawScrollbar on desktop for ALL axes, which on a
+    // horizontal snap-carousel renders as a misaligned line through the cards.
+    // Vertical scrollbars elsewhere in the app are unaffected.
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+      child: CarouselView(
+        itemExtent: _kCardExtent,
+        itemSnapping: true,
+        shrinkExtent: 40,
+        padding: const EdgeInsets.only(left: 16),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        shape: const RoundedRectangleBorder(),
+        overlayColor: WidgetStateProperty.all(Colors.transparent),
+        onTap: onItemTap,
+        children: children,
+      ),
     );
   }
 
   // Fade + upward slide on first build — M3E "emphasized decelerate" entrance.
-  static Widget _fadeIn({required Widget child}) {
+  // [delay] staggers sections so they cascade in rather than all at once.
+  static Widget _fadeIn({required Widget child, Duration delay = Duration.zero}) {
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
-      duration: _kEmphasizedDuration,
-      curve: _kEmphasizedDecelerate,
+      duration: _kEmphasizedDuration + delay,
+      curve: Interval(
+        delay.inMilliseconds / (_kEmphasizedDuration + delay).inMilliseconds,
+        1.0,
+        curve: _kEmphasizedDecelerate,
+      ),
       builder: (_, value, ch) => Opacity(
         opacity: value,
         child: Transform.translate(
@@ -363,6 +422,7 @@ class HomeScreen extends ConsumerWidget {
           case RecsReady(songs: final songs):
             return SliverToBoxAdapter(
               child: _fadeIn(
+                delay: _kStagger3,
                 child: _Section(
                   title: 'Recommended for You',
                   trailing: IconButton.filledTonal(
@@ -373,6 +433,7 @@ class HomeScreen extends ConsumerWidget {
                   child: SizedBox(
                     height: _kCarouselHeight,
                     child: _buildCarousel(
+                      context: context,
                       onItemTap: (i) => ref
                           .read(audioHandlerNotifierProvider)
                           ?.loadQueue(songs, startIndex: i),
@@ -429,7 +490,7 @@ class _Section extends StatelessWidget {
                   title,
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w700,
-                        letterSpacing: -0.1,
+                        letterSpacing: -0.2,
                       ),
                 ),
               ),
@@ -827,7 +888,7 @@ class _RecsInlineError extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
           color: scheme.errorContainer,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
         ),
         child: Row(
           children: [
@@ -862,9 +923,9 @@ class _DeezerExpiredBanner extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: Material(
         color: scheme.errorContainer,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const SettingsScreen()),
           ),
@@ -913,7 +974,7 @@ class _RecsEmptyHint extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
           color: scheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
         ),
         child: Row(
           children: [

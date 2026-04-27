@@ -12,6 +12,7 @@ import '../../core/providers.dart';
 import '../../shared/utils/download_polling_mixin.dart';
 import '../../shared/utils/snack.dart';
 import '../../shared/utils/song_actions.dart';
+import '../../shared/widgets/cover_art_image.dart';
 import 'queue_screen.dart';
 
 // ---------------------------------------------------------------------------
@@ -257,7 +258,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
         final scheme = Theme.of(context).colorScheme;
         return _SlideDismiss(child: Material(
           color: scheme.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
           clipBehavior: Clip.hardEdge,
           child: SafeArea(
             child: Column(
@@ -500,10 +501,47 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
     showModalBottomSheet(
       context: context,
       useRootNavigator: true,
+      showDragHandle: true,
       builder: (sheetCtx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Song header — confirms which track the menu acts on.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Row(
+                children: [
+                  CoverArtImage(
+                    coverArtId: song.coverArt,
+                    externalUrl: song.externalCoverUrl,
+                    size: 44,
+                    borderRadius: 8,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(song.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 14, fontWeight: FontWeight.w600)),
+                        Text(song.artist,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: scheme.onSurfaceVariant)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            const SizedBox(height: 4),
             ListTile(
               leading: const Icon(Icons.queue_music_rounded),
               title: const Text('Play next'),

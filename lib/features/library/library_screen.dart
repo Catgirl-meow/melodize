@@ -162,6 +162,7 @@ class _SongsTabState extends ConsumerState<_SongsTab>
     final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet<void>(
       context: context,
+      showDragHandle: true,
       builder: (_) => SafeArea(
         child: StatefulBuilder(
           builder: (ctx, setSheetState) {
@@ -317,6 +318,7 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
     final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet<void>(
       context: context,
+      showDragHandle: true,
       builder: (_) => SafeArea(
         child: StatefulBuilder(
           builder: (ctx, setSheetState) {
@@ -539,6 +541,7 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab>
     final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet<void>(
       context: context,
+      showDragHandle: true,
       builder: (_) => SafeArea(
         child: StatefulBuilder(
           builder: (ctx, setSheetState) {

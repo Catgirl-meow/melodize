@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import '../models/song.dart';
@@ -6,6 +7,16 @@ import '../models/album.dart';
 import '../models/artist.dart';
 import '../models/playlist.dart';
 import '../models/search_results.dart';
+
+enum ServerReachability {
+  reachable,
+  offline,       // device has no network
+  unreachable,   // DNS / connection refused / timeout
+  tlsError,      // certificate / handshake failure
+  unauthorized,  // HTTP 401
+  forbidden,     // HTTP 403
+  serverError,   // HTTP 5xx
+}
 
 class SubsonicConfig {
   final String serverUrl;
@@ -321,6 +332,29 @@ class SubsonicClient {
       return true;
     } catch (_) {
       return false;
+    }
+  }
+
+  Future<ServerReachability> pingDetailed() async {
+    try {
+      await _get('ping');
+      return ServerReachability.reachable;
+    } on DioException catch (e) {
+      final status = e.response?.statusCode;
+      if (status == 401) return ServerReachability.unauthorized;
+      if (status == 403) return ServerReachability.forbidden;
+      if (status != null && status >= 500) return ServerReachability.serverError;
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.sendTimeout) {
+        return ServerReachability.unreachable;
+      }
+      if (e.error is HandshakeException || e.error is TlsException) {
+        return ServerReachability.tlsError;
+      }
+      return ServerReachability.unreachable;
+    } catch (_) {
+      return ServerReachability.unreachable;
     }
   }
 }
