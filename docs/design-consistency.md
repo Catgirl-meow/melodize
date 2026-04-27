@@ -14,9 +14,11 @@ Status legend: ❌ open · 🟡 partial · ✅ shipped
 | C2 | `lib/features/settings/settings_screen.dart:817` (`_SettingsPageScaffold`) | plain `AppBar` | `SliverAppBar.medium` for sub-pages | ❌ |
 | C3 | `lib/features/downloads/downloads_screen.dart:36` | plain `SliverAppBar` (no variant) | `SliverAppBar.medium` | ❌ |
 | C4 | `lib/features/settings/downloaded_songs_screen.dart:245` | plain `AppBar` | `SliverAppBar.medium` (this screen has its own scroll already) | ❌ |
-| — | `lib/features/home/home_screen.dart:118` | `SliverAppBar.medium` | — | ✅ v1.9.5 |
+| — | `lib/features/home/home_screen.dart` | inline `SliverToBoxAdapter` + `SafeArea(top:true)` greeting | revisit M3E medium/large variant once a non-bottom-aligned title approach is found | 🟡 reverted v1.9.9 |
 
 Album / Artist / Playlist detail screens use a deliberate full-bleed cover-art `SliverAppBar` with `flexibleSpace`. Keep as-is (intentional pattern).
+
+**Lesson learned (Home, v1.9.9):** M3 medium/large `SliverAppBar` puts the title *bottom-aligned* inside the expanded slot. Default expanded height (112 px) + Android status bar inset (~32 px) = ~144 px tall bar with title at bottom → ~100 px black gap above the title. Setting `expandedHeight: 88` only halves it. Any future re-attempt at item 02 on Home must either (a) override the title's vertical alignment inside the flexible space, or (b) accept the gap as M3E spec and live with the visual cost.
 
 ## P1 — cover art radius drift
 

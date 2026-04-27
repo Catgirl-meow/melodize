@@ -111,16 +111,25 @@ class HomeScreen extends ConsumerWidget {
             // top edge; AnimatedSize makes it zero-height when online.
             const SliverToBoxAdapter(child: OfflineBanner()),
 
-            // M3E collapsing greeting — medium app bar collapses on scroll.
-            // Pass only fontWeight; size/letterSpacing come from the framework's
-            // variant-aware ScrollUnderFlexibleSpace so expanded → collapsed
-            // interpolates correctly without clipping.
-            SliverAppBar.medium(
-              automaticallyImplyLeading: false,
-              scrolledUnderElevation: 0,
-              title: Text(
-                _greeting(username),
-                style: const TextStyle(fontWeight: FontWeight.bold),
+            // Greeting — inline, sits directly under the status bar with no
+            // gap. SliverAppBar.medium leaves a large empty band above the
+            // bottom-aligned title (M3 spec) which looks bad with the small
+            // status bar of phones. Use SafeArea(top:true) to push past the
+            // status bar, then a plain Padding with headlineMedium bold.
+            SliverToBoxAdapter(
+              child: SafeArea(
+                top: true,
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  child: Text(
+                    _greeting(username),
+                    style: Theme.of(context)
+                        .textTheme
+                        .headlineMedium
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                ),
               ),
             ),
 

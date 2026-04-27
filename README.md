@@ -225,7 +225,13 @@ Work is organized into three passes. Full detail in [`docs/three-pass-plan.md`](
 - **Downloaded songs overhaul** — live search (title/artist/album/genre/format), lossless/lossy filter, sort by name/artist/album/recently added with ascending/descending toggle
 - **Settings sub-pages** — library server, Deezer, and companion settings moved to dedicated sub-screens
 
-### v1.9.9 — Pass 2c download polish + 2g menu pass
+### v1.9.9 — Pass 2c download polish + 2g menu pass + Android greeting gap
+
+**Home — Android greeting gap fix:**
+- **Replaced `SliverAppBar.medium` with inline `SliverToBoxAdapter` + `SafeArea(top:true)`** — M3 spec puts the medium-bar title bottom-aligned in the expanded slot, which on Android stacked the (default 112 px expanded) bar height with the ~32 px status bar inset and left a ~100 px black band above the greeting. Killed the medium variant entirely; greeting now sits directly under the status bar, scrolls away with content.
+- Trade-off: lose the M3E pinned-collapse animation on Home. Pass 3 item 02 (large/medium app bars) status downgraded back to "pending" for Home until a non-bottom-aligned approach lands.
+
+
 **2c — Companion download reliability:**
 - **Timeout snackbar** — 5-min poll budget exhaustion now surfaces "Download timed out" instead of silently dropping the job
 - **Connection-loss snackbar** — 3 consecutive poll errors (≈30 s) trigger a one-time "Lost connection to companion — still trying…" so the user knows

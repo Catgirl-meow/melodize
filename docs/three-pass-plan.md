@@ -105,7 +105,7 @@ Driven entirely by `Material 3 Expressive Roadmap.html` (8 items, ~20 h total).
 | # | Item | Priority | Est. | Status |
 |---|------|----------|------|--------|
 | 01 | Shape-morphing mini player | P0 | ~4 h | shipped, rework in Pass 2f |
-| 02 | Large / medium `SliverAppBar` | P0 | ~3 h | ✅ Home done v1.9.0 — Library + Settings pending |
+| 02 | Large / medium `SliverAppBar` | P0 | ~3 h | reverted on Home v1.9.9 (medium bar's bottom-aligned title left ~100 px gap above greeting on Android); Library + Settings still pending |
 | 03 | Grouped settings tiles | P0 | ~2 h | shipped, visual pass in Pass 2f |
 | 04 | Wavy progress + FAB shape morph | P1 | ~3 h | pending — Flutter 3.27+ |
 | 05 | `DynamicSchemeVariant.expressive` | P1 | ~1 h | ✅ done v1.9.0 |
