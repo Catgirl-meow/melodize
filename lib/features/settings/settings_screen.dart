@@ -48,6 +48,24 @@ const _autoDownloadOptions = [
   ),
 ];
 
+const _themeOptions = [
+  _ChoiceOption(
+    value: 'dark',
+    title: 'Dark',
+    subtitle: 'Always use dark theme',
+  ),
+  _ChoiceOption(
+    value: 'light',
+    title: 'Light',
+    subtitle: 'Always use light theme',
+  ),
+  _ChoiceOption(
+    value: 'system',
+    title: 'System default',
+    subtitle: 'Follow device theme',
+  ),
+];
+
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
@@ -70,6 +88,29 @@ class SettingsScreen extends ConsumerWidget {
         const _SectionHeader('Appearance'),
         GroupedSection(
           children: [
+            ListTile(
+              leading: const Icon(Icons.brightness_6_rounded),
+              title: const Text('Theme'),
+              subtitle: Text(_themeLabel(prefs.themeMode)),
+              trailing: const _TileTrailing(),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => _ChoiceSettingScreen<String>(
+                      title: 'Theme',
+                      currentValue: prefs.themeMode,
+                      options: _themeOptions,
+                      onSelected: (value) {
+                        ref.read(preferencesNotifierProvider.notifier).update(
+                              prefs.copyWith(themeMode: value),
+                            );
+                      },
+                    ),
+                  ),
+                );
+              },
+            ),
             SwitchListTile.adaptive(
               title: const Text('Floating navigation bar'),
               subtitle: const Text('Use the floating pill dock'),
@@ -1007,6 +1048,19 @@ String _autoDownloadLabel(String mode) {
       return 'All songs';
     default:
       return mode;
+  }
+}
+
+String _themeLabel(String theme) {
+  switch (theme) {
+    case 'dark':
+      return 'Dark';
+    case 'light':
+      return 'Light';
+    case 'system':
+      return 'System default';
+    default:
+      return theme;
   }
 }
 

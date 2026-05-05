@@ -8,6 +8,8 @@ on lossless playback, a polished Material 3 UI, and offline support.
 
 ## Features
 
+- **Theme switching** — choose between Dark, Light, or System-default theme in Settings → Appearance; all UI components adapt reactively
+- **Theme-aware now playing screen** — background gradient blends album-art colors toward white (light theme) or black (dark theme); all text, icons, buttons, and controls use proper Material color-scheme tokens instead of hardcoded colors
 - **Lossless playback** — streams original FLAC/OPUS/MP3 without re-encoding
 - **Offline / downloads** — download songs to device for playback without a connection; batch "download all" option; browse downloads with live search, lossless/lossy filter, and multi-field sort
 - **Synced lyrics** — fetches time-synced LRC lyrics from LRClib, auto-scrolls with the song
@@ -224,6 +226,19 @@ Work is organized into three passes. Full detail in [`docs/three-pass-plan.md`](
 ### v1.8.5 additions (outside pass plan)
 - **Downloaded songs overhaul** — live search (title/artist/album/genre/format), lossless/lossy filter, sort by name/artist/album/recently added with ascending/descending toggle
 - **Settings sub-pages** — library server, Deezer, and companion settings moved to dedicated sub-screens
+
+### v1.9.10 — Theme-aware player + theme switching
+
+**Settings — Theme switching:**
+- **Dark / Light / System** — new "Theme" preference in Settings → Appearance; persisted across sessions via `AppPreferences.themeMode`
+- **Theme data parity** — `AppTheme.light()` and `AppTheme.dark()` both produce full `ThemeData` with matching color-scheme brightness, surface / container tokens, and M3 tonal palettes seeded from the expressive variant
+- **Dynamic reactiveness** — `MaterialApp.themeMode` driven by a `riverpod` provider watching the persisted preference, so switching themes updates every screen instantly
+
+**Now Playing screen — full theme adaptation:**
+- **Gradient background** — album-art blended toward `Colors.white` in light mode / `Colors.black` in dark mode (was always black); glow alpha lowered to 0.15 in light mode
+- **Text / icons / buttons** — all hardcoded `Colors.white` / `Colors.black` (~38 locations) replaced with `ColorScheme` semantic tokens (`onSurface`, `onSurfaceVariant`, `primary`, `surfaceContainerHighest`, `outlineVariant`, etc.)
+- **System UI overlay** — `SystemUiOverlayStyle` now flips between `.light` / `.dark` based on theme brightness
+- **Album art shadow** — shadow opacity scales with brightness (0.5 dark / 0.12 light)
 
 ### v1.9.9 — Pass 2c download polish + 2g menu pass + Android greeting gap
 

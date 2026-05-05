@@ -6,6 +6,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart'
     show Color, HSLColor, ImageConfiguration, Size;
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:palette_generator/palette_generator.dart';
@@ -711,6 +712,22 @@ final preferencesNotifierProvider =
     StateNotifierProvider<PreferencesNotifier, AppPreferences>(
   (_) => PreferencesNotifier(),
 );
+
+/// Maps the saved theme preference string to a [ThemeMode].
+final themeModeProvider = Provider<ThemeMode>((ref) {
+  final mode = ref.watch(
+    preferencesNotifierProvider.select((p) => p.themeMode),
+  );
+  switch (mode) {
+    case 'light':
+      return ThemeMode.light;
+    case 'system':
+      return ThemeMode.system;
+    case 'dark':
+    default:
+      return ThemeMode.dark;
+  }
+});
 
 // --- Downloads ---
 class DownloadItem {

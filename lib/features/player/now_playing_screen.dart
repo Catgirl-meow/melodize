@@ -93,16 +93,19 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
         ref.watch(coverArtUrlProvider(song.coverArt ?? '')) ??
         song.externalCoverUrl ??
         '';
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+    final bgBase = isDark ? Colors.black : Colors.white;
+
     final dominantColor =
-        ref.watch(dominantColorProvider(coverUrl)).valueOrNull ??
-            const Color(0xFF1A1A2E);
+        ref.watch(dominantColorProvider(coverUrl)).valueOrNull ?? bgBase;
 
     // Gradient: top slightly dark (prevents stripe on bright art), peak is very
-    // vibrant around the album art zone, fades to black below.
-    final bgTop  = Color.lerp(dominantColor, Colors.black, 0.52)!;
-    final bgPeak = Color.lerp(dominantColor, Colors.black, 0.10)!;
-    final bgFade = Color.lerp(dominantColor, Colors.black, 0.72)!;
-    final bgGlow = dominantColor.withValues(alpha: 0.42);
+    // vibrant around the album art zone, fades to base (black or white).
+    final bgTop  = Color.lerp(dominantColor, bgBase, 0.52)!;
+    final bgPeak = Color.lerp(dominantColor, bgBase, 0.10)!;
+    final bgFade = Color.lerp(dominantColor, bgBase, 0.72)!;
+    final bgGlow = dominantColor.withValues(alpha: isDark ? 0.42 : 0.15);
 
     // ValueListenableBuilder rebuilds only the GestureDetector when _sheetOpen
     // changes — the heavy child (gradient, art, controls) is passed as the
@@ -118,7 +121,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
       ),
       // Material(transparency) provides the Material ancestor Slider needs.
       child: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: SystemUiOverlayStyle.light,
+        value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
         child: Material(
           type: MaterialType.transparency,
           child: Stack(
@@ -132,7 +135,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [bgTop, bgPeak, bgFade, Colors.black],
+                    colors: [bgTop, bgPeak, bgFade, bgBase],
                     stops: const [0.0, 0.32, 0.62, 1.0],
                   ),
                 ),
@@ -206,8 +209,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(3),
                               color: _currentPage == i
-                                  ? Colors.white
-                                  : Colors.white38,
+                                  ? scheme.onSurface
+                                  : scheme.onSurface.withValues(alpha: 0.38),
                             ),
                           ),
                         ),
@@ -460,13 +463,14 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
         children: [
           IconButton(
             icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 28),
-            color: Colors.white,
+            color: scheme.onSurface,
             onPressed: widget.onClose,
           ),
           const Spacer(),
@@ -474,11 +478,11 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
               style: Theme.of(context)
                   .textTheme
                   .labelLarge
-                  ?.copyWith(color: Colors.white70)),
+                  ?.copyWith(color: scheme.onSurface.withValues(alpha: 0.7))),
           const Spacer(),
           IconButton(
             icon: const Icon(Icons.more_vert_rounded),
-            color: Colors.white,
+            color: scheme.onSurface,
             onPressed: _showMoreOptions,
           ),
         ],
@@ -749,6 +753,8 @@ class _AlbumArt extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
     final isPlaying = ref.watch(
       playerStateStreamProvider.select((s) => s.valueOrNull?.playing ?? false),
     );
@@ -761,7 +767,9 @@ class _AlbumArt extends ConsumerWidget {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.5),
+            color: isDark
+                ? Colors.black.withValues(alpha: 0.5)
+                : Colors.black.withValues(alpha: 0.12),
             blurRadius: 32,
             offset: const Offset(0, 12),
           ),
@@ -773,18 +781,20 @@ class _AlbumArt extends ConsumerWidget {
             ? CachedNetworkImage(
                 imageUrl: coverUrl,
                 fit: BoxFit.cover,
-                errorWidget: (_, __, ___) => _placeholder(),
+                errorWidget: (_, __, ___) => _placeholder(scheme),
               )
-            : _placeholder(),
+            : _placeholder(scheme),
       ),
     );
   }
 
-  Widget _placeholder() => Container(
-        color: Colors.white10,
-        child:
-            const Icon(Icons.music_note_rounded, size: 80, color: Colors.white24),
-      );
+  Widget _placeholder(ColorScheme scheme) {
+    return Container(
+      color: scheme.surfaceContainerHighest,
+      child: Icon(Icons.music_note_rounded,
+          size: 80, color: scheme.onSurface.withValues(alpha: 0.38)),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -795,6 +805,7 @@ class _SongInfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Row(
       children: [
         Expanded(
@@ -805,8 +816,8 @@ class _SongInfoRow extends StatelessWidget {
                 song.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: scheme.onSurface,
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
                 ),
@@ -815,8 +826,9 @@ class _SongInfoRow extends StatelessWidget {
                 song.artist,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style:
-                    const TextStyle(color: Colors.white70, fontSize: 15),
+                style: TextStyle(
+                    color: scheme.onSurface.withValues(alpha: 0.7),
+                    fontSize: 15),
               ),
             ],
           ),
@@ -826,13 +838,13 @@ class _SongInfoRow extends StatelessWidget {
             padding:
                 const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.white30),
+              border: Border.all(color: scheme.outlineVariant),
               borderRadius: BorderRadius.circular(6),
             ),
             child: Text(
               song.suffix!.toUpperCase(),
-              style: const TextStyle(
-                  color: Colors.white70,
+              style: TextStyle(
+                  color: scheme.onSurfaceVariant,
                   fontSize: 10,
                   fontWeight: FontWeight.bold),
             ),
@@ -858,6 +870,7 @@ class _SeekSliderState extends ConsumerState<_SeekSlider> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final position = ref.watch(
       positionStreamProvider.select((s) => s.valueOrNull ?? Duration.zero),
     );
@@ -876,9 +889,9 @@ class _SeekSliderState extends ConsumerState<_SeekSlider> {
             thumbShape:
                 const RoundSliderThumbShape(enabledThumbRadius: 6),
             trackHeight: 3,
-            activeTrackColor: Colors.white,
-            inactiveTrackColor: Colors.white24,
-            thumbColor: Colors.white,
+            activeTrackColor: scheme.primary,
+            inactiveTrackColor: scheme.surfaceContainerHighest,
+            thumbColor: scheme.primary,
             overlayShape: SliderComponentShape.noOverlay,
           ),
           child: Slider(
@@ -903,11 +916,11 @@ class _SeekSliderState extends ConsumerState<_SeekSlider> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(_fmt(position),
-                  style: const TextStyle(
-                      color: Colors.white70, fontSize: 12)),
+                  style: TextStyle(
+                      color: scheme.onSurfaceVariant, fontSize: 12)),
               Text(_fmt(duration ?? Duration.zero),
-                  style: const TextStyle(
-                      color: Colors.white70, fontSize: 12)),
+                  style: TextStyle(
+                      color: scheme.onSurfaceVariant, fontSize: 12)),
             ],
           ),
         ),
@@ -930,6 +943,7 @@ class _PlayControls extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
     final isPlaying = ref.watch(
       playerStateStreamProvider.select((s) => s.valueOrNull?.playing ?? false),
     );
@@ -946,14 +960,14 @@ class _PlayControls extends ConsumerWidget {
         IconButton(
           icon: Icon(
             Icons.shuffle_rounded,
-            color: isShuffled ? Colors.white : Colors.white38,
+            color: isShuffled ? scheme.primary : scheme.onSurface.withValues(alpha: 0.38),
           ),
           iconSize: 26,
           onPressed: () =>
               ref.read(audioHandlerNotifierProvider)?.toggleShuffle(),
         ),
         IconButton(
-          icon: const Icon(Icons.skip_previous_rounded, color: Colors.white),
+          icon: Icon(Icons.skip_previous_rounded, color: scheme.onSurface),
           iconSize: 40,
           onPressed: () =>
               ref.read(audioHandlerNotifierProvider)?.skipToPrevious(),
@@ -961,14 +975,14 @@ class _PlayControls extends ConsumerWidget {
         Container(
           width: 68,
           height: 68,
-          decoration: const BoxDecoration(
-            color: Colors.white,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
             shape: BoxShape.circle,
           ),
           child: IconButton(
             icon: Icon(
               isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-              color: Colors.black,
+              color: scheme.onSurface,
             ),
             iconSize: 38,
             onPressed: () {
@@ -978,7 +992,7 @@ class _PlayControls extends ConsumerWidget {
           ),
         ),
         IconButton(
-          icon: const Icon(Icons.skip_next_rounded, color: Colors.white),
+          icon: Icon(Icons.skip_next_rounded, color: scheme.onSurface),
           iconSize: 40,
           onPressed: () =>
               ref.read(audioHandlerNotifierProvider)?.skipToNext(),
@@ -988,7 +1002,7 @@ class _PlayControls extends ConsumerWidget {
             loopMode == LoopMode.one
                 ? Icons.repeat_one_rounded
                 : Icons.repeat_rounded,
-            color: loopMode != LoopMode.off ? Colors.white : Colors.white38,
+            color: loopMode != LoopMode.off ? scheme.primary : scheme.onSurface.withValues(alpha: 0.38),
           ),
           iconSize: 26,
           onPressed: () =>
@@ -1073,6 +1087,7 @@ class _ActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -1081,12 +1096,13 @@ class _ActionButton extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 24, color: active ? Colors.white : Colors.white60),
+            Icon(icon, size: 24,
+                color: active ? scheme.primary : scheme.onSurface.withValues(alpha: 0.6)),
             const SizedBox(height: 4),
             Text(label,
                 style: TextStyle(
                     fontSize: 11,
-                    color: active ? Colors.white : Colors.white60)),
+                    color: active ? scheme.primary : scheme.onSurface.withValues(alpha: 0.6))),
           ],
         ),
       ),
@@ -1128,6 +1144,7 @@ class _VolumeSliderState extends ConsumerState<_VolumeSlider> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final handler = ref.read(audioHandlerNotifierProvider);
     return Row(
       children: [
@@ -1138,7 +1155,7 @@ class _VolumeSliderState extends ConsumerState<_VolumeSlider> {
                 : _volume < 0.5
                     ? Icons.volume_down_rounded
                     : Icons.volume_up_rounded,
-            color: Colors.white70,
+            color: scheme.onSurfaceVariant,
             size: 18,
           ),
           padding: EdgeInsets.zero,
@@ -1151,9 +1168,9 @@ class _VolumeSliderState extends ConsumerState<_VolumeSlider> {
             data: SliderTheme.of(context).copyWith(
               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
               trackHeight: 2,
-              activeTrackColor: Colors.white,
-              inactiveTrackColor: Colors.white24,
-              thumbColor: Colors.white,
+              activeTrackColor: scheme.primary,
+              inactiveTrackColor: scheme.surfaceContainerHighest,
+              thumbColor: scheme.primary,
               overlayShape: SliderComponentShape.noOverlay,
             ),
             child: Slider(
@@ -1225,6 +1242,7 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final query = (
       songId: widget.song.id,
       artist: widget.song.artist,
@@ -1242,20 +1260,23 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
 
     return lyricsAsync.when(
       loading: () =>
-          const Center(child: CircularProgressIndicator(color: Colors.white)),
-      error: (_, __) => const Center(
+          Center(child: CircularProgressIndicator(color: scheme.primary)),
+      error: (_, __) => Center(
           child: Text('Could not load lyrics',
-              style: TextStyle(color: Colors.white70))),
+              style: TextStyle(color: scheme.onSurface.withValues(alpha: 0.7)))),
       data: (result) {
         if (result == null) {
-          return const Center(
+          return Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.lyrics_outlined, size: 48, color: Colors.white38),
-                SizedBox(height: 12),
+                Icon(Icons.lyrics_outlined, size: 48,
+                    color: scheme.onSurface.withValues(alpha: 0.38)),
+                const SizedBox(height: 12),
                 Text('No lyrics found',
-                    style: TextStyle(color: Colors.white60, fontSize: 16)),
+                    style: TextStyle(
+                        color: scheme.onSurface.withValues(alpha: 0.6),
+                        fontSize: 16)),
               ],
             ),
           );
@@ -1284,8 +1305,8 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
           child: Text(
             result.plain ?? '',
-            style: const TextStyle(
-                color: Colors.white70, fontSize: 15, height: 1.6),
+            style: TextStyle(
+                color: scheme.onSurfaceVariant, fontSize: 15, height: 1.6),
           ),
         );
       },
@@ -1338,6 +1359,7 @@ class _LyricLineState extends State<_LyricLine>
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return AnimatedBuilder(
       animation: _anim,
       builder: (_, __) {
@@ -1350,8 +1372,8 @@ class _LyricLineState extends State<_LyricLine>
               fontSize: 18.0,
               fontWeight: t > 0.5 ? FontWeight.w700 : FontWeight.w400,
               color: Color.lerp(
-                Colors.white.withValues(alpha: 0.28),
-                Colors.white,
+                scheme.onSurface.withValues(alpha: 0.28),
+                scheme.onSurface,
                 t,
               ),
               height: 1.4,

@@ -16,6 +16,7 @@ class AppPreferences {
   final String libraryArtistSort;  // 'name' | 'albumCount'
   final bool libraryArtistAscending;
   final bool floatingNavBar;       // true = floating pill dock, false = classic nav bar
+  final String themeMode;          // 'dark' | 'light' | 'system'
 
   const AppPreferences({
     this.streamQuality = 'lossless',
@@ -31,6 +32,7 @@ class AppPreferences {
     this.libraryArtistSort = 'name',
     this.libraryArtistAscending = true,
     this.floatingNavBar = true,
+    this.themeMode = 'dark',
   });
 
   bool get hasCompanion => companionUrl.isNotEmpty && companionApiKey.isNotEmpty;
@@ -50,6 +52,7 @@ class AppPreferences {
     String? libraryArtistSort,
     bool? libraryArtistAscending,
     bool? floatingNavBar,
+    String? themeMode,
   }) =>
       AppPreferences(
         streamQuality: streamQuality ?? this.streamQuality,
@@ -65,6 +68,7 @@ class AppPreferences {
         libraryArtistSort: libraryArtistSort ?? this.libraryArtistSort,
         libraryArtistAscending: libraryArtistAscending ?? this.libraryArtistAscending,
         floatingNavBar: floatingNavBar ?? this.floatingNavBar,
+        themeMode: themeMode ?? this.themeMode,
       );
 
   factory AppPreferences.fromJson(Map<String, dynamic> j) => AppPreferences(
@@ -81,6 +85,7 @@ class AppPreferences {
         libraryArtistSort: j['libraryArtistSort'] as String? ?? 'name',
         libraryArtistAscending: j['libraryArtistAscending'] as bool? ?? true,
         floatingNavBar: j['floatingNavBar'] as bool? ?? true,
+        themeMode: j['themeMode'] as String? ?? 'dark',
       );
 
   Map<String, dynamic> toJson() => {
@@ -97,6 +102,7 @@ class AppPreferences {
         'libraryArtistSort': libraryArtistSort,
         'libraryArtistAscending': libraryArtistAscending,
         'floatingNavBar': floatingNavBar,
+        'themeMode': themeMode,
       };
 
   static Future<File> get _file async {

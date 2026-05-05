@@ -79,6 +79,13 @@ class AppTheme {
       colorScheme: scheme.harmonized(),
       brightness: Brightness.light,
       fontFamily: 'Roboto',
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: scheme.surface,
+        indicatorColor: scheme.secondaryContainer,
+        labelTextStyle: WidgetStateProperty.all(
+          TextStyle(fontSize: 12, color: scheme.onSurface),
+        ),
+      ),
       cardTheme: CardThemeData(
         elevation: 0,
         color: scheme.surfaceContainerHigh,
@@ -90,6 +97,14 @@ class AppTheme {
         backgroundColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
+      ),
+      sliderTheme: SliderThemeData(
+        thumbColor: scheme.primary,
+        activeTrackColor: scheme.primary,
+        inactiveTrackColor: scheme.surfaceContainerHighest,
+        overlayShape: SliderComponentShape.noOverlay,
+        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+        trackHeight: 3,
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,

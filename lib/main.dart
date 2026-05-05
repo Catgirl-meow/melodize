@@ -31,13 +31,6 @@ void main() {
   // SafeArea widgets throughout the app handle the inset padding automatically.
   if (!Platform.isLinux) {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-      statusBarBrightness: Brightness.dark,
-      systemNavigationBarColor: Colors.transparent,
-      systemNavigationBarDividerColor: Colors.transparent,
-    ));
   }
 
   // Phase 1: create the handler synchronously so the app starts immediately.
@@ -78,6 +71,27 @@ class MelodizeApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final themeMode = ref.watch(themeModeProvider);
+
+    // Derive effective brightness for status-bar icon color
+    final brightness = themeMode == ThemeMode.system
+        ? PlatformDispatcher.instance.platformBrightness
+        : themeMode == ThemeMode.light
+            ? Brightness.light
+            : Brightness.dark;
+
+    if (!Platform.isLinux) {
+      SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness:
+            brightness == Brightness.dark ? Brightness.light : Brightness.dark,
+        statusBarBrightness:
+            brightness == Brightness.dark ? Brightness.dark : Brightness.light,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarDividerColor: Colors.transparent,
+      ));
+    }
+
     return DynamicColorBuilder(
       builder: (lightScheme, darkScheme) {
         return MaterialApp(
@@ -85,7 +99,7 @@ class MelodizeApp extends ConsumerWidget {
           debugShowCheckedModeBanner: false,
           theme: AppTheme.light(lightScheme),
           darkTheme: AppTheme.dark(darkScheme),
-          themeMode: ThemeMode.dark,
+          themeMode: themeMode,
           scrollBehavior: const _AppScrollBehavior(),
           home: const _StartupRouter(),
         );
