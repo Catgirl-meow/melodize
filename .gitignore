@@ -51,9 +51,10 @@ app.*.map.json
 # Flutter Linux ephemeral build
 /linux/flutter/ephemeral/
 
-# Claude Code memory + local settings (private)
+# CLI agent memory + local settings (private)
 /memory/
 .claude/
+.iflow/
 
 # Flutter generated
 .flutter-plugins
