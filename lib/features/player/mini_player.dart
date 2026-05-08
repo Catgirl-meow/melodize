@@ -113,9 +113,10 @@ class _ClassicMiniPlayer extends ConsumerWidget {
                               Text(song.title,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       fontWeight: FontWeight.w600,
-                                      fontSize: 14)),
+                                      fontSize: 14,
+                                      color: scheme.onSurface)),
                               Text(song.artist,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -147,6 +148,10 @@ class _MiniPlayerProgress extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final accent = ref.watch(currentAccentColorProvider);
+    final fg = foregroundAccentColor(accent, scheme.brightness)
+        ?? scheme.primary;
     final position =
         ref.watch(positionStreamProvider).valueOrNull ?? Duration.zero;
     final duration = ref.watch(durationStreamProvider).valueOrNull;
@@ -158,7 +163,7 @@ class _MiniPlayerProgress extends ConsumerWidget {
       minHeight: 2,
       backgroundColor: Colors.transparent,
       valueColor:
-          AlwaysStoppedAnimation(Theme.of(context).colorScheme.primary),
+          AlwaysStoppedAnimation(fg),
     );
   }
 }

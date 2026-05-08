@@ -467,7 +467,10 @@ class _FloatingNavItem extends StatelessWidget {
 
     // Icon/label colour on the pill: white on accent (always dark dock bg),
     // else the standard onSecondaryContainer token.
-    final activeColor = accentColor != null
+    // Guard against light accents — white text on a light pill is invisible.
+    final isLightAccent = accentColor != null &&
+        ThemeData.estimateBrightnessForColor(accentColor!) == Brightness.light;
+    final activeColor = accentColor != null && !isLightAccent
         ? Colors.white
         : scheme.onSecondaryContainer;
 

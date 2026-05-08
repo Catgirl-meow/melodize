@@ -247,21 +247,56 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       // Load the full queue upfront instead — desktop doesn't have the
       // platform-channel latency that makes this slow on mobile.
       //
-      // preload: true (default) tells mpv to open the audio device and start
-      // buffering while setAudioSource awaits, so play() produces audio with
-      // minimal delay instead of waiting for PipeWire to initialize on play().
+      // However, loading 100+ songs at once triggers a just_audio_media_kit
+      // bug where concatenatingInsertAll generates bogus playlist-move
+      // commands that eventually crash mpv with "Broken pipe" on the
+      // display connection.  Cap initial load at ~50 songs and append the
+      // rest after playback starts.
+      const int maxInitial = 50;
+      final List<Song> initialSongs;
+      final List<Song> remainingSongs;
+      int initialIndex = idx;
+      if (songs.length <= maxInitial) {
+        initialSongs = songs;
+        remainingSongs = const [];
+      } else {
+        // Window the initial batch around the start index so the first
+        // several tracks after the starting song are available immediately.
+        final int start = idx.clamp(0, songs.length - maxInitial);
+        initialSongs = songs.sublist(start, start + maxInitial);
+        remainingSongs = [
+          ...songs.sublist(0, start),
+          ...songs.sublist(start + maxInitial),
+        ];
+        initialIndex = idx - start;
+      }
+
       _linuxShuffled = false;
       _preShuffleOrder = [];
       _linuxShuffleCtrl.add(false);
       _playlistSource = ConcatenatingAudioSource(
-        children: songs.map(_songToSource).toList(),
+        children: initialSongs.map(_songToSource).toList(),
         useLazyPreparation: true,
       );
       try {
-        await player.setAudioSource(_playlistSource, initialIndex: idx);
+        await player.setAudioSource(_playlistSource, initialIndex: initialIndex);
         await player.play();
       } catch (e) {
         debugPrint('loadQueue error: $e');
+        return;
+      }
+      // Append remaining songs after playback starts so mpv isn't choked
+      // by a massive playlist during initial load.
+      if (remainingSongs.isNotEmpty) {
+        Future.microtask(() async {
+          for (final s in remainingSongs) {
+            try {
+              await _playlistSource.add(_songToSource(s));
+            } catch (e) {
+              debugPrint('loadQueue append error: $e');
+            }
+          }
+        });
       }
       return;
     }

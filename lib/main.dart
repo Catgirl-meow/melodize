@@ -66,11 +66,22 @@ class _AppScrollBehavior extends ScrollBehavior {
       const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
 }
 
-class MelodizeApp extends ConsumerWidget {
+class MelodizeApp extends ConsumerStatefulWidget {
   const MelodizeApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MelodizeApp> createState() => _MelodizeAppState();
+}
+
+class _MelodizeAppState extends ConsumerState<MelodizeApp> {
+  ThemeData? _cachedLight;
+  ThemeData? _cachedDark;
+  ColorScheme? _lastLight;
+  ColorScheme? _lastDark;
+  Brightness? _lastBrightness;
+
+  @override
+  Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
 
     // Derive effective brightness for status-bar icon color
@@ -80,7 +91,8 @@ class MelodizeApp extends ConsumerWidget {
             ? Brightness.light
             : Brightness.dark;
 
-    if (!Platform.isLinux) {
+    if (!Platform.isLinux && brightness != _lastBrightness) {
+      _lastBrightness = brightness;
       SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
         statusBarIconBrightness:
@@ -94,11 +106,19 @@ class MelodizeApp extends ConsumerWidget {
 
     return DynamicColorBuilder(
       builder: (lightScheme, darkScheme) {
+        if (lightScheme != _lastLight || _cachedLight == null) {
+          _cachedLight = AppTheme.light(lightScheme);
+          _lastLight = lightScheme;
+        }
+        if (darkScheme != _lastDark || _cachedDark == null) {
+          _cachedDark = AppTheme.dark(darkScheme);
+          _lastDark = darkScheme;
+        }
         return MaterialApp(
           title: 'Melodize',
           debugShowCheckedModeBanner: false,
-          theme: AppTheme.light(lightScheme),
-          darkTheme: AppTheme.dark(darkScheme),
+          theme: _cachedLight!,
+          darkTheme: _cachedDark!,
           themeMode: themeMode,
           scrollBehavior: const _AppScrollBehavior(),
           home: const _StartupRouter(),

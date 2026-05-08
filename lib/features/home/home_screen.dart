@@ -838,7 +838,7 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
                 top: 2,
                 right: 2,
                 child: Material(
-                  color: Colors.black38,
+                  color: Colors.black54,
                   shape: const CircleBorder(),
                   clipBehavior: Clip.antiAlias,
                   child: InkWell(

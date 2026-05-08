@@ -97,8 +97,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
     final isDark = scheme.brightness == Brightness.dark;
     final bgBase = isDark ? Colors.black : Colors.white;
 
-    final dominantColor =
-        ref.watch(dominantColorProvider(coverUrl)).valueOrNull ?? bgBase;
+    final rawAccent =
+        ref.watch(currentAccentColorProvider);
+    final fg = foregroundAccentColor(rawAccent, scheme.brightness)
+        ?? scheme.primary;
+    final dominantColor = rawAccent ?? bgBase;
 
     // Gradient: top slightly dark (prevents stripe on bright art), peak is very
     // vibrant around the album art zone, fades to base (black or white).
@@ -177,6 +180,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
                               setState(() => _currentPage = p),
                           children: [
                             _PlayerPage(
+                              fgAccent: fg,
                               song: song,
                               coverUrl: coverUrl,
                               sleepNotifier: _sleepNotifier,
@@ -275,7 +279,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
                 if (handler.hasSleepTimer)
                   ListTile(
                     leading:
-                        const Icon(Icons.timer_off_rounded, color: Colors.red),
+                        Icon(Icons.timer_off_rounded, color: scheme.error),
                     title: const Text('Cancel timer'),
                     onTap: () {
                       handler.cancelSleepTimer();
@@ -686,6 +690,7 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
 // Player page — layout only, stream-watching delegated to sub-widgets
 
 class _PlayerPage extends StatelessWidget {
+  final Color fgAccent;
   final Song song;
   final String coverUrl;
   final ValueNotifier<Duration?> sleepNotifier;
@@ -694,6 +699,7 @@ class _PlayerPage extends StatelessWidget {
   final VoidCallback onLyricsOpen;
 
   const _PlayerPage({
+    required this.fgAccent,
     required this.song,
     required this.coverUrl,
     required this.sleepNotifier,
@@ -718,7 +724,7 @@ class _PlayerPage extends StatelessWidget {
             child: _AlbumArt(coverUrl: coverUrl, artSize: artSize),
           ),
           const Spacer(flex: 2),
-          _SongInfoRow(song: song),
+          _SongInfoRow(song: song, fgAccent: fgAccent),
           const SizedBox(height: 16),
           RepaintBoundary(child: _SeekSlider()),
           if (Platform.isLinux) ...[
@@ -730,6 +736,7 @@ class _PlayerPage extends StatelessWidget {
           const SizedBox(height: 12),
           RepaintBoundary(
             child: _BottomActions(
+              fg: fgAccent,
               sleepNotifier: sleepNotifier,
               onSleepTimer: onSleepTimer,
               onQueueOpen: onQueueOpen,
@@ -801,7 +808,8 @@ class _AlbumArt extends ConsumerWidget {
 
 class _SongInfoRow extends StatelessWidget {
   final Song song;
-  const _SongInfoRow({required this.song});
+  final Color fgAccent;
+  const _SongInfoRow({required this.song, required this.fgAccent});
 
   @override
   Widget build(BuildContext context) {
@@ -816,35 +824,35 @@ class _SongInfoRow extends StatelessWidget {
                 song.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: scheme.onSurface,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: scheme.onSurface,
+                      fontWeight: FontWeight.bold,
+                    ),
               ),
               Text(
                 song.artist,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    color: scheme.onSurface.withValues(alpha: 0.7),
-                    fontSize: 15),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: scheme.onSurface.withValues(alpha: 0.7),
+                    ),
               ),
             ],
           ),
         ),
-        if (song.suffix != null)
+          if (song.suffix != null)
           Container(
             padding:
                 const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
             decoration: BoxDecoration(
-              border: Border.all(color: scheme.outlineVariant),
+              color: fgAccent.withValues(alpha: 0.12),
+              border: Border.all(color: fgAccent.withValues(alpha: 0.4)),
               borderRadius: BorderRadius.circular(6),
             ),
             child: Text(
               song.suffix!.toUpperCase(),
               style: TextStyle(
-                  color: scheme.onSurfaceVariant,
+                  color: fgAccent,
                   fontSize: 10,
                   fontWeight: FontWeight.bold),
             ),
@@ -871,6 +879,9 @@ class _SeekSliderState extends ConsumerState<_SeekSlider> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final accent = ref.watch(currentAccentColorProvider);
+    final fg = foregroundAccentColor(accent, scheme.brightness)
+        ?? scheme.primary;
     final position = ref.watch(
       positionStreamProvider.select((s) => s.valueOrNull ?? Duration.zero),
     );
@@ -889,9 +900,9 @@ class _SeekSliderState extends ConsumerState<_SeekSlider> {
             thumbShape:
                 const RoundSliderThumbShape(enabledThumbRadius: 6),
             trackHeight: 3,
-            activeTrackColor: scheme.primary,
+            activeTrackColor: fg,
             inactiveTrackColor: scheme.surfaceContainerHighest,
-            thumbColor: scheme.primary,
+            thumbColor: fg,
             overlayShape: SliderComponentShape.noOverlay,
           ),
           child: Slider(
@@ -944,6 +955,9 @@ class _PlayControls extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
+    final accent = ref.watch(currentAccentColorProvider);
+    final fg = foregroundAccentColor(accent, scheme.brightness)
+        ?? scheme.primary;
     final isPlaying = ref.watch(
       playerStateStreamProvider.select((s) => s.valueOrNull?.playing ?? false),
     );
@@ -960,7 +974,7 @@ class _PlayControls extends ConsumerWidget {
         IconButton(
           icon: Icon(
             Icons.shuffle_rounded,
-            color: isShuffled ? scheme.primary : scheme.onSurface.withValues(alpha: 0.38),
+            color: isShuffled ? fg : scheme.onSurface.withValues(alpha: 0.38),
           ),
           iconSize: 26,
           onPressed: () =>
@@ -976,13 +990,13 @@ class _PlayControls extends ConsumerWidget {
           width: 68,
           height: 68,
           decoration: BoxDecoration(
-            color: scheme.surfaceContainerHighest,
+            color: fg,
             shape: BoxShape.circle,
           ),
           child: IconButton(
             icon: Icon(
               isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-              color: scheme.onSurface,
+              color: scheme.onPrimary,
             ),
             iconSize: 38,
             onPressed: () {
@@ -1002,7 +1016,7 @@ class _PlayControls extends ConsumerWidget {
             loopMode == LoopMode.one
                 ? Icons.repeat_one_rounded
                 : Icons.repeat_rounded,
-            color: loopMode != LoopMode.off ? scheme.primary : scheme.onSurface.withValues(alpha: 0.38),
+            color: loopMode != LoopMode.off ? fg : scheme.onSurface.withValues(alpha: 0.38),
           ),
           iconSize: 26,
           onPressed: () =>
@@ -1016,12 +1030,14 @@ class _PlayControls extends ConsumerWidget {
 // ---------------------------------------------------------------------------
 
 class _BottomActions extends StatelessWidget {
+  final Color fg;
   final ValueNotifier<Duration?> sleepNotifier;
   final VoidCallback onSleepTimer;
   final VoidCallback onQueueOpen;
   final VoidCallback onLyricsOpen;
 
   const _BottomActions({
+    required this.fg,
     required this.sleepNotifier,
     required this.onSleepTimer,
     required this.onQueueOpen,
@@ -1044,11 +1060,13 @@ class _BottomActions extends StatelessWidget {
           _ActionButton(
             icon: Icons.queue_music_rounded,
             label: 'Queue',
+            fg: fg,
             onTap: onQueueOpen,
           ),
           _ActionButton(
             icon: Icons.lyrics_outlined,
             label: 'Lyrics',
+            fg: fg,
             onTap: onLyricsOpen,
           ),
           // Only this button rebuilds every second — the rest of the row is stable
@@ -1058,6 +1076,7 @@ class _BottomActions extends StatelessWidget {
               icon: Icons.bedtime_rounded,
               label: remaining != null ? _fmtSleep(remaining) : 'Sleep',
               active: remaining != null,
+              fg: fg,
               onTap: onSleepTimer,
             ),
           ),
@@ -1077,17 +1096,20 @@ class _ActionButton extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
   final bool active;
+  final Color fg;
 
   const _ActionButton({
     required this.icon,
     required this.label,
     required this.onTap,
+    required this.fg,
     this.active = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final activeColor = fg;
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -1097,12 +1119,12 @@ class _ActionButton extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon, size: 24,
-                color: active ? scheme.primary : scheme.onSurface.withValues(alpha: 0.6)),
+                color: active ? activeColor : scheme.onSurface.withValues(alpha: 0.6)),
             const SizedBox(height: 4),
             Text(label,
                 style: TextStyle(
                     fontSize: 11,
-                    color: active ? scheme.primary : scheme.onSurface.withValues(alpha: 0.6))),
+                    color: active ? activeColor : scheme.onSurface.withValues(alpha: 0.6))),
           ],
         ),
       ),
@@ -1145,6 +1167,9 @@ class _VolumeSliderState extends ConsumerState<_VolumeSlider> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final accent = ref.watch(currentAccentColorProvider);
+    final fg = foregroundAccentColor(accent, scheme.brightness)
+        ?? scheme.primary;
     final handler = ref.read(audioHandlerNotifierProvider);
     return Row(
       children: [
@@ -1168,9 +1193,9 @@ class _VolumeSliderState extends ConsumerState<_VolumeSlider> {
             data: SliderTheme.of(context).copyWith(
               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
               trackHeight: 2,
-              activeTrackColor: scheme.primary,
+              activeTrackColor: fg,
               inactiveTrackColor: scheme.surfaceContainerHighest,
-              thumbColor: scheme.primary,
+              thumbColor: fg,
               overlayShape: SliderComponentShape.noOverlay,
             ),
             child: Slider(
@@ -1243,6 +1268,9 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final accent = ref.watch(currentAccentColorProvider);
+    final fg = foregroundAccentColor(accent, scheme.brightness)
+        ?? scheme.primary;
     final query = (
       songId: widget.song.id,
       artist: widget.song.artist,
@@ -1260,7 +1288,7 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
 
     return lyricsAsync.when(
       loading: () =>
-          Center(child: CircularProgressIndicator(color: scheme.primary)),
+          Center(child: CircularProgressIndicator(color: fg)),
       error: (_, __) => Center(
           child: Text('Could not load lyrics',
               style: TextStyle(color: scheme.onSurface.withValues(alpha: 0.7)))),
@@ -1274,9 +1302,8 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
                     color: scheme.onSurface.withValues(alpha: 0.38)),
                 const SizedBox(height: 12),
                 Text('No lyrics found',
-                    style: TextStyle(
-                        color: scheme.onSurface.withValues(alpha: 0.6),
-                        fontSize: 16)),
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: scheme.onSurface.withValues(alpha: 0.6))),
               ],
             ),
           );
@@ -1305,8 +1332,8 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
           child: Text(
             result.plain ?? '',
-            style: TextStyle(
-                color: scheme.onSurfaceVariant, fontSize: 15, height: 1.6),
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurfaceVariant, height: 1.6),
           ),
         );
       },
@@ -1368,8 +1395,7 @@ class _LyricLineState extends State<_LyricLine>
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Text(
             widget.text,
-            style: TextStyle(
-              fontSize: 18.0,
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
               fontWeight: t > 0.5 ? FontWeight.w700 : FontWeight.w400,
               color: Color.lerp(
                 scheme.onSurface.withValues(alpha: 0.28),

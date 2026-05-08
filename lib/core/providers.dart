@@ -5,7 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart'
-    show Color, HSLColor, ImageConfiguration, Size;
+    show Brightness, Color, HSLColor, ImageConfiguration, Size;
 import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
@@ -986,8 +986,33 @@ Color _processAccentColor(Color raw) {
       .toColor();
 }
 
+/// Derives a foreground accent from the album-art color for interactive
+/// elements (buttons, sliders, active icons). Same hue as the cover-art
+/// accent but shifted to contrast against the player background (which
+/// lerps the same accent toward black/white). Dark theme pushes lightness
+/// up for visibility; light theme pulls it down.
+/// Returns null when [accent] is null — caller falls back to scheme.primary.
+Color? foregroundAccentColor(Color? accent, Brightness brightness) {
+  if (accent == null) return null;
+  final hsl = HSLColor.fromColor(accent);
+  if (brightness == Brightness.dark) {
+    return hsl
+        .withLightness((hsl.lightness + 0.18).clamp(0.45, 0.80))
+        .withSaturation((hsl.saturation + 0.05).clamp(0.0, 1.0))
+        .toColor();
+  } else {
+    return hsl
+        .withLightness((hsl.lightness - 0.12).clamp(0.18, 0.48))
+        .toColor();
+  }
+}
+
+// Holds the last non-null accent so widgets don't flash scheme.primary between
+// songs while the next cover-art color resolves.
+final _lastAccentProvider = StateProvider<Color?>((ref) => null);
+
 // Accent color derived from the current song's album art.
-// Returns null until the color resolves, then updates all watchers.
+// Returns the last good accent during loading to avoid light-blue blinking.
 final currentAccentColorProvider = Provider<Color?>((ref) {
   final song = ref.watch(currentSongStreamProvider).valueOrNull;
   if (song == null) return null;
@@ -995,7 +1020,14 @@ final currentAccentColorProvider = Provider<Color?>((ref) {
       ?? song.externalCoverUrl
       ?? '';
   if (coverUrl.isEmpty) return null;
-  return ref.watch(dominantColorProvider(coverUrl)).valueOrNull;
+  final color = ref.watch(dominantColorProvider(coverUrl)).valueOrNull;
+  if (color != null) {
+    ref.read(_lastAccentProvider.notifier).state = color;
+    return color;
+  }
+  // During loading, keep the previous accent instead of falling back to
+  // scheme.primary — avoids the light-blue flash between tracks.
+  return ref.read(_lastAccentProvider);
 });
 
 // --- Helpers ---

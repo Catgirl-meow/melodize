@@ -16,7 +16,7 @@ on lossless playback, a polished Material 3 UI, and offline support.
 - **Deezer-powered discovery** — "Recommended for You" based on your listening history; "More like this" seeds from any artist; 30-second previews; full FLAC downloads via companion
 - **Deezer search** — search the Deezer catalog from the Search tab; play previews or save to server
 - **Library management** — sort songs/albums/artists by name, artist, recently added, downloaded; delete songs from server via companion
-- **Theme switching** — Dark / Light / System; theme-aware Now Playing screen with adaptive album-art gradient
+- **White & Black theme** — full light (white) / dark (black) theme with Material You dynamic color; theme-aware Now Playing screen with adaptive album-art gradient
 - **Sleep timer & scrobbling** — timer auto-stops playback; scrobbles submitted to server
 - **Android lock-screen controls** — MediaSession wired automatically
 - **Linux MPRIS2 + keyboard shortcuts** — exposes playback to `playerctl`, media keybindings; keyboard controls for playback, seek, shuffle, repeat, nav tabs

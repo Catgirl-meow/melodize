@@ -25,6 +25,9 @@ class QueueScreen extends ConsumerWidget {
         const [];
     final handler = ref.read(audioHandlerNotifierProvider);
     final scheme = Theme.of(context).colorScheme;
+    final accent = ref.watch(currentAccentColorProvider);
+    final fg = foregroundAccentColor(accent, scheme.brightness)
+        ?? scheme.primary;
 
     return Material(
       color: scheme.surface,
@@ -43,7 +46,7 @@ class QueueScreen extends ConsumerWidget {
               width: 36,
               height: 4,
               decoration: BoxDecoration(
-                color: scheme.onSurfaceVariant.withValues(alpha: 0.4),
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.38),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -113,7 +116,7 @@ class QueueScreen extends ConsumerWidget {
                               fontWeight: isCurrent
                                   ? FontWeight.bold
                                   : FontWeight.normal,
-                              color: isCurrent ? scheme.primary : null,
+                              color: isCurrent ? fg : null,
                             ),
                           ),
                           subtitle: Text(
@@ -128,7 +131,7 @@ class QueueScreen extends ConsumerWidget {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               if (isCurrent)
-                                _AnimatedEqualizer(color: scheme.primary),
+                                _AnimatedEqualizer(color: fg),
                               IconButton(
                                 icon: const Icon(Icons.close_rounded,
                                     size: 18),

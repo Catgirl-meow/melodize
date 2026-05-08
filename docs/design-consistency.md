@@ -26,7 +26,7 @@ Album / Artist / Playlist detail screens use a deliberate full-bleed cover-art `
 
 | ID | File | Issue |
 |----|------|-------|
-| C5 | `lib/shared/widgets/deezer_track_tile.dart:67,114` | Reimplements `ClipRRect` + `CachedNetworkImage` with radius **6** instead of using `CoverArtImage(externalUrl:)` (radius 8). Used in search results + artist page. ❌ |
+| C5 | `lib/shared/widgets/deezer_track_tile.dart:67,114` | Reimplements `ClipRRect` + `CachedNetworkImage` with radius **6** instead of using `CoverArtImage(externalUrl:)` (radius 8). Used in search results + artist page. ✅ |
 | C6 | `lib/shared/widgets/song_tile.dart:84` (`_QualityBadge`) | Radius **4** — different shape token vs everything else around it. Could use 6 or theme's small shape. ❌ |
 
 Fix C5 by routing the tile through `CoverArtImage` (it already supports `externalUrl`). Removes duplicate cache/placeholder logic too.
@@ -45,9 +45,9 @@ Fix C5 by routing the tile through `CoverArtImage` (it already supports `externa
 
 | ID | File:line |
 |----|-----------|
-| C10 | `lib/features/library/album_detail_screen.dart:41` |
-| C11 | `lib/features/library/playlist_detail_screen.dart:40` |
-| C12 | `lib/features/library/artist_detail_screen.dart` (gradient stack) |
+| C10 | `lib/features/library/album_detail_screen.dart:41` | ✅ |
+| C11 | `lib/features/library/playlist_detail_screen.dart:40` | ✅ |
+| C12 | `lib/features/library/artist_detail_screen.dart` (gradient stack) | ✅ already clean |
 
 Part of broader analyzer cleanup (~35 minor warnings repo-wide).
 

@@ -1122,7 +1122,7 @@ Widget? _deezerStatusIcon(
   }
   switch (status) {
     case DeezerArlStatus.valid:
-      return const Icon(Icons.check_circle_rounded, color: Colors.green);
+      return Icon(Icons.check_circle_rounded, color: scheme.primary);
     case DeezerArlStatus.invalid:
       return Icon(Icons.error_rounded, color: scheme.error);
     case DeezerArlStatus.notSet:
@@ -1170,7 +1170,7 @@ Widget? _companionStatusIcon(
   return statusAsync?.when(
         data: (ok) => Icon(
           ok ? Icons.check_circle_rounded : Icons.error_rounded,
-          color: ok ? Colors.green : scheme.error,
+          color: ok ? scheme.primary : scheme.error,
         ),
         loading: () => const SizedBox(
           width: 18,

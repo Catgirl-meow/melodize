@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/recommended_track.dart';
@@ -6,6 +5,7 @@ import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../utils/download_polling_mixin.dart';
 import '../utils/snack.dart';
+import '../widgets/cover_art_image.dart';
 
 /// Reusable tile for a Deezer track — play 30s preview, optionally save to
 /// Navidrome via the companion. Used in search results and the artist page.
@@ -61,22 +61,11 @@ class _DeezerTrackTileState extends ConsumerState<DeezerTrackTile>
     final scheme = Theme.of(context).colorScheme;
     final canSave = ref.watch(canDeleteFromServerProvider);
 
-    final Widget leading;
-    if (widget.track.coverUrl != null) {
-      leading = ClipRRect(
-        borderRadius: BorderRadius.circular(6),
-        child: CachedNetworkImage(
-          imageUrl: widget.track.coverUrl!,
-          width: 48,
-          height: 48,
-          fit: BoxFit.cover,
-          placeholder: (_, __) => _placeholder(scheme),
-          errorWidget: (_, __, ___) => _placeholder(scheme),
-        ),
-      );
-    } else {
-      leading = _placeholder(scheme);
-    }
+    final Widget leading = CoverArtImage(
+      coverArtId: null,
+      externalUrl: widget.track.coverUrl,
+      size: 48,
+    );
 
     return ListTile(
       leading: leading,
@@ -109,15 +98,4 @@ class _DeezerTrackTileState extends ConsumerState<DeezerTrackTile>
       ),
     );
   }
-
-  Widget _placeholder(ColorScheme scheme) => ClipRRect(
-        borderRadius: BorderRadius.circular(6),
-        child: Container(
-          width: 48,
-          height: 48,
-          color: scheme.surfaceContainerHigh,
-          child: Icon(Icons.music_note_rounded,
-              size: 20, color: scheme.onSurfaceVariant),
-        ),
-      );
 }

@@ -38,7 +38,7 @@ class AlbumDetailScreen extends ConsumerWidget {
                         end: Alignment.bottomCenter,
                         colors: [
                           Colors.transparent,
-                          scheme.surface.withOpacity(0.9),
+                          scheme.surface.withValues(alpha: 0.9),
                         ],
                       ),
                     ),
