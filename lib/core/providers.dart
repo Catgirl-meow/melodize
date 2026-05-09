@@ -475,8 +475,9 @@ final recommendationsProvider =
 });
 
 // Deezer catalog search — powers the "From Deezer" section in the search tab.
+// Not autoDispose: search tab lives in IndexedStack and never unmounts.
 final deezerSearchProvider =
-    FutureProvider.autoDispose<List<RecommendedTrack>>((ref) async {
+    FutureProvider<List<RecommendedTrack>>((ref) async {
   final query = ref.watch(searchQueryProvider);
   if (query.trim().length < 2) return [];
   return ref.watch(deezerClientProvider).search(query);

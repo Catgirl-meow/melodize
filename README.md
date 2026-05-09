@@ -16,7 +16,7 @@ on lossless playback, a polished Material 3 UI, and offline support.
 - **Deezer-powered discovery** — "Recommended for You" based on your listening history; "More like this" seeds from any artist; 30-second previews; full FLAC downloads via companion
 - **Deezer search** — search the Deezer catalog from the Search tab; play previews or save to server
 - **Library management** — sort songs/albums/artists by name, artist, recently added, downloaded; delete songs from server via companion
-- **White & Black theme** — full light (white) / dark (black) theme with Material You dynamic color; theme-aware Now Playing screen with adaptive album-art gradient
+- **White & Black theme** — full light (white) / dark (black) theme with Material You dynamic color; theme-aware Now Playing screen with adaptive album-art gradient and cover-art-driven accent colors for buttons, sliders, and progress bars
 - **Sleep timer & scrobbling** — timer auto-stops playback; scrobbles submitted to server
 - **Android lock-screen controls** — MediaSession wired automatically
 - **Linux MPRIS2 + keyboard shortcuts** — exposes playback to `playerctl`, media keybindings; keyboard controls for playback, seek, shuffle, repeat, nav tabs
@@ -175,7 +175,7 @@ Work is organized into three passes. Full detail in [`docs/three-pass-plan.md`](
 
 - **Pass 1** — Docs cleanup + dead-code removal ✅
 - **Pass 2** — Bug fixes and design polish (mostly complete — recommendations, connection errors, download reliability, companion freshness, auto-download idempotency, mini-player dock, menu triage)
-- **Pass 3** — Material 3 Expressive upgrade (pending — sliver app bars, motion tokens, grouped-settings visual pass, haptics)
+- **Pass 3** — Material 3 Expressive upgrade (partial — cover-art-driven player accent colors shipped; pending sliver app bars, motion tokens, grouped-settings visual pass, haptics)
 
 ---
 

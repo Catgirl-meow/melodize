@@ -62,10 +62,12 @@ class _ClassicMiniPlayer extends ConsumerWidget {
 
     return GestureDetector(
       onTap: onOpen,
-      child: DecoratedBox(
-        // Shadow shape fixed — blur hides the morph.
+      child: AnimatedContainer(
+        duration: _kClassicShapeDuration,
+        curve: _kClassicShapeCurve,
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(topRadius)),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.50),
@@ -74,17 +76,10 @@ class _ClassicMiniPlayer extends ConsumerWidget {
             ),
           ],
         ),
-        child: AnimatedContainer(
-          duration: _kClassicShapeDuration,
-          curve: _kClassicShapeCurve,
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.vertical(top: Radius.circular(topRadius)),
-          ),
-          child: Container(
-            height: 72,
-            color: bg,
-            child: Column(
+        child: Container(
+          height: 72,
+          color: bg,
+          child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 RepaintBoundary(child: _MiniPlayerProgress()),
@@ -133,7 +128,6 @@ class _ClassicMiniPlayer extends ConsumerWidget {
                 ),
               ],
             ),
-          ),
         ),
       ),
     );
