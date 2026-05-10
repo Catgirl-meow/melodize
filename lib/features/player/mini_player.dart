@@ -54,8 +54,8 @@ class _ClassicMiniPlayer extends ConsumerWidget {
     );
 
     final bg = accentColor != null
-        ? Color.lerp(accentColor!, scheme.surfaceContainerHigh, 0.55)!
-        : Color.lerp(scheme.surfaceContainerHigh, scheme.primaryContainer, 0.28)!;
+        ? Color.lerp(accentColor!, scheme.surface, 0.55)!
+        : Color.lerp(scheme.surface, scheme.primaryContainer, 0.28)!;
 
     final topRadius = isPlaying ? _kClassicPlayingTopRadius : _kClassicPausedTopRadius;
     final thumbRadius = isPlaying ? _kClassicThumbPlaying : _kClassicThumbPaused;
@@ -67,6 +67,7 @@ class _ClassicMiniPlayer extends ConsumerWidget {
         curve: _kClassicShapeCurve,
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
+          color: bg,
           borderRadius: BorderRadius.vertical(top: Radius.circular(topRadius)),
           boxShadow: [
             BoxShadow(

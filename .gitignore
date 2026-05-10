@@ -56,6 +56,9 @@ app.*.map.json
 .claude/
 .iflow/
 
+# Accidental project copy
+/melodize/
+
 # Flutter generated
 .flutter-plugins
 

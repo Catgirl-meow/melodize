@@ -59,6 +59,7 @@ class FloatingMiniPlayer extends ConsumerWidget {
             // in lockstep — a fixed-radius shadow drifted behind the card
             // during the transition and read as a second, misaligned shape.
             decoration: BoxDecoration(
+              color: bgColor,
               borderRadius: cardRadius,
               boxShadow: [
                 BoxShadow(

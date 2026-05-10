@@ -61,7 +61,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      body: SafeArea(
+      body: SafeArea(top: true, bottom: false,
         child: Column(
           children: [
             const OfflineBanner(),
@@ -116,7 +116,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                           keyboardDismissBehavior:
                               ScrollViewKeyboardDismissBehavior.onDrag,
                           padding:
-                              const EdgeInsets.only(bottom: 96),
+                              const EdgeInsets.only(bottom: 16),
                           children: [
                             if (results.songs.isNotEmpty)
                               _fadeIn(

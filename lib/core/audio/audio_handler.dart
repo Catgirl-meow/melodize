@@ -310,7 +310,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     );
     try {
       await player.setAudioSource(_playlistSource, initialIndex: 0, preload: false);
-      await player.play();
+      player.play().catchError((e) => debugPrint('loadQueue play: $e'));
     } catch (e) {
       debugPrint('loadQueue error: $e');
       return;

@@ -16,6 +16,7 @@ import '../player/now_playing_screen.dart';
 const _kDockHeight = 52.0;
 const _kDockBottom = 8.0;      // gap between dock bottom and safe area edge
 const _kDockHorizontal = 20.0;
+
 const _kDockRadius = 16.0;     // dock corners — matches mini player playing state
 // Pill is 38 px tall (dock 52 − 2×7 vertical padding). Radius = height/2 so it
 // renders as a true stadium, not a smaller rounded rectangle. Decoupled from
@@ -131,10 +132,13 @@ class _MainShellState extends ConsumerState<MainShell>
   Widget _buildFloatingDock(ColorScheme scheme, Color? accentColor) {
     final dockBg = AppTheme.dockBackground(accentColor, scheme);
 
+    // Outer horizontal padding creates spacing from screen edges. The internal
+    // nav items provide their own pill indicator padding.
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: _kDockHorizontal),
       child: DecoratedBox(
         decoration: BoxDecoration(
+          color: dockBg,
           borderRadius: BorderRadius.circular(_kDockRadius),
           boxShadow: [
             BoxShadow(
@@ -193,6 +197,12 @@ class _MainShellState extends ConsumerState<MainShell>
     final safeBottom = MediaQuery.of(context).viewPadding.bottom;
     final dockBodyPad =
         floatingNav ? _kDockHeight + _kDockBottom + safeBottom : 0.0;
+    // Counteract the Scaffold body shrink when the keyboard opens so the
+    // mini player doesn't fly up.  When keyboardInset >= dockBodyPad the
+    // mini player sits at the body bottom (right above the keyboard).
+    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
+    final miniPlayerBottom =
+        (dockBodyPad - keyboardInset).clamp(0.0, dockBodyPad);
 
     // Full clearance needed to position a snackbar above the dock + mini player.
     // Used for ref.listen callbacks whose BuildContext sits outside the inner
@@ -254,26 +264,26 @@ class _MainShellState extends ConsumerState<MainShell>
       });
     });
 
-    // Classic dock accent color
+    // Navigation bar background subtly adapts to accent color when available.
     final navBg = accentColor != null
         ? Color.lerp(accentColor, scheme.surface, 0.88)!
         : scheme.surface;
+
+    // Navigation indicator pill uses accent when available.
     final navIndicator = accentColor != null
         ? accentColor.withValues(alpha: 0.30)
         : null; // use theme default
 
     final scaffold = Scaffold(
       // extendBodyBehindAppBar: body fills behind the status bar so the
-      // ColoredBox(scheme.surface) covers that area with the same tint as the
-      // rest of the app — no visible black/tinted discontinuity around the
-      // camera cutout or Island.
-      // backgroundColor: transparent because the body's ColoredBox covers the
-      // entire screen; the scaffold background is never visible.
+      // Scaffold background covers the camera cutout area with the same tint
+      // as the rest of the app — no visible black/tinted discontinuity around
+      // the camera cutout or Island.
       // extendBody only in floating-dock mode so the classic-mode mini player
       // at bottom:0 sits correctly above the NavigationBar.
       extendBodyBehindAppBar: true,
       extendBody: floatingNav,
-      backgroundColor: Colors.transparent,
+      backgroundColor: scheme.surface,
       bottomNavigationBar: floatingNav
           ? null
           : NavigationBar(
@@ -309,23 +319,13 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
       body: Stack(
         children: [
-          // Surface fill — covers the full body including the status bar /
-          // camera cutout region so no window-background colour bleeds through.
-          // NowPlayingScreen's full-bleed gradient paints on top of this when
-          // the player is open.
-          ColoredBox(color: scheme.surface, child: const SizedBox.expand()),
-
-
-          // Content fills the full body with no shell-level bottom padding so
-          // the dock and mini player overlay actual content (giving the
-          // frosted-glass effect).  MediaQuery injection tells child scroll
-          // views how much bottom clearance to reserve via SafeArea / ListView
-          // default padding so the last item is always scrollable above the dock.
+          // No shell-level MediaQuery bottom padding — content scrolls behind
+          // the overlays so the 20px overlay margins reveal list items rather
+          // than a painted background dead zone.
           MediaQuery(
             data: MediaQuery.of(context).copyWith(
               padding: MediaQuery.of(context).padding.copyWith(
-                bottom: (floatingNav ? dockBodyPad : 0.0) +
-                    (hasSong ? 72.0 : 0.0),
+                bottom: MediaQuery.of(context).padding.bottom,
               ),
             ),
             child: IndexedStack(
@@ -339,13 +339,13 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
           ),
 
-          // Mini player — sits directly above the floating dock.
-          // Removed from the layer tree once invisible so its BackdropFilter
-          // doesn't add GPU compositing cost while the full player is open.
+          // Mini player — sits above the dock (floating mode) or NavigationBar
+          // (classic mode).  Uses viewInsets-adjusted positioning so the
+          // keyboard can't push it around when the Scaffold body resizes.
           Positioned(
             left: 0,
             right: 0,
-            bottom: dockBodyPad,
+            bottom: miniPlayerBottom,
             child: AnimatedBuilder(
               animation: _playerAnim,
               builder: (_, child) {

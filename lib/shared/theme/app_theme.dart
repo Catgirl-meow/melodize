@@ -6,13 +6,13 @@ class AppTheme {
   static Color dockBackground(Color? accentColor, ColorScheme scheme) {
     if (accentColor != null) {
       return scheme.brightness == Brightness.dark
-          ? Color.lerp(accentColor, const Color(0xFF1C1C1E), 0.58)!
+          ? Color.lerp(accentColor, scheme.surface, 0.58)!
               .withValues(alpha: 0.93)
           : Color.lerp(accentColor, Colors.white, 0.65)!
               .withValues(alpha: 0.94);
     }
     return scheme.brightness == Brightness.dark
-        ? const Color(0xFF2C2C2E).withValues(alpha: 0.93)
+        ? scheme.surface.withValues(alpha: 0.93)
         : scheme.surfaceContainerHighest.withValues(alpha: 0.94);
   }
 
