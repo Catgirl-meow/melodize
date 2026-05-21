@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../models/song.dart';
+import '../audio/shuffle_mode.dart';
 
 /// Registers an MPRIS2 D-Bus service under org.mpris.MediaPlayer2.melodize
 /// so that playerctl (and niri's XF86 keybindings) can control Melodize.
@@ -15,6 +16,8 @@ class LinuxMprisService {
   final AudioPlayer player;
   final Song? Function() getCurrentSong;
   final Future<void> Function() skipToPrevious;
+  final ShuffleMode Function() getShuffleMode;
+  final Stream<ShuffleMode> shuffleModeStream;
 
   DBusClient? _client;
   _MprisObject? _obj;
@@ -24,6 +27,8 @@ class LinuxMprisService {
     required this.player,
     required this.getCurrentSong,
     required this.skipToPrevious,
+    required this.getShuffleMode,
+    required this.shuffleModeStream,
   });
 
   Future<void> start() async {
@@ -34,6 +39,7 @@ class LinuxMprisService {
         player: player,
         getCurrentSong: getCurrentSong,
         skipToPrevious: skipToPrevious,
+        getShuffleMode: getShuffleMode,
       );
       await _client!.registerObject(_obj!);
       final reply = await _client!.requestName('org.mpris.MediaPlayer2.melodize');
@@ -41,7 +47,7 @@ class LinuxMprisService {
 
       _subs.add(player.playerStateStream.listen((_) => _obj!._onPlayerState()));
       _subs.add(player.sequenceStateStream.listen((_) => _obj!._onSequence()));
-      _subs.add(player.shuffleModeEnabledStream.listen((_) => _obj!._onShuffle()));
+      _subs.add(shuffleModeStream.listen((_) => _obj!._onShuffle()));
     } catch (e, st) {
       debugPrint('[MPRIS] start failed: $e\n$st');
     }
@@ -63,11 +69,13 @@ class _MprisObject extends DBusObject {
   final AudioPlayer player;
   final Song? Function() getCurrentSong;
   final Future<void> Function() skipToPrevious;
+  final ShuffleMode Function() getShuffleMode;
 
   _MprisObject({
     required this.player,
     required this.getCurrentSong,
     required this.skipToPrevious,
+    required this.getShuffleMode,
   }) : super(DBusObjectPath('/org/mpris/MediaPlayer2'));
 
   // --- Method dispatch -------------------------------------------------------
@@ -160,7 +168,7 @@ class _MprisObject extends DBusObject {
         'PlaybackStatus': DBusString(_playbackStatus),
         'LoopStatus': const DBusString('None'),
         'Rate': const DBusDouble(1.0),
-        'Shuffle': DBusBoolean(player.shuffleModeEnabled),
+        'Shuffle': DBusBoolean(getShuffleMode() != ShuffleMode.off),
         'Metadata': _metadataValue,
         'Volume': DBusDouble(player.volume),
         'Position': DBusInt64(player.position.inMicroseconds),
@@ -243,7 +251,7 @@ class _MprisObject extends DBusObject {
   void _onShuffle() {
     emitPropertiesChanged(
       'org.mpris.MediaPlayer2.Player',
-      changedProperties: {'Shuffle': DBusBoolean(player.shuffleModeEnabled)},
+      changedProperties: {'Shuffle': DBusBoolean(getShuffleMode() != ShuffleMode.off)},
     );
   }
 }

@@ -8,6 +8,9 @@ import 'package:just_audio/just_audio.dart';
 import '../models/song.dart';
 import '../api/subsonic_client.dart';
 import '../linux/linux_mpris.dart';
+import 'mix_transition_manager.dart';
+import 'shuffle_mode.dart';
+import 'smart_shuffle_engine.dart';
 
 // ---------------------------------------------------------------------------
 // Linux shuffle note:
@@ -19,9 +22,21 @@ import '../linux/linux_mpris.dart';
 // a different song than what mpv is actually decoding.
 //
 // Fix: on Linux we never call player.setShuffleModeEnabled.  Instead we
-// manage shuffle by physically reordering the ConcatenatingAudioSource
-// (setAudioSource with a re-built playlist).  A separate StreamController
-// carries the shuffle-on/off state so the UI still reflects it correctly.
+// manage shuffle in two ways:
+//
+//   • At loadQueue() time — re-order the song list before the single
+//     setAudioSource() call so the source is built in the correct order.
+//
+//   • On mid-playback toggle — use a virtual playback order (an in-memory
+//     index list) instead of re-building the source.  skipToNext and
+//     skipToPrevious navigate through the virtual order; a
+//     currentIndexStream handler corrects auto-advance when it lands on
+//     the wrong physical index.
+//
+// A StreamController carries the shuffle-on/off state for the UI.
+// The physical ConcatenatingAudioSource never changes during playback,
+// so the mpv playlist-move bug is never triggered and there is zero
+// UI freeze from setAudioSource rebuilds.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -41,6 +56,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   MelodizeAudioHandler() {
     _initStateSync();
     _initScrobbling();
+    _initCrossfade();
     if (Platform.isLinux) {
       HardwareKeyboard.instance.addHandler(_handleMediaKey);
     }
@@ -75,6 +91,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   SubsonicConfig? _config;
   String _streamQuality = 'lossless';
+  int _crossfadeSeconds = 0;
+  StreamSubscription<Duration>? _crossfadeSub;
   Timer? _sleepTimer;
   bool _nowPlayingReported = false;
   bool _scrobbled = false;
@@ -83,26 +101,69 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   // Shuffle playback history — tracks the actual sequence of songs heard so
   // that skipToPrevious goes back to the song the user really listened to last,
   // not just the adjacent position in the (fixed) shuffled order.
-  final _shuffleHistory = <int>[];  // original-sequence indices
+  final _shuffleHistory = <int>[];  // original-sequence indices (fallback)
   int? _lastHistoryIndex;
-  bool _seekingBack = false;
 
-  // Linux-only manual shuffle state (see file-top comment).
-  bool _linuxShuffled = false;
-  List<Song> _preShuffleOrder = [];   // queue order captured before shuffle
-  final _linuxShuffleCtrl = StreamController<bool>.broadcast();
+  // Unified shuffle state for both platforms.
+  ShuffleMode _shuffleMode = ShuffleMode.off;
+  final _shuffleModeCtrl = StreamController<ShuffleMode>.broadcast();
 
-  /// Shuffle-mode stream.  On Linux this is our own controller; on other
-  /// platforms it forwards just_audio's native stream.
-  Stream<bool> get shuffleStream => Platform.isLinux
-      ? _linuxShuffleCtrl.stream
-      : player.shuffleModeEnabledStream;
+  // Virtual ordering — maps playback-position → physical-source-index.
+  // When non-empty, skipToNext/skipToPrevious navigate through this order
+  // instead of the physical source order.  The physical source never changes,
+  // so toggling shuffle is instant (no setAudioSource rebuild).
+  List<int> _shuffleOrder = [];
+  int _shufflePos = 0;
 
-  // When true, currentSongStream holds its last non-null value instead of
-  // emitting null.  Set during setAudioSource calls on Linux so the
-  // now-playing screen doesn't flash/disappear while the source is reloading.
-  bool _holdSongNull = false;
-  Song? _lastSong;
+  // The full song list from the last loadQueue(), used to recalculate the
+  // virtual order when the user toggles shuffle mid-playback.
+  List<Song> _loadQueueSongs = [];
+
+  // Guards the currentIndexStream handler from interfering while we
+  // programmatically seek to a virtual-order position.
+  bool _seekingVirtual = false;
+
+  /// Expose current mode for external readers (e.g. MPRIS).
+  ShuffleMode get currentShuffleMode => _shuffleMode;
+
+  /// Optional companion analysis cache for real BPM/key data.
+  BpmCache? _companionBpmCache;
+
+  /// Transition mix manager (micro-level mixing).  Created externally with
+  /// the companion API client and wired in from main.dart.
+  TransitionMixManager? _mixManager;
+
+  /// Pending mix offsets: when a mix A→B is inserted, Song B should skip
+  /// [mixDuration] seconds (the portion already heard in the mix).
+  final _pendingMixOffsets = <String, double>{};
+
+  /// Set the companion analysis cache so smart shuffle uses real data.
+  void setCompanionAnalysis(BpmCache? cache) {
+    _companionBpmCache = cache;
+    // Also feed BPM data to the mix manager for early BPM-gap checks.
+    _mixManager?.companionBpm = cache?.bpm;
+  }
+
+  /// Wire in the transition mix manager for time-stretched crossfades.
+  void setTransitionMixManager(TransitionMixManager manager) {
+    _mixManager = manager;
+    if (_companionBpmCache != null) {
+      _mixManager!.companionBpm = _companionBpmCache!.bpm;
+    }
+    _mixManager!.onMixInserted = (songId, offset) {
+      _pendingMixOffsets[songId] = offset;
+    };
+  }
+
+  /// Restore a persisted shuffle mode without triggering reordering.
+  /// Use on app startup — the mode takes effect on the next [loadQueue].
+  void restoreShuffleMode(ShuffleMode mode) {
+    _shuffleMode = mode;
+    _shuffleModeCtrl.add(mode);
+  }
+
+  /// Shuffle-mode stream for the UI.
+  Stream<ShuffleMode> get shuffleModeStream => _shuffleModeCtrl.stream;
 
   // ---------------------------------------------------------------------------
   // MediaSession sync — keeps audio_service's playbackState + mediaItem current
@@ -121,19 +182,39 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       }
     });
 
-    // Track shuffle playback history so skipToPrevious works correctly.
+    // Track shuffle playback history and correct auto-advance in virtual orders.
     player.currentIndexStream.listen((index) {
-      if (_seekingBack || index == null) return;
-      if (!player.shuffleModeEnabled) {
+      if (_seekingVirtual || index == null) return;
+      if (_shuffleMode == ShuffleMode.off) {
         _shuffleHistory.clear();
         _lastHistoryIndex = null;
         return;
       }
-      if (_lastHistoryIndex != null && _lastHistoryIndex != index) {
-        _shuffleHistory.add(_lastHistoryIndex!);
-        if (_shuffleHistory.length > 100) _shuffleHistory.removeAt(0);
+      if (_shuffleOrder.isNotEmpty) {
+        final nextVp = _shufflePos + 1;
+        if (nextVp < _shuffleOrder.length) {
+          final expectedPhysical = _shuffleOrder[nextVp];
+          if (index != expectedPhysical) {
+            if (_seekingVirtual) return;
+            _seekingVirtual = true;
+            Future.microtask(() {
+              player.seek(Duration.zero, index: expectedPhysical)
+                .then((_) => _seekingVirtual = false);
+            });
+            return;
+          }
+        }
+        final vp = _shuffleOrder.indexOf(index);
+        if (vp >= 0) _shufflePos = vp;
+      } else {
+        if (_lastHistoryIndex != null && _lastHistoryIndex != index) {
+          _shuffleHistory.add(_lastHistoryIndex!);
+          if (_shuffleHistory.length > 100) _shuffleHistory.removeAt(0);
+        }
+        _lastHistoryIndex = index;
       }
-      _lastHistoryIndex = index;
+
+      _mixManager?.prefetch(index);
     });
 
     // Update MediaSession media item when the current song changes.
@@ -142,11 +223,30 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     // one event — prevents showing "new song title, position = 2:35 (old song)"
     // when mediaItem and playbackState update in separate microtasks.
     player.sequenceStateStream.listen((seqState) {
-      final song = seqState?.currentSource?.tag as Song?;
+      final rawTag = seqState?.currentSource?.tag;
+      Song? song = rawTag is Song ? rawTag : null;
+
+      if (song == null && rawTag is String && rawTag.startsWith('transition:')) {
+        song = _resolveTransitionDest(rawTag);
+      }
+
       if (song == null) {
         mediaItem.add(null);
         return;
       }
+
+      // Skip past the mix window when this real song just played in a mix WAV.
+      if (rawTag is Song && !_seekingVirtual) {
+        final skip = _pendingMixOffsets.remove(song.id);
+        if (skip != null && skip > 0) {
+          _seekingVirtual = true;
+          Future.microtask(() {
+            player.seek(Duration(milliseconds: (skip * 1000).round()))
+                .then((_) => _seekingVirtual = false);
+          });
+        }
+      }
+
       Uri? artUri;
       if (_config != null && (song.coverArt?.isNotEmpty ?? false)) {
         artUri = Uri.tryParse(
@@ -219,26 +319,79 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   void setStreamQuality(String quality) => _streamQuality = quality;
 
-  Song? get currentSong =>
-      player.sequenceState?.currentSource?.tag as Song?;
+  Song? get currentSong {
+    final tag = player.sequenceState?.currentSource?.tag;
+    if (tag is Song) return tag;
+    if (tag is String && tag.startsWith('transition:')) {
+      return _resolveTransitionDest(tag);
+    }
+    return null;
+  }
 
   Stream<Song?> get currentSongStream => player.sequenceStateStream.map((s) {
-        final song = s?.currentSource?.tag as Song?;
-        if (song != null) _lastSong = song;
-        // During setAudioSource reload (shuffle toggle), suppress the transient
-        // null so the now-playing screen doesn't blink away.
-        if (song == null && _holdSongNull) return _lastSong;
-        return song;
+        final tag = s?.currentSource?.tag;
+        if (tag is Song) return tag;
+        if (tag is String && tag.startsWith('transition:')) {
+          return _resolveTransitionDest(tag);
+        }
+        return null;
       });
+
+  /// Extract destination song from a transition mix tag (format "transition:A_ID→B_ID").
+  Song? _resolveTransitionDest(String tag) {
+    final parts = tag.split('→');
+    if (parts.length != 2) return null;
+    final destId = parts[1];
+    for (final s in _loadQueueSongs) {
+      if (s.id == destId) return s;
+    }
+    return null;
+  }
 
   // ---------------------------------------------------------------------------
   // Queue management
 
   Future<void> loadQueue(List<Song> songs, {int startIndex = 0}) async {
     if (_config == null || songs.isEmpty) return;
+    _mixManager?.detach();
     _shuffleHistory.clear();
     _lastHistoryIndex = null;
-    final idx = startIndex.clamp(0, songs.length - 1);
+    int idx = startIndex.clamp(0, songs.length - 1);
+
+    // Apply active shuffle mode by re-ordering the song list before building
+    // the audio source.  This runs before the platform branch so both Linux
+    // and mobile build the ordered queue in their single setAudioSource call.
+    if (_shuffleMode == ShuffleMode.shuffle && songs.length > 1) {
+      final current = songs[idx];
+      final shuffled = [...songs]..shuffle();
+      shuffled.remove(current);
+      shuffled.insert(idx.clamp(0, shuffled.length), current);
+      songs = shuffled;
+    } else if (_shuffleMode == ShuffleMode.smartShuffle && songs.length > 1) {
+      final cache = buildBpmCache(songs,
+          knownBpm: _companionBpmCache?.bpm,
+          knownKeys: _companionBpmCache?.key,
+          knownEnergy: _companionBpmCache?.energy,
+          knownSpectralCentroid: _companionBpmCache?.spectralCentroid);
+      songs = orderSongs(songs, idx, cache,
+          seed: DateTime.now().microsecondsSinceEpoch,
+          energyCurve: true);
+      idx = 0;
+    }
+
+    // Store the full song list for virtual-order recalculation on mid-playback
+    // toggle.  The source is already in the correct order — _shuffleOrder is
+    // kept empty (identity) so navigation follows physical source order.
+    _loadQueueSongs = List.from(songs);
+    _pendingMixOffsets.clear();
+    // Identity virtual order so skipToPrevious wraps to the last track
+    // instead of being stuck at position 0.
+    if (_shuffleMode != ShuffleMode.off && songs.length > 1) {
+      _shuffleOrder = List.generate(songs.length, (i) => i);
+    } else {
+      _shuffleOrder = [];
+    }
+    _shufflePos = 0;
 
     if (Platform.isLinux) {
       // On Linux (just_audio_media_kit / libmpv), insertAll() before the
@@ -271,9 +424,6 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         initialIndex = idx - start;
       }
 
-      _linuxShuffled = false;
-      _preShuffleOrder = [];
-      _linuxShuffleCtrl.add(false);
       _playlistSource = ConcatenatingAudioSource(
         children: initialSongs.map(_songToSource).toList(),
         useLazyPreparation: true,
@@ -285,6 +435,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         debugPrint('loadQueue error: $e');
         return;
       }
+      _mixManager?.attach(_playlistSource, songs);
+      _mixManager?.prefetch(initialIndex);
       // Append remaining songs after playback starts so mpv isn't choked
       // by a massive playlist during initial load.
       if (remainingSongs.isNotEmpty) {
@@ -301,48 +453,52 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       return;
     }
 
-    // Mobile: two-phase loading to avoid tap-lag from pre-preparing all sources.
-    // Phase 1: fresh playlist with only the selected song — single
-    // platform-channel call, no expensive clear() of the old queue.
+    // Mobile: build full queue upfront so the player starts at the correct index.
+    // preload:false registers the source tree structure without preparing audio
+    // decoders, so platform-channel latency is minimal — no tap-lag regression
+    // compared to the previous two-phase approach (which was buggy — insertAll
+    // at index 0 after playback starts doesn't reliably shift currentIndex).
     _playlistSource = ConcatenatingAudioSource(
-      children: [_songToSource(songs[idx])],
+      children: songs.map(_songToSource).toList(),
       useLazyPreparation: true,
     );
     try {
-      await player.setAudioSource(_playlistSource, initialIndex: 0, preload: false);
+      await player.setAudioSource(_playlistSource, initialIndex: idx, preload: false);
       player.play().catchError((e) => debugPrint('loadQueue play: $e'));
     } catch (e) {
       debugPrint('loadQueue error: $e');
-      return;
     }
-    // Phase 2: fill the rest of the queue while music plays.
-    // insertAll(0, …) shifts current track from index 0 → idx.
-    if (idx > 0) {
-      await _playlistSource.insertAll(
-          0, songs.sublist(0, idx).map(_songToSource).toList());
-    }
-    if (idx + 1 < songs.length) {
-      await _playlistSource.addAll(
-          songs.sublist(idx + 1).map(_songToSource).toList());
-    }
+    _mixManager?.attach(_playlistSource, songs);
+    _mixManager?.prefetch(idx);
   }
 
   Future<void> playNext(Song song) async {
     if (_config == null) return;
+    _mixManager?.sourceMutated();
     final idx =
         ((player.currentIndex ?? 0) + 1).clamp(0, _playlistSource.length);
     await _playlistSource.insert(idx, _songToSource(song));
+    _shuffleOrder = [];
+    _shufflePos = 0;
   }
 
   Future<void> addToQueue(Song song) async {
     if (_config == null) return;
+    _mixManager?.sourceMutated();
     await _playlistSource.add(_songToSource(song));
+    _shuffleOrder = []; // source changed, virtual order stale
+    _shufflePos = 0;
   }
 
-  Future<void> removeFromQueue(int index) =>
-      _playlistSource.removeAt(index);
+  Future<void> removeFromQueue(int index) async {
+    _mixManager?.sourceMutated();
+    await _playlistSource.removeAt(index);
+    _shuffleOrder = [];
+    _shufflePos = 0;
+  }
 
   Future<void> removeSongById(String songId) async {
+    _mixManager?.sourceMutated();
     for (int i = _playlistSource.length - 1; i >= 0; i--) {
       final child = _playlistSource[i];
       final tag = child is IndexedAudioSource ? child.tag : null;
@@ -350,10 +506,16 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         await _playlistSource.removeAt(i);
       }
     }
+    _shuffleOrder = [];
+    _shufflePos = 0;
   }
 
-  Future<void> reorderQueue(int oldIndex, int newIndex) =>
-      _playlistSource.move(oldIndex, newIndex);
+  Future<void> reorderQueue(int oldIndex, int newIndex) async {
+    _mixManager?.sourceMutated();
+    await _playlistSource.move(oldIndex, newIndex);
+    _shuffleOrder = [];
+    _shufflePos = 0;
+  }
 
   // ---------------------------------------------------------------------------
   // Playback controls — @override routes media button events from audio_service
@@ -371,7 +533,21 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   Future<void> seek(Duration position) => player.seek(position);
 
   @override
-  Future<void> skipToNext() => player.seekToNext();
+  Future<void> skipToNext() async {
+    if (_shuffleOrder.isNotEmpty) {
+      final nextVp = _shufflePos + 1;
+      if (nextVp < _shuffleOrder.length) {
+        _shufflePos = nextVp;
+        _seekingVirtual = true;
+        await player.seek(Duration.zero, index: _shuffleOrder[_shufflePos]);
+        _seekingVirtual = false;
+        return;
+      }
+      // End of virtual order — player continues in physical order.
+      _shuffleOrder = [];
+    }
+    await player.seekToNext();
+  }
 
   @override
   Future<void> skipToPrevious() async {
@@ -379,120 +555,165 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       await player.seek(Duration.zero);
       return;
     }
-    if (player.shuffleModeEnabled && _shuffleHistory.isNotEmpty) {
+    if (_shuffleOrder.isNotEmpty) {
+      // Navigate back in the virtual order.  At position 0, wrap to the
+      // last song (matches wrap-around behavior of most music players).
+      if (_shufflePos > 0) {
+        _shufflePos--;
+      } else {
+        _shufflePos = _shuffleOrder.length - 1;
+      }
+      _seekingVirtual = true;
+      await player.seek(Duration.zero, index: _shuffleOrder[_shufflePos]);
+      _seekingVirtual = false;
+      return;
+    } else if (_shuffleMode != ShuffleMode.off && _shuffleHistory.isNotEmpty) {
       final prevIndex = _shuffleHistory.removeLast();
-      _seekingBack = true;
+      _seekingVirtual = true;
       _lastHistoryIndex = prevIndex;
       try {
         await player.seek(Duration.zero, index: prevIndex);
       } finally {
-        _seekingBack = false;
+        _seekingVirtual = false;
       }
     } else {
       await player.seekToPrevious();
     }
   }
 
-  Future<void> skipToIndex(int index) =>
-      player.seek(Duration.zero, index: index);
-
-  Future<void> toggleShuffle() async {
-    if (Platform.isLinux) {
-      return _toggleShuffleLinux();
+  Future<void> skipToIndex(int index) async {
+    _seekingVirtual = true;
+    if (_shuffleOrder.isNotEmpty) {
+      final vp = _shuffleOrder.indexOf(index);
+      if (vp >= 0) {
+        _shufflePos = vp;
+      } else {
+        // Target is outside the virtual order — user broke out, clear it.
+        _shuffleOrder = [];
+        _shufflePos = 0;
+      }
     }
-    if (player.shuffleModeEnabled) {
-      // Turning shuffle off — clear history so back works normally.
-      _shuffleHistory.clear();
-      _lastHistoryIndex = null;
-    }
-    await player.setShuffleModeEnabled(!player.shuffleModeEnabled);
+    await player.seek(Duration.zero, index: index);
+    _seekingVirtual = false;
   }
 
-  // In-place shuffle/unshuffle that mutates only the *upcoming* portion of
-  // the queue, leaving the currently-playing source untouched. This avoids
-  // the setAudioSource() reload that previously muted audio, jumped to the
-  // beginning, and froze the UI for ~2 s while mpv reopened the audio device.
-  //
-  // Implementation note: just_audio_media_kit 2.1.0's concatenatingInsertAll
-  // has a bug where the loop body uses request.index against the growing
-  // playlist length, generating one bogus playlist-move per item after the
-  // first. Workaround: append items one-by-one via .add(), which routes each
-  // through concatenatingInsertAll(length, [single]) — no moves emitted.
-  Future<void> _toggleShuffleLinux() async {
-    final song = currentSong;
-    final currentIdx = player.currentIndex ?? 0;
-    final queueLen = _playlistSource.length;
-
-    Future<void> appendOneByOne(List<Song> songs) async {
-      for (final s in songs) {
-        await _playlistSource.add(_songToSource(s));
-      }
+  /// Calculate a virtual playback order for the current [shuffleMode].
+  ///
+  /// Reads the currently loaded songs from [_playlistSource] and builds an
+  /// index list that maps playback-position → physical-source-index.  When
+  /// the list is non-empty [skipToNext] and [skipToPrevious] follow it.
+  ///
+  /// Called on mid-playback toggle — no source rebuild, instant (~O(n)).
+  void _recalculateShuffleOrder() {
+    final loaded = _playlistSource.length;
+    if (loaded < 2 || _config == null) {
+      _shuffleOrder = [];
+      _shufflePos = 0;
+      return;
     }
 
-    if (_linuxShuffled) {
-      // Unshuffle: replace upcoming portion with the original tail.
-      _linuxShuffled = false;
-      _linuxShuffleCtrl.add(false);
+    switch (_shuffleMode) {
+      case ShuffleMode.off:
+        _shuffleOrder = [];
+        _shufflePos = 0;
+        break;
 
-      if (song == null || _preShuffleOrder.isEmpty) {
-        _preShuffleOrder = [];
-        return;
-      }
-
-      final origIdx = _preShuffleOrder.indexWhere((s) => s.id == song.id);
-      if (origIdx < 0) {
-        _preShuffleOrder = [];
-        return;
-      }
-
-      final tail = _preShuffleOrder.sublist(origIdx + 1);
-      try {
-        if (currentIdx + 1 < queueLen) {
-          await _playlistSource.removeRange(currentIdx + 1, queueLen);
+      case ShuffleMode.shuffle: {
+        final validIndices = <int>[];
+        for (int i = 0; i < loaded; i++) {
+          final child = _playlistSource[i];
+          if (child is IndexedAudioSource && child.tag is Song) {
+            validIndices.add(i);
+          }
         }
-        await appendOneByOne(tail);
-      } catch (e) {
-        debugPrint('unshuffle error: $e');
+        _shuffleOrder = validIndices..shuffle();
+        final currentIdx = player.currentIndex ?? 0;
+        final pos = _shuffleOrder.indexOf(currentIdx);
+        if (pos >= 0) _shuffleOrder.removeAt(pos);
+        _shuffleOrder.insert(0, currentIdx);
+        _shufflePos = 0;
+        break;
       }
-      _preShuffleOrder = [];
-    } else {
-      // Shuffle on: snapshot full order, then shuffle upcoming portion only.
-      _linuxShuffled = true;
-      _linuxShuffleCtrl.add(true);
 
-      final seqSongs = player.sequenceState?.effectiveSequence
-              .map((s) => s.tag)
-              .whereType<Song>()
-              .toList() ??
-          [];
-      _preShuffleOrder = seqSongs;
-
-      if (song == null) return;
-
-      final shuffled = seqSongs
-          .where((s) => s.id != song.id)
-          .toList()
-        ..shuffle();
-
-      try {
-        if (currentIdx + 1 < queueLen) {
-          await _playlistSource.removeRange(currentIdx + 1, queueLen);
+      case ShuffleMode.smartShuffle: {
+        if (_loadQueueSongs.length < 2) {
+          _shuffleOrder = [];
+          _shufflePos = 0;
+          break;
         }
-        await appendOneByOne(shuffled);
-      } catch (e) {
-        debugPrint('shuffle error: $e');
+        final cache = buildBpmCache(_loadQueueSongs,
+            knownBpm: _companionBpmCache?.bpm,
+            knownKeys: _companionBpmCache?.key,
+            knownEnergy: _companionBpmCache?.energy,
+            knownSpectralCentroid: _companionBpmCache?.spectralCentroid);
+        final ordered = orderSongs(
+          _loadQueueSongs, 0, cache,
+          seed: DateTime.now().microsecondsSinceEpoch,
+          energyCurve: true,
+        );
+
+        // Build virtual order: map each ordered song to its physical index.
+        final physMap = <String, int>{};
+        for (int i = 0; i < _playlistSource.length; i++) {
+          final child = _playlistSource[i];
+          if (child is IndexedAudioSource) {
+            final tag = child.tag;
+            if (tag is Song) physMap[tag.id] = i;
+          }
+        }
+        _shuffleOrder = ordered
+            .map((s) => physMap[s.id] ?? -1)
+            .where((i) => i >= 0)
+            .toList();
+        final currentIdx = player.currentIndex ?? 0;
+        _shufflePos = _shuffleOrder.indexOf(currentIdx);
+        if (_shufflePos < 0) _shufflePos = 0;
+        break;
       }
     }
+  }
+
+
+  // ---------------------------------------------------------------------------
+  // 3-state shuffle: Off → Shuffle → Smart Shuffle → Off
+
+  /// Cycle through Off → Shuffle → Smart Shuffle → Off.
+  /// Recalculates the virtual order — the current song keeps playing;
+  /// skipToNext will navigate to the first song in the new order.
+  Future<void> toggleShuffle() async {
+    switch (_shuffleMode) {
+      case ShuffleMode.off:
+        _shuffleMode = ShuffleMode.shuffle;
+      case ShuffleMode.shuffle:
+        _shuffleMode = ShuffleMode.smartShuffle;
+      case ShuffleMode.smartShuffle:
+        _shuffleMode = ShuffleMode.off;
+    }
+    _shuffleModeCtrl.add(_shuffleMode);
+    _shuffleHistory.clear();
+    _lastHistoryIndex = null;
+
+    _recalculateShuffleOrder();
+  }
+
+  /// Directly set the shuffle mode (used by playlist "Shuffle" button, etc.).
+  /// Also recalculates the virtual order.
+  void applyShuffleMode(ShuffleMode mode) {
+    _shuffleMode = mode;
+    _shuffleModeCtrl.add(mode);
+    _shuffleHistory.clear();
+    _lastHistoryIndex = null;
+
+    _recalculateShuffleOrder();
   }
 
   Future<void> resetPlaybackModes() async {
-    if (Platform.isLinux) {
-      _linuxShuffled = false;
-      _preShuffleOrder = [];
-      _linuxShuffleCtrl.add(false);
-    } else {
-      await player.setShuffleModeEnabled(false);
-    }
+    _shuffleMode = ShuffleMode.off;
+    _shuffleModeCtrl.add(ShuffleMode.off);
+    _shuffleOrder = [];
+    _shufflePos = 0;
+    _shuffleHistory.clear();
+    _lastHistoryIndex = null;
     await player.setLoopMode(LoopMode.off);
   }
 
@@ -564,6 +785,47 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   Stream<Song> get playHistoryStream => _historyController.stream;
 
   // ---------------------------------------------------------------------------
+  // Crossfade — volume ramp between tracks
+
+  void _initCrossfade() {
+    // Reset volume on song change.
+    player.sequenceStateStream.listen((_) {
+      if (_crossfadeSeconds > 0 && player.volume < 0.99) {
+        player.setVolume(1.0);
+      }
+    });
+
+    // Ramp volume down near the end of each song, offset by trailing silence.
+    _crossfadeSub = player.positionStream.listen((position) {
+      final dur = player.duration;
+      final secs = _crossfadeSeconds;
+      if (dur == null || secs <= 0 || !player.playing) return;
+
+      // Offset the effective duration by the current song's trailing silence
+      // so the fade doesn't start during silence at the end of the track.
+      final song = currentSong;
+      final tailOff = (song != null)
+          ? (_companionBpmCache?.tailSilenceFor(song) ?? 0.0).clamp(0.0, dur.inSeconds * 0.5)
+          : 0.0;
+      final effectiveDur = tailOff > 0
+          ? dur - Duration(milliseconds: (tailOff * 1000).round())
+          : dur;
+
+      final remain = effectiveDur - position;
+      if (remain.inSeconds > secs || remain <= Duration.zero) return;
+      // Linear fade: vol goes from 1.0 → 0.08 over the last N seconds.
+      final fadeProgress = remain.inMilliseconds / (secs * 1000.0);
+      player.setVolume((fadeProgress * 0.92 + 0.08).clamp(0.0, 1.0));
+    });
+  }
+
+  /// Set crossfade duration (0 = off).  Called when preferences change.
+  void setCrossfadeDuration(int seconds) {
+    _crossfadeSeconds = seconds.clamp(0, 12);
+    if (seconds <= 0) player.setVolume(1.0);
+  }
+
+  // ---------------------------------------------------------------------------
 
   AudioSource _songToSource(Song song) {
     final Uri uri;
@@ -591,6 +853,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       player: player,
       getCurrentSong: () => currentSong,
       skipToPrevious: skipToPrevious,
+      getShuffleMode: () => _shuffleMode,
+      shuffleModeStream: _shuffleModeCtrl.stream,
     );
     await _mpris!.start();
   }
@@ -649,7 +913,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         player.pause();
         return true;
       case LogicalKeyboardKey.mediaTrackNext:
-        player.seekToNext();
+        skipToNext();
         return true;
       case LogicalKeyboardKey.mediaTrackPrevious:
         skipToPrevious();
@@ -668,7 +932,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         player.playing ? player.pause() : player.play();
         return true;
       case LogicalKeyboardKey.keyN:
-        player.seekToNext();
+        skipToNext();
         return true;
       case LogicalKeyboardKey.keyP:
         skipToPrevious();
@@ -707,10 +971,16 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     if (Platform.isLinux) {
       HardwareKeyboard.instance.removeHandler(_handleMediaKey);
       _mpris?.dispose();
-      _linuxShuffleCtrl.close();
     }
+    _shuffleModeCtrl.close();
+    _shuffleOrder = [];
+    _shufflePos = 0;
+    _loadQueueSongs = const [];
+    _pendingMixOffsets.clear();
+    _crossfadeSub?.cancel();
     _sleepTimer?.cancel();
     _historyController.close();
+    _mixManager?.detach();
     player.dispose();
   }
 }

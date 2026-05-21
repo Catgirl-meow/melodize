@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/playlist.dart';
+import '../../core/audio/shuffle_mode.dart';
 import '../../core/providers.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/song_tile.dart';
@@ -86,8 +87,8 @@ class PlaylistDetailScreen extends ConsumerWidget {
                         final h =
                             ref.read(audioHandlerNotifierProvider);
                         if (h == null) return;
+                        h.applyShuffleMode(ShuffleMode.shuffle);
                         await h.loadQueue(songs);
-                        await h.player.setShuffleModeEnabled(true);
                         if (context.mounted) Navigator.pop(context);
                       },
                     ),

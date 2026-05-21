@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
+import '../../core/audio/shuffle_mode.dart';
 import '../../shared/utils/download_polling_mixin.dart';
 import '../../shared/utils/snack.dart';
 import '../../shared/utils/song_actions.dart';
@@ -961,8 +962,8 @@ class _PlayControls extends ConsumerWidget {
     final isPlaying = ref.watch(
       playerStateStreamProvider.select((s) => s.valueOrNull?.playing ?? false),
     );
-    final isShuffled = ref.watch(
-      shuffleModeStreamProvider.select((s) => s.valueOrNull ?? false),
+    final shuffleMode = ref.watch(
+      shuffleModeStreamProvider.select((s) => s.valueOrNull ?? ShuffleMode.off),
     );
     final loopMode = ref.watch(
       loopModeStreamProvider.select((s) => s.valueOrNull ?? LoopMode.off),
@@ -973,12 +974,25 @@ class _PlayControls extends ConsumerWidget {
       children: [
         IconButton(
           icon: Icon(
-            Icons.shuffle_rounded,
-            color: isShuffled ? fg : scheme.onSurface.withValues(alpha: 0.38),
+            shuffleMode == ShuffleMode.smartShuffle
+                ? Icons.auto_awesome_rounded
+                : Icons.shuffle_rounded,
+            color: shuffleMode != ShuffleMode.off
+                ? fg
+                : scheme.onSurface.withValues(alpha: 0.38),
           ),
           iconSize: 26,
-          onPressed: () =>
-              ref.read(audioHandlerNotifierProvider)?.toggleShuffle(),
+          onPressed: () async {
+            final h = ref.read(audioHandlerNotifierProvider);
+            if (h == null) return;
+            await h.toggleShuffle();
+            // Persist the new mode.
+            final prefsNotifier = ref.read(preferencesNotifierProvider.notifier);
+            final current = ref.read(preferencesNotifierProvider);
+            await prefsNotifier.update(current.copyWith(
+              shuffleMode: h.currentShuffleMode.name,
+            ));
+          },
         ),
         IconButton(
           icon: Icon(Icons.skip_previous_rounded, color: scheme.onSurface),

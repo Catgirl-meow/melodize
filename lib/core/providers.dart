@@ -17,7 +17,10 @@ import 'api/deezer_client.dart';
 import 'api/lrclib_client.dart';
 import 'models/recommended_track.dart';
 import 'models/recommendations_state.dart';
+import 'audio/shuffle_mode.dart';
 import 'audio/audio_handler.dart';
+import 'audio/smart_shuffle_engine.dart';
+import 'api/companion_audio_api.dart';
 import 'db/database.dart';
 import 'models/app_preferences.dart';
 import 'models/song.dart';
@@ -101,6 +104,70 @@ final companionAvailableProvider = StreamProvider<bool>((ref) async* {
 
 final canDeleteFromServerProvider = Provider<bool>((ref) =>
     ref.watch(companionAvailableProvider).valueOrNull ?? false);
+
+/// Companion audio analysis API client — built from the server prefs.
+final companionAudioApiProvider = Provider<CompanionAudioApi?>((ref) {
+  final prefs = ref.watch(preferencesNotifierProvider);
+  if (!prefs.hasCompanion) return null;
+  return CompanionAudioApi(
+    baseUrl: prefs.companionUrl,
+    apiKey: prefs.companionApiKey,
+  );
+});
+
+/// Fetches all analysis results from the companion server.
+/// Returns a [BpmCache] that the smart shuffle engine uses for ordering.
+final companionAnalysisProvider = FutureProvider<BpmCache?>((ref) async {
+  final api = ref.watch(companionAudioApiProvider);
+  final available = ref.watch(companionAvailableProvider).valueOrNull ?? false;
+  if (api == null || !available) return null;
+
+  final results = await api.getAllResults();
+  if (results.isEmpty) return null;
+
+  final bpm = <String, int>{};
+  final key = <String, String>{};
+  final isEstimated = <String, bool>{};
+  final tailSilence = <String, double>{};
+  final energy = <String, double>{};
+  final spectralCentroid = <String, double>{};
+
+  for (final r in results) {
+    final songId = r['song_id'] as String?;
+    final bpmVal = r['bpm'];
+    final keyVal = r['key'] as String?;
+    if (songId == null) continue;
+
+    if (bpmVal is num && bpmVal > 0) {
+      bpm[songId] = bpmVal.round();
+      isEstimated[songId] = false;
+    }
+    if (keyVal != null && keyVal.isNotEmpty) {
+      key[songId] = keyVal;
+    }
+    final tailVal = r['tail_silence'];
+    if (tailVal is num && tailVal > 0) {
+      tailSilence[songId] = tailVal.toDouble();
+    }
+    final energyVal = r['energy'];
+    if (energyVal is num && energyVal > 0) {
+      energy[songId] = energyVal.toDouble();
+    }
+    final centroidVal = r['spectral_centroid'];
+    if (centroidVal is num && centroidVal > 0) {
+      spectralCentroid[songId] = centroidVal.toDouble();
+    }
+  }
+
+  return BpmCache(
+    bpm: bpm,
+    key: key,
+    isEstimated: isEstimated,
+    tailSilence: tailSilence,
+    energy: energy,
+    spectralCentroid: spectralCentroid,
+  );
+});
 
 /// Three-state readable status for the user's Deezer ARL cookie.
 ///
@@ -201,10 +268,10 @@ final sequenceStateStreamProvider = StreamProvider<SequenceState?>((ref) {
   return handler.player.sequenceStateStream;
 });
 
-final shuffleModeStreamProvider = StreamProvider<bool>((ref) {
+final shuffleModeStreamProvider = StreamProvider<ShuffleMode>((ref) {
   final handler = ref.watch(audioHandlerNotifierProvider);
-  if (handler == null) return Stream.value(false);
-  return handler.shuffleStream;
+  if (handler == null) return Stream.value(ShuffleMode.off);
+  return handler.shuffleModeStream;
 });
 
 final loopModeStreamProvider = StreamProvider<LoopMode>((ref) {
@@ -468,6 +535,8 @@ final recommendationsProvider =
         durationSeconds: t.durationSeconds,
         previewUrl: t.previewUrl,
         coverUrl: t.coverUrl,
+        bpm: t.bpm,
+        genre: t.genre,
       ),
   ];
 

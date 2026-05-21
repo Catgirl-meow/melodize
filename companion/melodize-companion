@@ -15,7 +15,11 @@ Config: /etc/melodize-companion/config.json
 
 import hashlib, hmac, http.server, json, logging, os, pathlib, re
 import sqlite3, subprocess, sys, threading, time, urllib.parse, urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
+
+from analysis_cache import AnalysisCache
+from audio_analysis import analyze_song, generate_transition, analysis_jobs, estimate_mix_quality
 
 # ---------------------------------------------------------------------------
 CONFIG_PATH = "/etc/melodize-companion/config.json"
@@ -189,9 +193,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         p = self.path.split("?")[0]
         if p == "/health":
-            self._send(200, {"status": "ok", "version": "1.1.0"})
+            self._send(200, {"status": "ok", "version": "1.2.0"})
             return
 
+        # Download job status
         m = re.match(r"^/api/songs/download/([A-Za-z0-9_-]+)$", p)
         if m:
             if not self._auth():
@@ -203,6 +208,79 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._send(404, {"error": "job not found"})
             else:
                 self._send(200, job)
+            return
+
+        # Mix transition job status
+        m = re.match(r"^/api/audio/mix-transition/([A-Za-z0-9_-]+)$", p)
+        if m:
+            if not self._auth():
+                return
+            jid = m.group(1)
+            with _jobs_lock:
+                job = _jobs.get(jid)
+            if not job:
+                self._send(404, {"error": "mix job not found"})
+            else:
+                self._send(200, job)
+            return
+
+        # Audio analysis — poll batch job
+        m = re.match(r"^/api/audio/analyze-batch/([A-Za-z0-9_-]+)$", p)
+        if m:
+            if not self._auth():
+                return
+            jid = m.group(1)
+            job = analysis_jobs.get_job(jid)
+            if not job:
+                self._send(404, {"error": "analysis job not found"})
+            else:
+                # Strip internal song list from response
+                resp = {k: v for k, v in job.items() if k != "songs"}
+                self._send(200, resp)
+            return
+
+        # Audio analysis — get all cached results
+        if p == "/api/audio/analysis":
+            if not self._auth():
+                return
+            results = self.server.analysis_cache.get_all_results()
+            self._send(200, {"results": results})
+            return
+
+        # Audio analysis — get single cached result
+        m = re.match(r"^/api/audio/analysis/([^/?]+)$", p)
+        if m:
+            if not self._auth():
+                return
+            song_id = m.group(1)
+            result = self.server.analysis_cache.get(song_id)
+            if not result:
+                self._send(404, {"error": "analysis not found"})
+            else:
+                self._send(200, result)
+            return
+
+        # Serve cached transition WAV
+        m = re.match(r"^/api/audio/transition/([A-Za-z0-9_-]+\.wav)$", p)
+        if m:
+            if not self._auth():
+                return
+            name = m.group(1)
+            mix_dir = pathlib.Path(
+                self.server.cfg.get("mix_cache_dir",
+                                    "/var/lib/melodize-companion/mix_cache")
+            )
+            wav_path = mix_dir / name
+            if not wav_path.is_file():
+                self._send(404, {"error": "transition not found"})
+                return
+            data = wav_path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/wav")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            self.wfile.write(data)
             return
 
         self._send(404, {"error": "not found"})
@@ -251,6 +329,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         if p == "/api/songs/download":
             self._handle_download_start()
+        elif p == "/api/audio/analyze-batch":
+            self._handle_analyze_batch()
+        elif p == "/api/audio/mix-transition":
+            self._handle_mix_transition()
         else:
             self._send(404, {"error": "not found"})
 
@@ -278,12 +360,261 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         t.start()
         self._send(202, {"job_id": job_id, "status": "queued"})
 
+    # --- Audio analysis ---
+
+    def _handle_analyze_batch(self):
+        """Start a batch analysis of the song library."""
+        import secrets
+
+        try:
+            body = self._body()
+        except (json.JSONDecodeError, ValueError):
+            self._send(400, {"error": "invalid JSON body"})
+            return
+
+        # Build the list of songs to analyze from Navidrome DB
+        song_ids = body.get("song_ids")  # optional subset
+        conn = sqlite3.connect(self.server.cfg["navidrome_db"], check_same_thread=False)
+        try:
+            if song_ids:
+                placeholders = ",".join("?" for _ in song_ids)
+                cur = conn.execute(
+                    f"SELECT id, path FROM media_file WHERE id IN ({placeholders})",
+                    song_ids,
+                )
+            else:
+                cur = conn.execute("SELECT id, path FROM media_file")
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+
+        music_dir = self.server.cfg["music_dir"]
+        songs_to_check = []
+        for song_id, rel_path in rows:
+            full_path = os.path.join(music_dir, rel_path) if not os.path.isabs(rel_path) else rel_path
+            try:
+                st = os.stat(full_path)
+                songs_to_check.append({
+                    "song_id": song_id,
+                    "file_path": full_path,
+                    "mtime": st.st_mtime,
+                    "size": st.st_size,
+                })
+            except OSError:
+                log.warning("Cannot stat %s — skipping", full_path)
+
+        # Filter to stale songs only
+        cache = self.server.analysis_cache
+        stale = cache.get_all_stale(songs_to_check)
+        skipped = len(songs_to_check) - len(stale)
+
+        if not stale:
+            # Everything is already cached — return all results
+            all_results = cache.get_all_results()
+            self._send(200, {
+                "status": "done",
+                "total": len(songs_to_check),
+                "analyzed": len(all_results),
+                "skipped": skipped,
+                "failed": 0,
+                "results": all_results,
+            })
+            return
+
+        job_id = f"ana_{secrets.token_urlsafe(8)}"
+        # Store full song list for progress tracking
+        analysis_jobs.create_job(job_id, songs_to_check)
+        analysis_jobs.update_job(job_id, status="in_progress", skipped=skipped)
+
+        # Run analysis in background via the server's thread pool
+        executor = self.server.executor
+        executor.submit(self._run_analysis_batch, job_id, stale, cache)
+
+        self._send(202, {
+            "job_id": job_id,
+            "status": "in_progress",
+            "total": len(songs_to_check),
+            "analyzed": 0,
+            "skipped": skipped,
+            "failed": 0,
+        })
+
+    def _run_analysis_batch(self, job_id: str, stale: list[dict], cache: AnalysisCache):
+        """Analyze stale songs in the background."""
+        analyzed = 0
+        failed = 0
+        for song in stale:
+            try:
+                result = analyze_song(song["file_path"])
+                if result:
+                    cache.set(
+                        song["song_id"], song["file_path"],
+                        song["mtime"], song["size"], result,
+                    )
+                    analysis_jobs.add_result(job_id, {
+                        "song_id": song["song_id"],
+                        **result,
+                    })
+                    analyzed += 1
+                else:
+                    failed += 1
+                    # Still mark as analyzed so we don't retry on next batch
+                    cache.set(
+                        song["song_id"], song["file_path"],
+                        song["mtime"], song["size"],
+                        {"bpm": None, "key": None, "energy": None},
+                    )
+            except Exception as e:
+                log.error("Analysis error for %s: %s", song["file_path"], e)
+                failed += 1
+
+            analysis_jobs.update_job(
+                job_id, analyzed=analyzed, failed=failed,
+            )
+
+        analysis_jobs.update_job(job_id, status="done")
+        log.info(
+            "Batch analysis %s done: %d analyzed, %d failed",
+            job_id, analyzed, failed,
+        )
+
+    # --- Transition mixing ---
+
+    def _handle_mix_transition(self):
+        """Generate a time-stretched crossfade mix between two songs."""
+        import secrets
+
+        try:
+            body = self._body()
+        except (json.JSONDecodeError, ValueError):
+            self._send(400, {"error": "invalid JSON body"})
+            return
+
+        song_a_id = body.get("song_a_id", "").strip()
+        song_b_id = body.get("song_b_id", "").strip()
+        if not song_a_id or not song_b_id:
+            self._send(400, {"error": "song_a_id and song_b_id are required"})
+            return
+
+        mix_duration = float(body.get("mix_duration", 10))
+
+        # Check cache first
+        mix_dir = pathlib.Path(
+            self.server.cfg.get("mix_cache_dir",
+                                "/var/lib/melodize-companion/mix_cache")
+        )
+        mix_dir.mkdir(parents=True, exist_ok=True)
+        mix_filename = f"{song_a_id}__{song_b_id}.wav"
+        mix_path = mix_dir / mix_filename
+
+        if mix_path.is_file():
+            # Cached — return immediately
+            self._send(200, {
+                "status": "ok",
+                "cached": True,
+                "transition_id": mix_filename.replace(".wav", ""),
+                "url": f"/api/audio/transition/{mix_filename}",
+            })
+            return
+
+        # Look up file paths from Navidrome DB
+        conn = sqlite3.connect(self.server.cfg["navidrome_db"], check_same_thread=False)
+        try:
+            cur = conn.execute(
+                "SELECT id, path FROM media_file WHERE id IN (?, ?)",
+                (song_a_id, song_b_id),
+            )
+            paths = {row[0]: row[1] for row in cur.fetchall()}
+        finally:
+            conn.close()
+
+        music_dir = self.server.cfg["music_dir"]
+        path_a = paths.get(song_a_id)
+        path_b = paths.get(song_b_id)
+        if not path_a or not path_b:
+            self._send(404, {"error": "song not found in database"})
+            return
+
+        full_a = os.path.join(music_dir, path_a) if not os.path.isabs(path_a) else path_a
+        full_b = os.path.join(music_dir, path_b) if not os.path.isabs(path_b) else path_b
+
+        # Look up BPM from analysis cache
+        cache_a = self.server.analysis_cache.get(song_a_id)
+        cache_b = self.server.analysis_cache.get(song_b_id)
+        bpm_a = float(cache_a["bpm"]) if cache_a and cache_a.get("bpm") else 120.0
+        bpm_b = float(cache_b["bpm"]) if cache_b and cache_b.get("bpm") else 120.0
+        tail_a = float(cache_a["tail_silence"]) if cache_a and cache_a.get("tail_silence") else 0.0
+        key_a = str(cache_a["key"]) if cache_a and cache_a.get("key") else None
+        key_b = str(cache_b["key"]) if cache_b and cache_b.get("key") else None
+
+        # Estimate mix quality for the response.
+        quality = estimate_mix_quality(bpm_a, bpm_b, key_a=key_a, key_b=key_b)
+
+        # Generate mix in executor to avoid blocking
+        job_id = f"mix_{secrets.token_urlsafe(8)}"
+        with _jobs_lock:
+            _jobs[job_id] = {
+                "status": "mixing",
+                "song_a": song_a_id,
+                "song_b": song_b_id,
+                "url": None,
+                "quality": quality,
+            }
+
+        executor = self.server.executor
+        executor.submit(
+            self._run_mix_job,
+            job_id, full_a, full_b, bpm_a, bpm_b, mix_duration, mix_path,
+            tail_a,
+        )
+
+        self._send(202, {
+            "job_id": job_id,
+            "status": "mixing",
+            "quality": quality,
+        })
+
+    def _run_mix_job(self, job_id, path_a, path_b, bpm_a, bpm_b,
+                     mix_duration, mix_path, tail_silence_a=0.0):
+        """Generate transition mix in background."""
+        try:
+            wav_bytes = generate_transition(
+                path_a, path_b, bpm_a, bpm_b, mix_duration,
+                tail_silence_a=tail_silence_a,
+            )
+            if wav_bytes:
+                mix_path.write_bytes(wav_bytes)
+                mix_filename = mix_path.name
+                with _jobs_lock:
+                    _jobs[job_id] = {
+                        "status": "done",
+                        "url": f"/api/audio/transition/{mix_filename}",
+                        "transition_id": mix_filename.replace(".wav", ""),
+                    }
+                log.info("Transition mix %s done", job_id)
+            else:
+                with _jobs_lock:
+                    _jobs[job_id] = {
+                        "status": "fallback",
+                        "reason": "bpm_gap_too_large or generation failed",
+                        "fallback_method": "crossfade",
+                    }
+        except Exception as e:
+            log.exception("Mix job %s failed", job_id)
+            with _jobs_lock:
+                _jobs[job_id] = {"status": "error", "error": str(e)}
+
 
 # ---------------------------------------------------------------------------
 
 class _Server(http.server.HTTPServer):
     def __init__(self, addr, handler, cfg):
         self.cfg = cfg
+        self.executor = ThreadPoolExecutor(max_workers=cfg.get("analysis_threads", 2))
+        self.analysis_cache = AnalysisCache(
+            cfg.get("analysis_cache_path",
+                    "/var/lib/melodize-companion/analysis_cache.db")
+        )
         super().__init__(addr, handler)
 
 

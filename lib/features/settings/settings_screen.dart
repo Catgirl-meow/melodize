@@ -150,6 +150,36 @@ class SettingsScreen extends ConsumerWidget {
                 );
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.swap_horiz_rounded),
+              title: const Text('Crossfade'),
+              subtitle: Row(
+                children: [
+                  Text(
+                    prefs.crossfadeSeconds > 0
+                        ? '${prefs.crossfadeSeconds}s'
+                        : 'Off',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  Expanded(
+                    child: Slider(
+                      value: prefs.crossfadeSeconds.toDouble(),
+                      min: 0,
+                      max: 8,
+                      divisions: 8,
+                      label: prefs.crossfadeSeconds > 0
+                          ? '${prefs.crossfadeSeconds}s'
+                          : 'Off',
+                      onChanged: (value) {
+                        ref.read(preferencesNotifierProvider.notifier).update(
+                              prefs.copyWith(crossfadeSeconds: value.round()),
+                            );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
         const _SectionHeader('Downloads'),

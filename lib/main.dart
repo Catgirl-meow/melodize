@@ -8,7 +8,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'core/utils/platform_dirs.dart';
+import 'core/audio/shuffle_mode.dart';
 import 'core/audio/audio_handler.dart';
+import 'core/audio/mix_transition_manager.dart';
 import 'core/db/database.dart';
 import 'core/models/song.dart';
 import 'core/providers.dart';
@@ -145,6 +147,23 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
   void initState() {
     super.initState();
     final handler = ref.read(audioHandlerNotifierProvider);
+
+    // Restore persisted shuffle mode and crossfade on startup.
+    Future.microtask(() {
+      if (!mounted) return;
+      final prefs = ref.read(preferencesNotifierProvider);
+      final h = ref.read(audioHandlerNotifierProvider);
+      if (h == null) return;
+      if (prefs.shuffleMode == 'shuffle') {
+        h.restoreShuffleMode(ShuffleMode.shuffle);
+      } else if (prefs.shuffleMode == 'smartShuffle') {
+        h.restoreShuffleMode(ShuffleMode.smartShuffle);
+      }
+      if (prefs.crossfadeSeconds > 0) {
+        h.setCrossfadeDuration(prefs.crossfadeSeconds);
+      }
+    });
+
     _historySubscription = handler?.playHistoryStream.listen((song) async {
       if (!mounted) return;
       // Save play history to DB
@@ -213,6 +232,22 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
   Widget build(BuildContext context) {
     final configAsync = ref.watch(serverConfigProvider);
 
+    // Sync companion analysis data to audio handler for smart shuffle.
+    ref.listen(companionAnalysisProvider, (_, next) {
+      final h = ref.read(audioHandlerNotifierProvider);
+      h?.setCompanionAnalysis(next.valueOrNull);
+    });
+
+    // Wire transition mix manager when companion API is available.
+    // Uses listen-once pattern: the provider is stable after login.
+    ref.listen(companionAudioApiProvider, (_, next) {
+      final h = ref.read(audioHandlerNotifierProvider);
+      if (next != null && h != null) {
+        final manager = TransitionMixManager(api: next);
+        h.setTransitionMixManager(manager);
+      }
+    });
+
     // Sync server config to audio handler
     ref.listen(serverConfigProvider, (_, next) {
       next.whenData((config) {
@@ -222,10 +257,11 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
       });
     });
 
-    // Sync stream quality; re-download all on download quality change;
-    // start full-library download when autoDownload is switched to 'all'.
+    // Sync stream quality and crossfade; re-download all on download quality
+    // change; start full-library download when autoDownload is switched to 'all'.
     ref.listen(preferencesNotifierProvider, (prev, next) {
       ref.read(audioHandlerNotifierProvider)?.setStreamQuality(next.streamQuality);
+      ref.read(audioHandlerNotifierProvider)?.setCrossfadeDuration(next.crossfadeSeconds);
       if (prev != null && prev.downloadQuality != next.downloadQuality) {
         _redownloadAll(ref, next.downloadQuality);
       }

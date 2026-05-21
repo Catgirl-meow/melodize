@@ -17,6 +17,8 @@ class AppPreferences {
   final bool libraryArtistAscending;
   final bool floatingNavBar;       // true = floating pill dock, false = classic nav bar
   final String themeMode;          // 'dark' | 'light' | 'system'
+  final String shuffleMode;        // 'off' | 'shuffle' | 'smartShuffle'
+  final int crossfadeSeconds;      // 0 = off, 1–8 = fade duration between tracks
 
   const AppPreferences({
     this.streamQuality = 'lossless',
@@ -33,6 +35,8 @@ class AppPreferences {
     this.libraryArtistAscending = true,
     this.floatingNavBar = true,
     this.themeMode = 'dark',
+    this.shuffleMode = 'off',
+    this.crossfadeSeconds = 0,
   });
 
   bool get hasCompanion => companionUrl.isNotEmpty && companionApiKey.isNotEmpty;
@@ -53,6 +57,8 @@ class AppPreferences {
     bool? libraryArtistAscending,
     bool? floatingNavBar,
     String? themeMode,
+    String? shuffleMode,
+    int? crossfadeSeconds,
   }) =>
       AppPreferences(
         streamQuality: streamQuality ?? this.streamQuality,
@@ -69,6 +75,8 @@ class AppPreferences {
         libraryArtistAscending: libraryArtistAscending ?? this.libraryArtistAscending,
         floatingNavBar: floatingNavBar ?? this.floatingNavBar,
         themeMode: themeMode ?? this.themeMode,
+        shuffleMode: shuffleMode ?? this.shuffleMode,
+        crossfadeSeconds: crossfadeSeconds ?? this.crossfadeSeconds,
       );
 
   factory AppPreferences.fromJson(Map<String, dynamic> j) => AppPreferences(
@@ -86,6 +94,8 @@ class AppPreferences {
         libraryArtistAscending: j['libraryArtistAscending'] as bool? ?? true,
         floatingNavBar: j['floatingNavBar'] as bool? ?? true,
         themeMode: j['themeMode'] as String? ?? 'dark',
+        shuffleMode: j['shuffleMode'] as String? ?? 'off',
+        crossfadeSeconds: j['crossfadeSeconds'] as int? ?? 0,
       );
 
   Map<String, dynamic> toJson() => {
@@ -103,6 +113,8 @@ class AppPreferences {
         'libraryArtistAscending': libraryArtistAscending,
         'floatingNavBar': floatingNavBar,
         'themeMode': themeMode,
+        'shuffleMode': shuffleMode,
+        'crossfadeSeconds': crossfadeSeconds,
       };
 
   static Future<File> get _file async {

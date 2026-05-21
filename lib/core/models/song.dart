@@ -22,6 +22,10 @@ class Song {
   final String? externalStreamUrl;
   final String? externalCoverUrl;
 
+  /// BPM from Deezer API (recommendations only, never stored in DB).
+  /// Used by smart shuffle for ordering; null for library songs.
+  final int? bpm;
+
   const Song({
     required this.id,
     required this.title,
@@ -43,6 +47,7 @@ class Song {
     this.created,
     this.externalStreamUrl,
     this.externalCoverUrl,
+    this.bpm,
   });
 
   factory Song.fromSubsonicJson(Map<String, dynamic> json) {
@@ -90,6 +95,7 @@ class Song {
       created: created,
       externalStreamUrl: externalStreamUrl,
       externalCoverUrl: externalCoverUrl,
+      bpm: bpm,
     );
   }
 
@@ -102,6 +108,8 @@ class Song {
     required int durationSeconds,
     String? previewUrl,
     String? coverUrl,
+    double? bpm,
+    String? genre,
   }) {
     return Song(
       id: 'deezer:$deezerId',
@@ -111,6 +119,8 @@ class Song {
       duration: durationSeconds,
       externalStreamUrl: previewUrl,
       externalCoverUrl: coverUrl,
+      bpm: bpm?.round().clamp(40, 200),
+      genre: genre,
     );
   }
 

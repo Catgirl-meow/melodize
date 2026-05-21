@@ -28,6 +28,8 @@ class _DeezerTrackTileState extends ConsumerState<DeezerTrackTile>
       durationSeconds: widget.track.durationSeconds,
       previewUrl: widget.track.previewUrl,
       coverUrl: widget.track.coverUrl,
+      bpm: widget.track.bpm,
+      genre: widget.track.genre,
     );
     ref.read(audioHandlerNotifierProvider)?.loadQueue([song]);
   }

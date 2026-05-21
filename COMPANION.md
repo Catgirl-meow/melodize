@@ -1,9 +1,16 @@
 # Melodize Companion — Installation Guide
 
 The companion is a small Python HTTP service that runs alongside Navidrome and
-gives the Melodize app file-management capabilities that the Subsonic/Navidrome
-API does not expose: deleting songs from the server and downloading songs from
-the Deezer catalog directly onto the server.
+gives the Melodize app file-management and audio-analysis capabilities that the
+Subsonic/Navidrome API does not expose.
+
+| Capability | Description |
+|------------|-------------|
+| Delete songs from server | Removes the file from disk |
+| Download songs to server | Deezer FLAC via deemix; any URL via yt-dlp |
+| Audio analysis | Detects BPM, Camelot wheel key, energy, spectral centroid, and trailing silence per song |
+| Smart shuffle | BPM-progressive ordering using real analysis data (vs genre estimates) |
+| Transition mixing | Generates time-stretched crossfade mixes between songs, trimming trailing silence |
 
 **Requirements**
 - Linux server with systemd (Debian 12+ / Ubuntu 22.04+ / any modern distro)
@@ -170,6 +177,18 @@ If either tool is at a non-standard path, set it in config:
 "ytdlp_path":  "/usr/local/bin/yt-dlp",
 "deemix_path": "/usr/local/bin/deemix"
 ```
+
+### Audio analysis dependencies (optional)
+
+Required for BPM/key detection, trailing-silence measurement, and transition mixing:
+
+```bash
+python3 -m pip install librosa numpy soundfile pyrubberband
+```
+
+If these are not installed, song analysis jobs fail gracefully and the companion
+reports `"analysis not available"`. The health endpoint shows whether analysis
+dependencies are loaded.
 
 ---
 
@@ -535,12 +554,38 @@ initiate one manually from the Navidrome web UI under **Settings → Scan Librar
 
 All endpoints require the `X-API-Key` header except `/health`.
 
+### General
+
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/health` | Liveness probe. Returns `{"status":"ok","version":"..."}` |
+| `GET` | `/health` | Liveness probe. Returns `{"status":"ok","version":"...", "analysis":"available\|unavailable"}` |
+
+### Song management
+
+| Method | Path | Description |
+|--------|------|-------------|
 | `DELETE` | `/api/songs/{id}` | Delete a song by its Navidrome ID. Removes the file from disk. |
 | `POST` | `/api/songs/download` | Start a background download job. Body: `{"url":"...", "deezer_arl":"..."}`. Returns `{"job_id":"..."}` |
 | `GET` | `/api/songs/download/{job_id}` | Poll a download job. Returns `{"status":"queued\|downloading\|done\|error", ...}` |
+
+### Audio analysis
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/audio/analyze-batch` | Start batch analysis. Body: `{"song_ids":["..."]}` (omit for all songs). Returns `{"job_id":"..."}` |
+| `GET` | `/api/audio/analyze-batch/{job_id}` | Poll analysis job progress |
+| `GET` | `/api/audio/analysis` | All cached analysis results. Returns `{"results":[{song_id, bpm, key, energy, spectral_centroid, duration, tail_silence, data_version}, ...]}` |
+| `GET` | `/api/audio/analysis/{song_id}` | Single song's cached analysis |
+
+### Transition mixing
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/audio/mix-transition` | Request a mix. Body: `{"song_a_id":"...", "song_b_id":"...", "mix_duration":10}`. Returns `{"job_id":"...", "status":"mixing"}` |
+| `GET` | `/api/audio/mix-transition/{job_id}` | Poll mix job. When done: `{"status":"done", "url":"/api/audio/transition/{id}.wav"}` |
+| `GET` | `/api/audio/transition/{filename}` | Download a completed WAV mix |
+
+### Response format
 
 Responses are always JSON. Non-2xx responses include an `"error"` field.
 
@@ -550,3 +595,14 @@ Responses are always JSON. Non-2xx responses include an `"error"` field.
 |-------------|-----------|-------|
 | `deezer.com/*` | deemix | Requires ARL for FLAC; falls back to error without ARL |
 | anything else | yt-dlp | Requires yt-dlp + ffmpeg on the server |
+
+### Analysis fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `bpm` | float (nullable) | Beats per minute — detected via librosa beat tracking |
+| `key` | string (nullable) | Camelot wheel key (e.g. `8A`, `12B`) — Krumhansl–Schmuckler profile correlation |
+| `energy` | float | Mean RMS energy of the signal |
+| `spectral_centroid` | float | Spectral centroid (brightness proxy) in Hz |
+| `duration` | float | Total file duration in seconds |
+| `tail_silence` | float | Seconds of trailing silence at end of track — detected by scanning backward from file end; used by crossfade and transition mixing to avoid fading during silence |
