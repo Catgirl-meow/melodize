@@ -2,6 +2,10 @@ import 'dart:math';
 import '../models/song.dart';
 import 'bpm_estimator.dart';
 
+// Expando caches normalized artist names outside Song to keep the class immutable.
+final _normArtistExpando = Expando<String>('normArtist');
+String _normArtist(Song s) => _normArtistExpando[s] ??= s.artist.trim().toLowerCase();
+
 // DJ-aware smart shuffle with BPM/key/energy scoring and energy-curve planning.
 //
 // Tiers:
@@ -446,8 +450,7 @@ double _djScore(Song a, Song b, BpmCache cache, int tier, int totalSongs) {
   }
 
   // --- Artist penalty ---
-  if (totalSongs > 5 &&
-      a.artist.trim().toLowerCase() == b.artist.trim().toLowerCase()) {
+  if (totalSongs > 5 && _normArtist(a) == _normArtist(b)) {
     score *= 0.1;
   }
 
@@ -520,7 +523,7 @@ List<Song> orderSongs(List<Song> songs, int anchorIndex, BpmCache cache,
 
   // Build the DJ path through upcoming songs
   final orderedUpcoming =
-      _buildDjArc(anchor, upcoming, cache, tier, songs.length, seed);
+      _buildAndPolishDjArc(anchor, upcoming, cache, tier, songs.length, seed);
 
   return [...songs.sublist(0, idx + 1), ...orderedUpcoming];
 }  // Auto-select tier based on available data quality.
@@ -553,7 +556,15 @@ List<Song> orderSongs(List<Song> songs, int anchorIndex, BpmCache cache,
 
 // DJ path builder: energy-constrained nearest neighbor.
 
-List<Song> _buildDjArc(
+/// Build a DJ arc — pure energy-curve ordering without post-processing.
+///
+/// Returns the upcoming songs ordered by energy-tier sequence (warm-up →
+/// peak → cool-down) using greedy nearest-neighbour selection. No adjacent
+/// swap or artist-interleave passes are applied, so the result is the raw
+/// arc shape and is fully deterministic for a given [seed].
+///
+/// This is public so tests can assert the pure arc before perturbations.
+List<Song> buildDjArc(
   Song anchor,
   List<Song> upcoming,
   BpmCache cache,
@@ -580,7 +591,9 @@ List<Song> _buildDjArc(
   // upcoming songs are placed. Distribute songs evenly across tiers so the
   // energy curve is perceptible across the entire set (not just first 5 songs).
   final result = <Song>[];
-  final visited = <String>{};
+  // Use object identity (Set<Song>) instead of Set<String> so duplicate
+  // song IDs in the queue don't cause an infinite loop or data loss.
+  final visited = <Song>{};
   Song current = anchor;
   var songCount = upcoming.length;
   final songsPerTierStep = max(1, songCount ~/ arcSequence.length);
@@ -601,12 +614,23 @@ List<Song> _buildDjArc(
 
         if (candidates.isEmpty) break;
 
-        // Pick best-scoring candidate from current song. For performance on large
-        // playlists, pre-sort candidates by fast BPM proximity.
+        // Pick best-scoring candidate from current song. For large playlists,
+        // avoid O(n log n) sorts on thousands of candidates by using reservoir
+        // sampling to pick a random subset, then sorting only that subset.
         final maxCandidates = totalSongs > 500
-            ? 50.clamp(1, candidates.length)
+            ? min(50, candidates.length)
             : candidates.length;
         if (maxCandidates < candidates.length) {
+          // Reservoir sample: O(n) with one RNG call per extra element.
+          final sample = candidates.sublist(0, maxCandidates);
+          for (int i = maxCandidates; i < candidates.length; i++) {
+            final j = rng.nextInt(i + 1);
+            if (j < maxCandidates) {
+              sample[j] = candidates[i];
+            }
+          }
+          candidates = sample;
+
           final currBpm = cache.bpmFor(current);
           if (currBpm != null) {
             candidates.sort((a, b) {
@@ -669,7 +693,7 @@ List<Song> _buildDjArc(
         }
 
         result.add(best);
-        visited.add(best.id);
+        visited.add(best);
         // Remove best from its actual bucket (may differ from targetTier due to spread).
         for (final bucket in tierBuckets) {
           if (bucket.remove(best)) break;
@@ -681,11 +705,24 @@ List<Song> _buildDjArc(
     }
   }
 
-  // Polishing passes
+  return result;
+}
+
+/// Wraps [buildDjArc] and applies the polishing passes
+/// (_adjacentSwap + _interleaveArtists).
+List<Song> _buildAndPolishDjArc(
+  Song anchor,
+  List<Song> upcoming,
+  BpmCache cache,
+  int tier,
+  int totalSongs,
+  int seed,
+) {
+  final result = buildDjArc(anchor, upcoming, cache, tier, totalSongs, seed);
+  final rng = Random(seed);
   result
     .._adjacentSwap(cache, tier, totalSongs, rng)
     .._interleaveArtists();
-
   return result;
 }  // Warm-up → peak → cool-down arc sequence.
   List<int> _buildArcSequence(int anchorTier) {
@@ -704,7 +741,7 @@ List<Song> _buildDjArc(
   List<List<Song>> buckets,
   int targetTier,
   int spread,
-  Set<String> visited,
+  Set<Song> visited,
 ) {
   final result = <Song>[];
   for (int t = targetTier - spread;
@@ -712,7 +749,7 @@ List<Song> _buildDjArc(
       t++) {
     if (t < 0 || t >= _kEnergyTiers) continue;
     for (final s in buckets[t]) {
-      if (!visited.contains(s.id)) result.add(s);
+      if (!visited.contains(s)) result.add(s);
     }
   }
   return result;
@@ -804,24 +841,20 @@ extension _AdjacentSwap on List<Song> {
 extension _Interleave on List<Song> {
   void _interleaveArtists() {
     if (length < 3) return;
+    // Precompute normalized artist names once.
+    final norm = List<String>.generate(length, (i) => _normArtist(this[i]));
     for (int i = 1; i < length - 1; i++) {
-      final samePrev =
-          this[i].artist.trim().toLowerCase() ==
-              this[i - 1].artist.trim().toLowerCase();
-      final sameNext =
-          this[i].artist.trim().toLowerCase() ==
-              this[i + 1].artist.trim().toLowerCase();
-      if (samePrev && sameNext) {
+      if (norm[i] == norm[i - 1] && norm[i] == norm[i + 1]) {
         // Triple same-artist cluster — swap middle with a later song
         for (int j = i + 2; j < length; j++) {
-          if (this[j].artist.trim().toLowerCase() !=
-                  this[i].artist.trim().toLowerCase() &&
-              (i == 1 ||
-                  this[j].artist.trim().toLowerCase() !=
-                      this[i - 1].artist.trim().toLowerCase())) {
+          if (norm[j] != norm[i] &&
+              (i == 1 || norm[j] != norm[i - 1])) {
             final tmp = this[i];
             this[i] = this[j];
             this[j] = tmp;
+            final tmpN = norm[i];
+            norm[i] = norm[j];
+            norm[j] = tmpN;
             break;
           }
         }
@@ -834,7 +867,8 @@ extension _Interleave on List<Song> {
 
 List<Song> _randomWithArtistSep(List<Song> songs, int anchorIndex, int seed) {
   final anchor = songs[anchorIndex.clamp(0, songs.length - 1)];
-  final rest = songs.where((s) => s.id != anchor.id).toList();
+  // Use object identity so duplicate song instances are preserved.
+  final rest = songs.where((s) => s != anchor).toList();
   rest.shuffle(Random(seed));
   final result = [anchor, ...rest];
   result._interleaveArtists();

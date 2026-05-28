@@ -126,6 +126,9 @@ class PlaybackQueue {
     return removed;
   }
 
+  // Reorder a song. Expects Flutter-adjusted indices (i.e. newIndex is
+  // already decremented by 1 for downward moves, matching ReorderableListView
+  // onReorder semantics).
   void reorder(int oldIndex, int newIndex) {
     if (oldIndex < 0 || oldIndex >= _songs.length) return;
     final insertIndex = newIndex.clamp(0, _songs.length - 1);
@@ -141,6 +144,10 @@ class PlaybackQueue {
     } else if (oldIndex < previousCurrent && insertIndex >= previousCurrent) {
       // Removed before current, inserted after → current slides back one.
       _currentIndex = (previousCurrent - 1).clamp(0, _songs.length - 1);
+    } else if (oldIndex < previousCurrent && insertIndex < previousCurrent) {
+      // removeAt already decremented; inserting before current's new
+      // position should restore it.
+      _currentIndex = previousCurrent.clamp(0, _songs.length - 1);
     } else if (oldIndex > previousCurrent && insertIndex <= previousCurrent) {
       // Removed after current, inserted before → current slides forward one.
       _currentIndex = (previousCurrent + 1).clamp(0, _songs.length - 1);
@@ -192,7 +199,10 @@ class PlaybackPlanner {
 
   List<Song> _shuffleUpcoming(List<Song> upcoming, int? seed) {
     final copy = List<Song>.from(upcoming);
-    final rng = seed == null ? Random() : Random(seed);
+    // Derive a stable seed from the list contents when none is provided so
+    // the same upcoming segment always shuffles the same way.
+    final effectiveSeed = seed ?? Object.hashAll(upcoming.map((s) => s.id));
+    final rng = Random(effectiveSeed);
     for (var i = copy.length - 1; i > 0; i--) {
       final j = rng.nextInt(i + 1);
       final tmp = copy[i];
