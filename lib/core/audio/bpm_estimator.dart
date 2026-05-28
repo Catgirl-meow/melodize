@@ -1,20 +1,11 @@
-/// Genre-average BPM ranges for songs without real BPM data.
-///
-/// Used as a fallback when neither the companion server nor Deezer API
-/// can provide BPM for a song. The estimator picks the midpoint of the
-/// genre's range as a best-effort guess.
-///
-/// Safety: these are estimates, not ground truth. The ordering algorithm
-/// treats estimated BPM with wider tolerances than measured BPM.
+// Genre-average BPM ranges. Used as a fallback when no real BPM data exists.
 
-/// Returns an estimated BPM range [low, high] for a given genre string,
-/// or null if the genre is unknown.
+// Returns an estimated BPM range [low, high] for a genre, or null.
 ({double low, double high})? bpmRangeForGenre(String? genre) {
   if (genre == null || genre.trim().isEmpty) return null;
   final g = genre.trim().toLowerCase();
 
-  // Map of genre → [min, max] BPM ranges.
-  // Sources: verified against Spotify's genre BPM data.
+  // genre → [min, max] BPM ranges.
   const ranges = <String, ({double low, double high})>{
     'rock': (low: 110, high: 140),
     'alternative': (low: 100, high: 140),
@@ -81,10 +72,8 @@
   return null;
 }
 
-/// Returns a best-effort BPM estimate for a song based on its genre.
-///
-/// Returns null when the genre is unknown or empty — the caller should
-/// skip BPM constraints for this song rather than use a default.
+// Best-effort BPM estimate for a song based on genre. Returns null when
+// the genre is unknown so callers can skip BPM constraints.
 int? estimateBpm(String? genre) {
   final range = bpmRangeForGenre(genre);
   if (range == null) return null;

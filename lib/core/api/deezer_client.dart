@@ -2,17 +2,7 @@ import 'package:dio/dio.dart';
 import '../models/recommended_track.dart';
 import '../utils/title_normalize.dart';
 
-/// Free Deezer API wrapper — no API key required.
-///
-/// Recommendations pipeline (in [recommendationsProvider]):
-///   1. [searchBestArtist] → fuzzy-match the seed artist to a Deezer artist ID.
-///   2. [artistRadio] → fetch that artist's radio, a curated mix of similar
-///      tracks (30-second MP3 previews served from Deezer's CDN).
-///
-/// The two methods are exposed separately so the provider can parallelise
-/// the whole seed fan-out via `Future.wait`. The old combined method did
-/// one sequential round-trip per seed, turning a handful of seeds into a
-/// multi-second wait.
+// Free Deezer API wrapper (no API key required).
 class DeezerClient {
   static const _base = 'https://api.deezer.com';
   late final Dio _dio;
@@ -25,19 +15,8 @@ class DeezerClient {
     ));
   }
 
-  /// Resolve a Deezer artist ID for a given seed.
-  ///
-  /// Strategy (two-pass):
-  ///   1. Query /search/artist — Deezer's dedicated artist-name search.
-  ///      Results are ranked by name relevance, not track popularity, so
-  ///      this reliably surfaces the right artist for niche/non-mainstream acts.
-  ///   2. Fall back to /search (track search) only if pass 1 returns nothing.
-  ///      Accept a result ONLY when the artist name fuzzy-matches; never use
-  ///      a popularity-ranked "first result" as that was the root cause of
-  ///      unrelated pop recommendations.
-  ///
-  /// Returns null when no confident match is found — the caller should skip
-  /// this seed rather than guessing a random popular artist.
+  // Resolve a Deezer artist ID. Two-pass: /search/artist first, then
+  // /search fallback with strict fuzzy name-matching only.
   Future<int?> searchBestArtist({
     required String artistName,
     String? trackTitle,
@@ -76,10 +55,8 @@ class DeezerClient {
     return null;
   }
 
-  /// Fetch an artist's Deezer radio — a curated list of similar-sounding
-  /// tracks. Only returns entries that carry a non-null preview URL (the
-  /// whole point of using these as recommendations is that they are
-  /// immediately playable in-app).
+  // Fetch an artist's radio (curated similar tracks). Only returns tracks
+  // with a preview URL.
   Future<List<RecommendedTrack>> artistRadio(
     int artistId, {
     int limit = 10,
@@ -98,11 +75,7 @@ class DeezerClient {
     }
   }
 
-  /// Fetch an artist's actual top tracks from Deezer (distinct from the radio,
-  /// which is a curated mix of *similar* artists). Used on the artist detail
-  /// page so the user can preview tracks they don't own yet.
-  ///
-  /// Only returns entries with a preview URL (no preview = not playable in-app).
+  // Fetch an artist's top tracks. Only returns tracks with a preview URL.
   Future<List<RecommendedTrack>> artistTopTracks(
     int artistId, {
     int limit = 15,
@@ -120,16 +93,8 @@ class DeezerClient {
     }
   }
 
-  /// Validate an ARL cookie by calling Deezer's gw-light endpoint with it
-  /// and checking whether the returned user object has a non-zero USER_ID.
-  ///
-  /// This is the same check deemix runs internally — matches server-side
-  /// truth without needing a companion round-trip.
-  ///
-  /// Returns `true` only on a confirmed-valid response. Network errors,
-  /// rate-limit hiccups, or malformed responses return `false` to keep the
-  /// UI caller simple — we'd rather show "invalid" once and let the user
-  /// retry than show "valid" on a transient glitch.
+  // Validate an ARL cookie against Deezer's gw-light endpoint. Returns true
+  // only on a confirmed-valid response; errors return false.
   static Future<bool> validateArl(String arl) async {
     if (arl.isEmpty) return false;
     try {
@@ -160,7 +125,7 @@ class DeezerClient {
     }
   }
 
-  /// Direct Deezer catalog search — used by the search tab.
+  // Deezer catalog search.
   Future<List<RecommendedTrack>> search(String query, {int limit = 12}) async {
     if (query.trim().isEmpty) return [];
     try {

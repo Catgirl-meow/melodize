@@ -60,21 +60,15 @@ String _reachabilityMessage(ServerReachability r) {
     case ServerReachability.reachable:
       return '';
   }
-}
-
-// Carousel geometry matching pre-v1.9.0 proportions — image is explicit
-// 130×130 in a column with text below; carousel height = 176 to fit.
-const _kCardExtent = 138.0;     // CarouselView itemExtent (image 130 + 2×4 padding)
-const _kCardImageSize = 130.0;  // explicit square — CoverArtImage(size: 130) → 130×130
-const _kCarouselHeight = 176.0; // image 130 + gap 8 + title 16 + artist 14 + slack 8
+}const _kCardExtent = 138.0;
+const _kCardImageSize = 130.0;
+const _kCarouselHeight = 176.0;
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   Future<void> _refresh(WidgetRef ref) async {
-    // Clear any active "More like this" seed override — otherwise the override
-    // persists through pull-to-refresh and re-triggers the same single-seed
-    // run (which errors out if that artist can't be resolved on Deezer).
+    // Clear "More like this" override so pull-to-refresh uses history seeds.
     ref.read(recommendationsSeedOverrideProvider.notifier).state = null;
     ref.invalidate(newestAlbumsProvider);
     ref.invalidate(randomSongsProvider);
@@ -107,15 +101,10 @@ class HomeScreen extends ConsumerWidget {
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
-            // Offline banner — before the app bar so it shows at the absolute
-            // top edge; AnimatedSize makes it zero-height when online.
-            const SliverToBoxAdapter(child: OfflineBanner()),
+    const SliverToBoxAdapter(child: OfflineBanner()),
 
-            // Greeting — inline, sits directly under the status bar with no
-            // gap. SliverAppBar.medium leaves a large empty band above the
-            // bottom-aligned title (M3 spec) which looks bad with the small
-            // status bar of phones. Use SafeArea(top:true) to push past the
-            // status bar, then a plain Padding with headlineMedium bold.
+            // Inline greeting — replaces SliverAppBar.medium to avoid the large
+            // empty band above the bottom-aligned title on phones.
             SliverToBoxAdapter(
               child: SafeArea(
                 top: true,
@@ -327,18 +316,13 @@ class HomeScreen extends ConsumerWidget {
     ref.read(audioHandlerNotifierProvider)?.loadQueue(songs, startIndex: index);
   }
 
-  // Taps are handled at the carousel level (onItemTap) rather than inside
-  // individual card widgets. This avoids tap-interception conflicts between
-  // CarouselView's own gesture layer and nested InkWells.
+  // CarouselView.onTap avoids gesture conflicts with nested InkWells.
   static Widget _buildCarousel({
     required BuildContext context,
     required List<Widget> children,
     void Function(int)? onItemTap,
   }) {
-    // Scope a no-scrollbar ScrollConfiguration around the carousel: the base
-    // ScrollBehavior adds a RawScrollbar on desktop for ALL axes, which on a
-    // horizontal snap-carousel renders as a misaligned line through the cards.
-    // Vertical scrollbars elsewhere in the app are unaffected.
+    // Hide horizontal scrollbar on desktop — RawScrollbar looks broken on snap carousels.
     return ScrollConfiguration(
       behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
       child: CarouselView(
@@ -356,8 +340,7 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
-  // Fade + upward slide on first build — M3E "emphasized decelerate" entrance.
-  // [delay] staggers sections so they cascade in rather than all at once.
+  // M3E emphasized-decelerate entrance with staggered delay per section.
   static Widget _fadeIn({required Widget child, Duration delay = Duration.zero}) {
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
@@ -514,10 +497,7 @@ class _Section extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Card widgets — intentionally no InkWell / tap handler of their own.
-// CarouselView.onTap handles all taps at the carousel level to avoid
-// gesture conflicts with the carousel's own scroll/snap recogniser.
-// Layout mirrors pre-v1.9.0: explicit square image + title/artist below.
+// Cards have no own tap handler — CarouselView.onTap handles gestures.
 // ---------------------------------------------------------------------------
 
 class _SongCard extends ConsumerWidget {

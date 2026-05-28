@@ -10,7 +10,6 @@ import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'core/utils/platform_dirs.dart';
 import 'core/audio/shuffle_mode.dart';
 import 'core/audio/audio_handler.dart';
-import 'core/audio/mix_transition_manager.dart';
 import 'core/db/database.dart';
 import 'core/models/song.dart';
 import 'core/providers.dart';
@@ -162,6 +161,7 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
       if (prefs.crossfadeSeconds > 0) {
         h.setCrossfadeDuration(prefs.crossfadeSeconds);
       }
+      h.setDjTransitionsEnabled(prefs.djTransitionsEnabled);
     });
 
     _historySubscription = handler?.playHistoryStream.listen((song) async {
@@ -237,16 +237,7 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
       final h = ref.read(audioHandlerNotifierProvider);
       h?.setCompanionAnalysis(next.valueOrNull);
     });
-
-    // Wire transition mix manager when companion API is available.
-    // Uses listen-once pattern: the provider is stable after login.
-    ref.listen(companionAudioApiProvider, (_, next) {
-      final h = ref.read(audioHandlerNotifierProvider);
-      if (next != null && h != null) {
-        final manager = TransitionMixManager(api: next);
-        h.setTransitionMixManager(manager);
-      }
-    });
+    ref.listen(companionAnalysisSyncProvider, (_, __) {});
 
     // Sync server config to audio handler
     ref.listen(serverConfigProvider, (_, next) {
@@ -260,12 +251,20 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
     // Sync stream quality and crossfade; re-download all on download quality
     // change; start full-library download when autoDownload is switched to 'all'.
     ref.listen(preferencesNotifierProvider, (prev, next) {
-      ref.read(audioHandlerNotifierProvider)?.setStreamQuality(next.streamQuality);
-      ref.read(audioHandlerNotifierProvider)?.setCrossfadeDuration(next.crossfadeSeconds);
+      ref
+          .read(audioHandlerNotifierProvider)
+          ?.setStreamQuality(next.streamQuality);
+      ref
+          .read(audioHandlerNotifierProvider)
+          ?.setCrossfadeDuration(next.crossfadeSeconds);
+      ref
+          .read(audioHandlerNotifierProvider)
+          ?.setDjTransitionsEnabled(next.djTransitionsEnabled);
       if (prev != null && prev.downloadQuality != next.downloadQuality) {
         _redownloadAll(ref, next.downloadQuality);
       }
-      if (prev != null && prev.autoDownload != next.autoDownload &&
+      if (prev != null &&
+          prev.autoDownload != next.autoDownload &&
           next.autoDownload == 'all') {
         _downloadAll(ref);
       }

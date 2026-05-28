@@ -38,12 +38,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
   final _pageController = PageController();
   int _currentPage = 0;
   Timer? _sleepCountdown;
-  // ValueNotifier so only _BottomActions rebuilds each tick — not the whole screen
+  // ValueNotifier isolates rebuilds to _BottomActions (sleep timer tick).
   final _sleepNotifier = ValueNotifier<Duration?>(null);
-  // ValueNotifier instead of bool+setState so toggling it only rebuilds the
-  // GestureDetector wrapper (via ValueListenableBuilder), not the entire screen.
-  // This prevents the full NowPlayingScreen rebuild that was causing a visible
-  // stutter when the queue or sleep sheet finished its close animation.
+  // ValueNotifier isolates the drag-gesture disable to the wrapper only.
   final _sheetOpen = ValueNotifier<bool>(false);
 
   @override
@@ -104,16 +101,12 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
         ?? scheme.primary;
     final dominantColor = rawAccent ?? bgBase;
 
-    // Gradient: top slightly dark (prevents stripe on bright art), peak is very
-    // vibrant around the album art zone, fades to base (black or white).
     final bgTop  = Color.lerp(dominantColor, bgBase, 0.52)!;
     final bgPeak = Color.lerp(dominantColor, bgBase, 0.10)!;
     final bgFade = Color.lerp(dominantColor, bgBase, 0.72)!;
     final bgGlow = dominantColor.withValues(alpha: isDark ? 0.42 : 0.15);
 
-    // ValueListenableBuilder rebuilds only the GestureDetector when _sheetOpen
-    // changes — the heavy child (gradient, art, controls) is passed as the
-    // static `child` parameter and is NOT re-built on sheet open/close.
+    // Rebuilds only the GestureDetector wrapper on sheet open/close.
     return ValueListenableBuilder<bool>(
       valueListenable: _sheetOpen,
       builder: (_, sheetOpen, child) => GestureDetector(
@@ -165,10 +158,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
                       onClose: widget.onClose,
                     ),
                     Expanded(
-                      child: ScrollConfiguration(
-                        // Allow mouse/trackpad to swipe between player and lyrics
-                        behavior: ScrollConfiguration.of(context).copyWith(
-                          dragDevices: {
+                      child: ScrollConfiguration(        behavior: ScrollConfiguration.of(context).copyWith(
+          dragDevices: {
                             PointerDeviceKind.touch,
                             PointerDeviceKind.mouse,
                             PointerDeviceKind.trackpad,
@@ -237,9 +228,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
       context: context,
       isScrollControlled: true,
       enableDrag: false, // _SlideDismiss owns the drag
-      // Zero reverse duration: when _SlideDismiss calls Navigator.pop() the
-      // sheet content is already off-screen via Transform.  Without this the
-      // route still runs its ~300 ms close animation as a blank overlay (ghost).
+      // Zero reverse duration — the sheet is already off-screen via Transform.
       sheetAnimationStyle: AnimationStyle(reverseDuration: Duration.zero),
       backgroundColor: Colors.transparent,
       barrierColor: Colors.transparent,
@@ -259,8 +248,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
     showModalBottomSheet(
       context: context,
       barrierColor: Colors.transparent,
-      backgroundColor: Colors.transparent, // no route-level surface behind Transform
-      enableDrag: false, // _SlideDismiss owns the drag
+      backgroundColor: Colors.transparent,
+      enableDrag: false,
       sheetAnimationStyle: AnimationStyle(reverseDuration: Duration.zero),
       builder: (_) {
         final scheme = Theme.of(context).colorScheme;
@@ -329,23 +318,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
   }
 }
 
-// ---------------------------------------------------------------------------
-// Drag-to-dismiss wrapper for bottom sheets.
-//
-// Owns the vertical drag gesture entirely (the modal is opened with
-// enableDrag: false so Flutter's built-in sheet drag is disabled).
-// This removes the velocity-mismatch stutter that occurs when Flutter's
-// _BottomSheet._handleDragEnd restarts its physics animation independently
-// of the ongoing pointer velocity.
-//
-// Behaviour:
-//   • Dragging down translates the sheet via Transform — zero rebuild cost.
-//   • On release, if past threshold (22 % of screen height) or fast fling
-//     (>500 px/s), animate off-screen then call Navigator.pop().
-//   • Otherwise snap back with easeOutCubic.
-//   • Works with inner scroll views: when the ListView inside QueueScreen is
-//     scrollable the gesture arena gives the ListView priority; when the list
-//     is at the top and the user pulls down, this widget wins and dismisses.
+// Drag-to-dismiss bottom-sheet wrapper. Replaces Flutter's built-in drag
+// to avoid the velocity-mismatch stutter between pointer and physics.
 class _SlideDismiss extends StatefulWidget {
   final Widget child;
   const _SlideDismiss({required this.child});
@@ -495,8 +469,7 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
     );
   }
 
-  // True for Deezer-preview tracks surfaced in recommendations — they are not
-  // in the Subsonic library, so local Subsonic-based Download/Delete are N/A.
+  // Preview tracks from recommendations are not in the Subsonic library.
   bool get _isPreview =>
       song.externalStreamUrl != null || song.id.startsWith('deezer:');
 
@@ -612,10 +585,7 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
     );
   }
 
-  // The player renders *outside* the shell's injected bottom-padding
-  // MediaQuery, so `showStyledSnack`'s default offset (viewPadding + 12)
-  // plants the snack BEHIND the mini player / dock. Compute the full
-  // clearance here the same way MainShell does, and pass it explicitly.
+  // Compute snack offset above mini player + dock (player is outside shell MediaQuery).
   double _snackBottom() {
     final floatingNav = ref.read(
       preferencesNotifierProvider.select((p) => p.floatingNavBar),
@@ -653,8 +623,6 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
     }
     final prefs = ref.read(preferencesNotifierProvider);
 
-    // Preview songs from recommendations use id "deezer:TRACKID".
-    // Library songs that somehow fall here wouldn't have a Deezer ID; guard.
     if (!song.id.startsWith('deezer:')) {
       _snack('No Deezer source for this track', isError: true);
       return;
@@ -687,9 +655,6 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Player page — layout only, stream-watching delegated to sub-widgets
-
 class _PlayerPage extends StatelessWidget {
   final Color fgAccent;
   final Song song;
@@ -712,8 +677,6 @@ class _PlayerPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    // Cap by height so the Column never overflows on wide/short desktop windows.
-    // On mobile screenWidth * 0.8 always wins (tall narrow screens).
     final artSize = math.min(size.width * 0.8, size.height * 0.40);
 
     return Padding(
@@ -750,9 +713,6 @@ class _PlayerPage extends StatelessWidget {
     );
   }
 }
-
-// ---------------------------------------------------------------------------
-// Album art — only rebuilds when isPlaying changes
 
 class _AlbumArt extends ConsumerWidget {
   final String coverUrl;
@@ -863,9 +823,6 @@ class _SongInfoRow extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Seek slider — has its own drag state, rebuilds every ~200ms independently
-
 class _SeekSlider extends ConsumerStatefulWidget {
   const _SeekSlider();
 
@@ -946,9 +903,6 @@ class _SeekSliderState extends ConsumerState<_SeekSlider> {
     return '$m:${s.toString().padLeft(2, '0')}';
   }
 }
-
-// ---------------------------------------------------------------------------
-// Play controls — rebuilds only on playerState / shuffle / loop changes
 
 class _PlayControls extends ConsumerWidget {
   const _PlayControls();
@@ -1060,9 +1014,7 @@ class _BottomActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // The outer NowPlayingScreen has a vertical-drag handler for swipe-to-close.
-    // Absorbing drag events here ensures button taps always win the gesture
-    // arena and don't occasionally get stolen by the drag recognizer.
+    // Absorb drag events so button taps win over the swipe-to-close recogniser.
     return GestureDetector(
       onVerticalDragStart: (_) {},
       onVerticalDragUpdate: (_) {},
@@ -1146,9 +1098,6 @@ class _ActionButton extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Volume slider — desktop only
-
 class _VolumeSlider extends ConsumerStatefulWidget {
   const _VolumeSlider();
 
@@ -1227,9 +1176,6 @@ class _VolumeSliderState extends ConsumerState<_VolumeSlider> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Lyrics page
-
 class _LyricsPage extends ConsumerStatefulWidget {
   final Song song;
   const _LyricsPage({required this.song});
@@ -1241,8 +1187,6 @@ class _LyricsPage extends ConsumerStatefulWidget {
 class _LyricsPageState extends ConsumerState<_LyricsPage> {
   final _scrollCtrl = ScrollController();
   int _currentLine = 0;
-  // Cache synced lines so the position listener can binary-search without
-  // touching the lyrics provider again. Updated inside build when data arrives.
   List<dynamic> _syncedLines = [];
 
   void _onPosition(Duration position) {
@@ -1294,9 +1238,7 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
     );
     final lyricsAsync = ref.watch(lyricsProvider(query));
 
-    // Listen (not watch) — position updates many times/sec so we must NOT
-    // let them trigger a full rebuild. _onPosition calls setState only when
-    // the active lyric line actually changes.
+    // Listen, don't watch — position updates 10×/sec; only rebuild on line change.
     ref.listen(positionStreamProvider,
         (_, next) => _onPosition(next.valueOrNull ?? Duration.zero));
 
@@ -1325,8 +1267,6 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
 
         if (result.hasSynced) {
           final lines = result.syncedLines;
-          // Keep cached lines up-to-date for the position listener.
-          // This runs only when lyrics data changes, not on every position tick.
           _syncedLines = lines;
 
           return ListView.builder(
@@ -1354,9 +1294,6 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
     );
   }
 }
-
-// ---------------------------------------------------------------------------
-// Animated lyric line — smoothly transitions between active and inactive state.
 
 class _LyricLine extends StatefulWidget {
   final String text;

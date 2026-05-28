@@ -10,20 +10,19 @@ class Song {
   final String? genre;
   final int? track;
   final String? coverArt;
-  final String? suffix;       // flac, mp3, etc.
+  final String? suffix; // flac, mp3, etc.
   final String? contentType;
   final int? bitRate;
   final int? size;
   final bool isDownloaded;
   final String? localPath;
-  final DateTime? created; // When the song was added to the server library
+  final DateTime? created;
 
-  // Non-null only for external (e.g. Deezer preview) tracks — never stored in DB.
+  // Only set for external tracks (e.g. Deezer previews). Never stored in DB.
   final String? externalStreamUrl;
   final String? externalCoverUrl;
 
-  /// BPM from Deezer API (recommendations only, never stored in DB).
-  /// Used by smart shuffle for ordering; null for library songs.
+  // BPM from Deezer API. Only set for recommendations; null for library songs.
   final int? bpm;
 
   const Song({
@@ -49,6 +48,14 @@ class Song {
     this.externalCoverUrl,
     this.bpm,
   });
+
+  // Placeholder for out-of-bounds fallback. Never displayed.
+  factory Song.empty() => const Song(
+        id: '',
+        title: 'Unknown',
+        artist: 'Unknown',
+        album: 'Unknown',
+      );
 
   factory Song.fromSubsonicJson(Map<String, dynamic> json) {
     return Song(
@@ -99,7 +106,7 @@ class Song {
     );
   }
 
-  /// Build a transient Song from a Deezer recommendation for preview playback.
+  // Build a Song from a Deezer recommendation.
   factory Song.fromRecommendation({
     required int deezerId,
     required String title,

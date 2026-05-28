@@ -2,10 +2,6 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 
-/// Dart client for the melodize-companion audio analysis and transition endpoints.
-///
-/// Separated from [CompanionClient] to keep concerns distinct — the download
-/// client deals with file management while this one handles analysis + mixing.
 class CompanionAudioApi {
   final String baseUrl;
   final String apiKey;
@@ -24,17 +20,12 @@ class CompanionAudioApi {
         HttpClient()..badCertificateCallback = (_, __, ___) => true;
   }
 
-  /// Normalised base URL (no trailing slash) for resolving relative paths.
   late final String _resolvedBaseUrl;
 
-  /// The normalised companion server URL (no trailing slash).
   String get serverUrl => _resolvedBaseUrl;
 
-  // ---------------------------------------------------------------------------
   // Batch analysis
 
-  /// Trigger analysis for all songs (or a subset).
-  /// Returns the job info including [jobId] for polling.
   Future<Map<String, dynamic>?> startAnalysis({List<String>? songIds}) async {
     try {
       final body = <String, dynamic>{};
@@ -48,7 +39,6 @@ class CompanionAudioApi {
     }
   }
 
-  /// Poll batch analysis job status.
   Future<Map<String, dynamic>?> pollAnalysis(String jobId) async {
     try {
       final resp = await _dio.get('/api/audio/analyze-batch/$jobId');
@@ -58,7 +48,6 @@ class CompanionAudioApi {
     }
   }
 
-  /// Get all cached analysis results from the companion.
   Future<List<Map<String, dynamic>>> getAllResults() async {
     try {
       final resp = await _dio.get('/api/audio/analysis');
@@ -71,7 +60,6 @@ class CompanionAudioApi {
     }
   }
 
-  /// Get cached analysis for a single song.
   Future<Map<String, dynamic>?> getAnalysis(String songId) async {
     try {
       final resp = await _dio.get('/api/audio/analysis/$songId');
@@ -81,11 +69,8 @@ class CompanionAudioApi {
     }
   }
 
-  // ---------------------------------------------------------------------------
   // Transition mixing
 
-  /// Request a transition mix between two songs.
-  /// Returns the job info for polling.
   Future<Map<String, dynamic>?> requestTransition({
     required String songAId,
     required String songBId,
@@ -103,7 +88,6 @@ class CompanionAudioApi {
     }
   }
 
-  /// Poll transition mix job status.
   Future<Map<String, dynamic>?> pollTransition(String jobId) async {
     try {
       final resp = await _dio.get('/api/audio/mix-transition/$jobId');

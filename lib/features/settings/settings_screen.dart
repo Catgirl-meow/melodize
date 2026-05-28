@@ -66,6 +66,22 @@ const _themeOptions = [
   ),
 ];
 
+String _analysisStatusLabel(CompanionAnalysisStatus? status) {
+  if (status == null) return 'Use analysis when available';
+  switch (status.phase) {
+    case CompanionAnalysisPhase.ready:
+      return 'Analysis cache ready';
+    case CompanionAnalysisPhase.queued:
+      return '${status.missingSongs} songs queued for analysis';
+    case CompanionAnalysisPhase.running:
+      return '${status.missingSongs} songs analyzing';
+    case CompanionAnalysisPhase.error:
+      return status.message ?? 'Analysis unavailable';
+    case CompanionAnalysisPhase.unavailable:
+      return 'Use analysis when available';
+  }
+}
+
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
@@ -80,6 +96,8 @@ class SettingsScreen extends ConsumerWidget {
       ),
     );
     final config = ref.watch(serverConfigProvider).valueOrNull;
+    final analysisStatus = ref.watch(companionAnalysisSyncProvider).valueOrNull;
+    final analysisLabel = _analysisStatusLabel(analysisStatus);
 
     return _SettingsPageScaffold(
       title: 'Settings',
@@ -179,6 +197,17 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                 ],
               ),
+            ),
+            SwitchListTile(
+              secondary: const Icon(Icons.auto_awesome_rounded),
+              title: const Text('DJ transitions'),
+              subtitle: Text(analysisLabel),
+              value: prefs.djTransitionsEnabled,
+              onChanged: (value) {
+                ref.read(preferencesNotifierProvider.notifier).update(
+                      prefs.copyWith(djTransitionsEnabled: value),
+                    );
+              },
             ),
           ],
         ),

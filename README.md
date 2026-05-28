@@ -18,8 +18,9 @@ on lossless playback, a polished Material 3 UI, and offline support.
 - **Library management** — sort songs/albums/artists by name, artist, recently added, downloaded; delete songs from server via companion
 - **White & Black theme** — full light (white) / dark (black) theme with Material You dynamic color; theme-aware Now Playing screen with adaptive album-art gradient and cover-art-driven accent colors for buttons, sliders, and progress bars
 - **Sleep timer & scrobbling** — timer auto-stops playback; scrobbles submitted to server
-- **Smart Shuffle** — BPM-progressive ordering powered by companion audio analysis; Camelot-wheel harmonic mixing; non-deterministic (every activation produces a different sequence)
-- **Crossfade** — configurable volume-ramp between tracks (0-8s); automatically offsets by trailing silence so the fade doesn't start during silence
+- **Smart Shuffle** — BPM-progressive ordering powered by companion audio analysis; Camelot-wheel harmonic mixing; energy-curve DJ arc planning; non-deterministic (every activation produces a different sequence); heard-song preservation (only upcoming tracks are reordered)
+- **Crossfade** — deck-based overlap between tracks (0–12s); loads the next track on a temporary second player and crossfades volumes; automatically offsets by trailing silence so the fade doesn't start during silence
+- **DJ transitions** — when companion analysis is available and BPM is compatible (±15%), transitions are tagged for enhanced blending; toggleable in Settings
 - **Android lock-screen controls** — MediaSession wired automatically
 - **Linux MPRIS2 + keyboard shortcuts** — exposes playback to `playerctl`, media keybindings; keyboard controls for playback, seek, shuffle, repeat, nav tabs
 - **Dock toggle** — switch between classic `NavigationBar` and floating pill dock
@@ -91,7 +92,7 @@ A small Python service that runs on your Navidrome host, unlocking server-manage
 | Download Deezer search result to server | ✗ | ✓ |
 | Audio analysis (BPM, Camelot key, energy) | ✗ | ✓ |
 | Smart shuffle with real BPM/key data | ✗ | ✓ |
-| Transition mixing (time-stretched crossfade) | ✗ | ✓ |
+| Transition mixing (server-side only — not used by client) | ✗ | ✓ |
 
 → **[Full installation guide](COMPANION.md)** — single Python file, config JSON, and systemd unit. Requires **yt-dlp** and **deemix** on the server.
 
@@ -150,7 +151,7 @@ flutter build linux    # release build → build/linux/x64/release/bundle/
 lib/
 ├── core/
 │   ├── api/           # SubsonicClient, NavidromeClient, CompanionClient, DeezerClient, LrcLibClient
-│   ├── audio/         # MelodizeAudioHandler (just_audio + audio_service)
+│   ├── audio/         # MelodizeAudioHandler, PlaybackQueue, PlaybackPlanner, TransitionPolicy, SmartShuffleEngine
 │   ├── db/            # Drift SQLite database (songs, downloads, queue, lyrics cache)
 │   ├── models/        # Song, Album, Artist, Playlist, AppPreferences, RecommendedTrack, ...
 │   └── providers.dart # All Riverpod providers

@@ -19,6 +19,7 @@ import 'models/recommended_track.dart';
 import 'models/recommendations_state.dart';
 import 'audio/shuffle_mode.dart';
 import 'audio/audio_handler.dart';
+import 'audio/playback_core.dart';
 import 'audio/smart_shuffle_engine.dart';
 import 'api/companion_audio_api.dart';
 import 'db/database.dart';
@@ -169,6 +170,126 @@ final companionAnalysisProvider = FutureProvider<BpmCache?>((ref) async {
   );
 });
 
+enum CompanionAnalysisPhase { unavailable, ready, queued, running, error }
+
+class CompanionAnalysisStatus {
+  final CompanionAnalysisPhase phase;
+  final int totalSongs;
+  final int cachedSongs;
+  final int missingSongs;
+  final String? message;
+
+  const CompanionAnalysisStatus({
+    required this.phase,
+    this.totalSongs = 0,
+    this.cachedSongs = 0,
+    this.missingSongs = 0,
+    this.message,
+  });
+}
+
+final companionAnalysisSyncProvider =
+    StreamProvider<CompanionAnalysisStatus>((ref) async* {
+  final api = ref.watch(companionAudioApiProvider);
+  final available = ref.watch(companionAvailableProvider).valueOrNull ?? false;
+  if (api == null || !available) {
+    yield const CompanionAnalysisStatus(
+      phase: CompanionAnalysisPhase.unavailable,
+      message: 'Companion offline',
+    );
+    return;
+  }
+
+  final songs = ref.watch(allSongsProvider).valueOrNull ?? const <Song>[];
+  if (songs.isEmpty) {
+    yield const CompanionAnalysisStatus(phase: CompanionAnalysisPhase.ready);
+    return;
+  }
+
+  final results = await api.getAllResults();
+  final cachedIds = <String>{
+    for (final r in results)
+      if (r['song_id'] != null) r['song_id'].toString(),
+  };
+  final missing = songs
+      .where((s) => !s.id.startsWith('deezer:') && !cachedIds.contains(s.id))
+      .map((s) => s.id)
+      .toList();
+
+  if (missing.isEmpty) {
+    yield CompanionAnalysisStatus(
+      phase: CompanionAnalysisPhase.ready,
+      totalSongs: songs.length,
+      cachedSongs: cachedIds.length,
+    );
+    return;
+  }
+
+  yield CompanionAnalysisStatus(
+    phase: CompanionAnalysisPhase.queued,
+    totalSongs: songs.length,
+    cachedSongs: cachedIds.length,
+    missingSongs: missing.length,
+  );
+
+  final job = await api.startAnalysis(songIds: missing);
+  final jobId = job?['job_id']?.toString() ?? job?['jobId']?.toString();
+  if (jobId == null || jobId.isEmpty) {
+    yield CompanionAnalysisStatus(
+      phase: CompanionAnalysisPhase.error,
+      totalSongs: songs.length,
+      cachedSongs: cachedIds.length,
+      missingSongs: missing.length,
+      message: 'Could not start analysis',
+    );
+    return;
+  }
+
+  for (var attempt = 0; attempt < 120; attempt++) {
+    await Future.delayed(const Duration(seconds: 3));
+    final status = await api.pollAnalysis(jobId);
+    final raw = status?['status']?.toString().toLowerCase();
+    final done = raw == 'done' || raw == 'complete' || raw == 'completed';
+    final failed = raw == 'error' || raw == 'failed';
+
+    if (done) {
+      ref.invalidate(companionAnalysisProvider);
+      yield CompanionAnalysisStatus(
+        phase: CompanionAnalysisPhase.ready,
+        totalSongs: songs.length,
+        cachedSongs: songs.length,
+      );
+      return;
+    }
+    if (failed) {
+      yield CompanionAnalysisStatus(
+        phase: CompanionAnalysisPhase.error,
+        totalSongs: songs.length,
+        cachedSongs: cachedIds.length,
+        missingSongs: missing.length,
+        message: status?['error']?.toString() ?? 'Analysis failed',
+      );
+      return;
+    }
+
+    yield CompanionAnalysisStatus(
+      phase: CompanionAnalysisPhase.running,
+      totalSongs: songs.length,
+      cachedSongs: cachedIds.length,
+      missingSongs: missing.length,
+      message: raw,
+    );
+  }
+
+  yield CompanionAnalysisStatus(
+    phase: CompanionAnalysisPhase.error,
+    totalSongs: songs.length,
+    cachedSongs: cachedIds.length,
+    missingSongs: missing.length,
+    message: 'Analysis timed out',
+  );
+});
+
 /// Three-state readable status for the user's Deezer ARL cookie.
 ///
 /// `notSet` — user never pasted an ARL. No banner, no red chip; the app is
@@ -266,6 +387,16 @@ final sequenceStateStreamProvider = StreamProvider<SequenceState?>((ref) {
   final handler = ref.watch(audioHandlerNotifierProvider);
   if (handler == null) return Stream.value(null);
   return handler.player.sequenceStateStream;
+});
+
+final queueSnapshotStreamProvider =
+    StreamProvider<PlaybackQueueSnapshot>((ref) {
+  final handler = ref.watch(audioHandlerNotifierProvider);
+  if (handler == null) return Stream.value(PlaybackQueueSnapshot.empty());
+  return (() async* {
+    yield handler.queueSnapshot;
+    yield* handler.queueSnapshotStream;
+  })();
 });
 
 final shuffleModeStreamProvider = StreamProvider<ShuffleMode>((ref) {
@@ -1077,9 +1208,10 @@ Color? foregroundAccentColor(Color? accent, Brightness brightness) {
   }
 }
 
-// Holds the last non-null accent so widgets don't flash scheme.primary between
-// songs while the next cover-art color resolves.
-final _lastAccentProvider = StateProvider<Color?>((ref) => null);
+// Module-level cache for the last non-null accent. Using a plain variable
+// instead of a StateProvider avoids the Riverpod assertion that prohibits
+// modifying another provider's state during a provider's build phase.
+Color? _cachedLastAccent;
 
 // Accent color derived from the current song's album art.
 // Returns the last good accent during loading to avoid light-blue blinking.
@@ -1092,12 +1224,10 @@ final currentAccentColorProvider = Provider<Color?>((ref) {
   if (coverUrl.isEmpty) return null;
   final color = ref.watch(dominantColorProvider(coverUrl)).valueOrNull;
   if (color != null) {
-    ref.read(_lastAccentProvider.notifier).state = color;
+    _cachedLastAccent = color;
     return color;
   }
-  // During loading, keep the previous accent instead of falling back to
-  // scheme.primary — avoids the light-blue flash between tracks.
-  return ref.read(_lastAccentProvider);
+  return _cachedLastAccent;
 });
 
 // --- Helpers ---

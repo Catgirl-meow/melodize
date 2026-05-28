@@ -3,22 +3,27 @@ import 'dart:io';
 import '../utils/platform_dirs.dart';
 
 class AppPreferences {
-  final String streamQuality;      // 'lossless' | '320' | '192' | '128'
-  final String autoDownload;       // 'never' | 'on_play' | 'all'
-  final String downloadQuality;    // 'lossless' | '320' | '192' | '128'
-  final String companionUrl;       // e.g. 'http://100.73.73.73:8765'  (empty = disabled)
-  final String companionApiKey;    // X-API-Key value
-  final String deezerArl;          // Deezer ARL cookie — enables FLAC downloads via companion
-  final String librarySongSort;    // 'name' | 'artist' | 'recentlyAdded' | 'downloaded'
+  final String streamQuality; // 'lossless' | '320' | '192' | '128'
+  final String autoDownload; // 'never' | 'on_play' | 'all'
+  final String downloadQuality; // 'lossless' | '320' | '192' | '128'
+  final String
+      companionUrl; // e.g. 'http://100.73.73.73:8765'  (empty = disabled)
+  final String companionApiKey; // X-API-Key value
+  final String
+      deezerArl; // Deezer ARL cookie — enables FLAC downloads via companion
+  final String
+      librarySongSort; // 'name' | 'artist' | 'recentlyAdded' | 'downloaded'
   final bool librarySongAscending;
-  final String libraryAlbumSort;   // 'name' | 'artist' | 'year' | 'songCount'
+  final String libraryAlbumSort; // 'name' | 'artist' | 'year' | 'songCount'
   final bool libraryAlbumAscending;
-  final String libraryArtistSort;  // 'name' | 'albumCount'
+  final String libraryArtistSort; // 'name' | 'albumCount'
   final bool libraryArtistAscending;
-  final bool floatingNavBar;       // true = floating pill dock, false = classic nav bar
-  final String themeMode;          // 'dark' | 'light' | 'system'
-  final String shuffleMode;        // 'off' | 'shuffle' | 'smartShuffle'
-  final int crossfadeSeconds;      // 0 = off, 1–8 = fade duration between tracks
+  final bool
+      floatingNavBar; // true = floating pill dock, false = classic nav bar
+  final String themeMode; // 'dark' | 'light' | 'system'
+  final String shuffleMode; // 'off' | 'shuffle' | 'smartShuffle'
+  final int crossfadeSeconds; // 0 = off, 1–8 = fade duration between tracks
+  final bool djTransitionsEnabled; // true = allow enhanced analyzed transitions
 
   const AppPreferences({
     this.streamQuality = 'lossless',
@@ -37,9 +42,11 @@ class AppPreferences {
     this.themeMode = 'dark',
     this.shuffleMode = 'off',
     this.crossfadeSeconds = 0,
+    this.djTransitionsEnabled = true,
   });
 
-  bool get hasCompanion => companionUrl.isNotEmpty && companionApiKey.isNotEmpty;
+  bool get hasCompanion =>
+      companionUrl.isNotEmpty && companionApiKey.isNotEmpty;
   bool get hasDeezerArl => deezerArl.isNotEmpty;
 
   AppPreferences copyWith({
@@ -59,6 +66,7 @@ class AppPreferences {
     String? themeMode,
     String? shuffleMode,
     int? crossfadeSeconds,
+    bool? djTransitionsEnabled,
   }) =>
       AppPreferences(
         streamQuality: streamQuality ?? this.streamQuality,
@@ -70,13 +78,16 @@ class AppPreferences {
         librarySongSort: librarySongSort ?? this.librarySongSort,
         librarySongAscending: librarySongAscending ?? this.librarySongAscending,
         libraryAlbumSort: libraryAlbumSort ?? this.libraryAlbumSort,
-        libraryAlbumAscending: libraryAlbumAscending ?? this.libraryAlbumAscending,
+        libraryAlbumAscending:
+            libraryAlbumAscending ?? this.libraryAlbumAscending,
         libraryArtistSort: libraryArtistSort ?? this.libraryArtistSort,
-        libraryArtistAscending: libraryArtistAscending ?? this.libraryArtistAscending,
+        libraryArtistAscending:
+            libraryArtistAscending ?? this.libraryArtistAscending,
         floatingNavBar: floatingNavBar ?? this.floatingNavBar,
         themeMode: themeMode ?? this.themeMode,
         shuffleMode: shuffleMode ?? this.shuffleMode,
         crossfadeSeconds: crossfadeSeconds ?? this.crossfadeSeconds,
+        djTransitionsEnabled: djTransitionsEnabled ?? this.djTransitionsEnabled,
       );
 
   factory AppPreferences.fromJson(Map<String, dynamic> j) => AppPreferences(
@@ -96,6 +107,7 @@ class AppPreferences {
         themeMode: j['themeMode'] as String? ?? 'dark',
         shuffleMode: j['shuffleMode'] as String? ?? 'off',
         crossfadeSeconds: j['crossfadeSeconds'] as int? ?? 0,
+        djTransitionsEnabled: j['djTransitionsEnabled'] as bool? ?? true,
       );
 
   Map<String, dynamic> toJson() => {
@@ -115,6 +127,7 @@ class AppPreferences {
         'themeMode': themeMode,
         'shuffleMode': shuffleMode,
         'crossfadeSeconds': crossfadeSeconds,
+        'djTransitionsEnabled': djTransitionsEnabled,
       };
 
   static Future<File> get _file async {

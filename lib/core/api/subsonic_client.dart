@@ -61,8 +61,7 @@ class SubsonicClient {
     };
   }
 
-  // Stable auth params with fixed salt — used for cover art URLs so
-  // CachedNetworkImage disk cache keys are deterministic across app sessions.
+  // Fixed-salt auth params for cover art URLs so cache keys are deterministic.
   Map<String, String> _stableAuthParams() {
     const salt = 'melodize';
     final token = md5.convert(utf8.encode(config.password + salt)).toString();
@@ -262,9 +261,7 @@ class SubsonicClient {
     return '$_baseUrl/rest/download?${_encodeParams(params)}';
   }
 
-  // size=0 → Navidrome returns the original embedded image at full resolution.
-  // Use 0 for high-quality contexts (now-playing, album grids); list tiles can
-  // pass a smaller value if needed, but 0 is fine everywhere given image caching.
+  // size=0 returns the original image at full resolution.
   String coverArtUrl(String coverArtId, {int size = 0}) {
     final params = <String, String>{
       ..._stableAuthParams(),
@@ -279,8 +276,7 @@ class SubsonicClient {
       .join('&');
 
   // --- Downloads ---
-  // quality: 'lossless' → /rest/download (original file),
-  //          '320'/'192'/'128' → /rest/stream with maxBitRate (transcoded)
+  // quality: 'lossless' → /rest/download, other values → /rest/stream transcoded.
   Future<void> downloadSong(
     Song song,
     String savePath, {

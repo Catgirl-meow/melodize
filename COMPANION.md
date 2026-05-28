@@ -10,13 +10,13 @@ Subsonic/Navidrome API does not expose.
 | Download songs to server | Deezer FLAC via deemix; any URL via yt-dlp |
 | Audio analysis | Detects BPM, Camelot wheel key, energy, spectral centroid, and trailing silence per song |
 | Smart shuffle | BPM-progressive ordering using real analysis data (vs genre estimates) |
-| Transition mixing | Generates time-stretched crossfade mixes between songs, trimming trailing silence |
+| Transition mixing | Server-side time-stretched crossfade mixes. Not used by the app (client-side mixing removed in [2h](docs/pass-2/2h-playback-architecture.md)). |
 
 **Requirements**
-- Linux server with systemd (Debian 12+ / Ubuntu 22.04+ / any modern distro)
-- Python 3.10 or newer (check with `python3 --version`)
-- Navidrome running on the same machine
-- A reverse proxy (nginx, Caddy, Nginx Proxy Manager) **or** direct port access
+- Linux server with systemd
+- Python 3.10+
+- Navidrome on the same machine
+- A reverse proxy (nginx, Caddy, NPM) or direct port access
 
 ---
 
@@ -61,12 +61,12 @@ Create `/etc/melodize-companion/config.json`:
 
 | Key | Description |
 |-----|-------------|
-| `api_key` | Secret that the app sends with every request. Must match the key entered in app Settings. |
-| `port` | Port the companion listens on. Default `8765`. |
-| `music_dir` | **Absolute path** to the folder Navidrome scans for music. Find it in `/etc/navidrome/navidrome.toml` (`MusicFolder =`). |
-| `navidrome_db` | Path to Navidrome's SQLite database. Usually `/var/lib/navidrome/navidrome.db`. |
-| `download_format` | Audio format for non-Deezer downloads. `flac`, `opus`, `mp3`. |
-| `deezer_arl` | Optional Deezer ARL cookie for FLAC downloads (HiFi subscription required). The app can also send this per-request from Settings. |
+| `api_key` | Secret the app sends with every request. Must match the key in app Settings. |
+| `port` | Companion listen port. Default `8765`. |
+| `music_dir` | Absolute path to Navidrome's music folder. |
+| `navidrome_db` | Path to Navidrome's SQLite database. |
+| `download_format` | Format for non-Deezer downloads: `flac`, `opus`, `mp3`. |
+| `deezer_arl` | Optional Deezer ARL for HiFi FLAC. The app can also send this per-request. |
 
 ### Finding your paths
 
@@ -180,15 +180,17 @@ If either tool is at a non-standard path, set it in config:
 
 ### Audio analysis dependencies (optional)
 
-Required for BPM/key detection, trailing-silence measurement, and transition mixing:
+Required for BPM/key detection and trailing-silence measurement:
 
 ```bash
-python3 -m pip install librosa numpy soundfile pyrubberband
+python3 -m pip install librosa numpy soundfile
 ```
 
-If these are not installed, song analysis jobs fail gracefully and the companion
-reports `"analysis not available"`. The health endpoint shows whether analysis
-dependencies are loaded.
+If these are not installed, analysis jobs fail gracefully and the companion
+reports `"analysis not available"`. The health endpoint shows the analysis status.
+
+> `pyrubberband` is only needed for the server-side `/api/audio/mix-transition`
+> endpoint. The app no longer uses it.
 
 ---
 
@@ -577,7 +579,10 @@ All endpoints require the `X-API-Key` header except `/health`.
 | `GET` | `/api/audio/analysis` | All cached analysis results. Returns `{"results":[{song_id, bpm, key, energy, spectral_centroid, duration, tail_silence, data_version}, ...]}` |
 | `GET` | `/api/audio/analysis/{song_id}` | Single song's cached analysis |
 
-### Transition mixing
+### Transition mixing (server-side only)
+
+> The app no longer consumes these endpoints. They remain server-side for direct
+> API use or future re-integration.
 
 | Method | Path | Description |
 |--------|------|-------------|

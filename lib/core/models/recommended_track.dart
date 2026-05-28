@@ -4,10 +4,10 @@ class RecommendedTrack {
   final String artist;
   final String album;
   final int durationSeconds;
-  final String? previewUrl;  // 30-second MP3 from Deezer CDN
-  final String? coverUrl;    // album art, full HTTPS URL
-  final double? bpm;         // BPM from Deezer API (track-level field)
-  final String? genre;       // Genre name, extracted from Deezer genre_id if possible
+  final String? previewUrl;
+  final String? coverUrl;
+  final double? bpm;
+  final String? genre;
 
   const RecommendedTrack({
     required this.deezerId,
@@ -25,7 +25,7 @@ class RecommendedTrack {
     final artist = json['artist'] as Map<String, dynamic>? ?? {};
     final album = json['album'] as Map<String, dynamic>? ?? {};
 
-    // Extract genre from Deezer's genres.data array or genre_id field.
+    // Try genres.data array first, fall back to genre_id mapping.
     String? genre;
     final genresData = json['genres'] as Map<String, dynamic>?;
     if (genresData != null) {
@@ -54,11 +54,7 @@ class RecommendedTrack {
   }
 }
 
-/// Best-effort mapping from Deezer genre_id to a readable genre name.
-///
-/// Deezer genre IDs are documented at https://developers.deezer.com/api/genre.
-/// The mapping covers the most common genres; unknown IDs return null so the
-/// caller falls through to other metadata or estimation.
+// Mapping from Deezer genre_id to a readable genre name.
 String? _deezerGenreIdToName(int id) {
   switch (id) {
     case 0: return null; // "Not Found"

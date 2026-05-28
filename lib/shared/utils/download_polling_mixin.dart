@@ -4,21 +4,17 @@ import '../../core/api/navidrome_client.dart';
 import '../../core/providers.dart';
 import 'snack.dart';
 
-/// Mixin for ConsumerState subclasses that poll a companion download job.
-/// Provides [startDownloadPolling] and automatically cancels the timer on
-/// dispose.  Mix into any ConsumerState that needs Deezer→server downloads.
+/// Polls a companion download job and shows snackbars for completion/failure.
+/// Mix into any [ConsumerState] that initiates Deezer→server downloads.
 mixin DownloadPollingMixin<T extends ConsumerStatefulWidget>
     on ConsumerState<T> {
   Timer? _pollTimer;
-  // Track consecutive poll failures so we can warn after sustained loss
-  // instead of failing silently when the companion drops mid-job.
+  // Warn after sustained connection loss instead of failing silently.
   int _consecutiveErrors = 0;
   bool _connectionLostSnackShown = false;
 
-  /// Override to force a specific bottom-margin for snacks fired by this
-  /// mixin. Needed when the host widget lives outside the shell's injected
-  /// MediaQuery padding (e.g. the NowPlayingScreen player overlay) — the
-  /// default offset would put the snack behind the mini player / dock.
+  /// Bottom margin for snackbars. Override when the widget lives outside
+  /// the shell's MediaQuery (e.g. NowPlaying overlay).
   double? get snackBottomOffset => null;
 
   @override
@@ -32,15 +28,14 @@ mixin DownloadPollingMixin<T extends ConsumerStatefulWidget>
     _pollTimer?.cancel();
     _consecutiveErrors = 0;
     _connectionLostSnackShown = false;
-    // First tick at 3 s for snappy small-file completion, then every 10 s.
+    // Fast first tick for small files, then every 10 s.
     _pollTimer = Timer(const Duration(seconds: 3), () => _poll(companion, jobId, ++attempts));
   }
 
   void _poll(CompanionClient companion, String jobId, int attempts) async {
     if (!mounted) return;
     if (attempts >= 36) {
-      // 5 min budget exhausted — surface a snackbar so the user knows the
-      // job stopped instead of silently dropping it.
+      // 5 min budget exhausted.
       if (mounted) {
         showStyledSnack(context,
             'Download timed out — companion may be slow or stalled. Try again.',
@@ -54,10 +49,8 @@ mixin DownloadPollingMixin<T extends ConsumerStatefulWidget>
       final s = status['status'] as String?;
       if (s == 'done') {
         ref.read(subsonicClientProvider)?.startScan();
-        // Single delayed invalidation only. The previous immediate +
-        // delayed pair caused two full library refreshes back-to-back —
-        // the immediate one always missed because the song hadn't been
-        // indexed by Navidrome yet, so it was wasted work + UI jank.
+          // Navidrome needs time to index; the immediate refresh always
+        // missed, so only the delayed one remains.
         Future.delayed(const Duration(seconds: 12), () {
           if (mounted) ref.invalidate(allSongsProvider);
         });
@@ -77,9 +70,7 @@ mixin DownloadPollingMixin<T extends ConsumerStatefulWidget>
         return;
       }
     } catch (_) {
-      // Transient network hiccup — keep polling rather than giving up.
-      // After 3 consecutive failures (≈30 s) surface a one-time snack so
-      // the user knows the companion is unreachable.
+      // Keep polling on transient errors. Warn after 3 failures (~30 s).
       _consecutiveErrors++;
       if (_consecutiveErrors >= 3 && !_connectionLostSnackShown && mounted) {
         _connectionLostSnackShown = true;

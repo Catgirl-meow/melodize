@@ -29,6 +29,24 @@ static void my_application_activate(GApplication* application) {
   // the compositor will add or omit decorations per its own settings.
   gtk_window_set_title(window, "melodize");
 
+  // Set the window icon from the bundled icon.png so KDE/Wayland shows
+  // the app icon instead of the generic Wayland placeholder.
+  {
+    gchar exe_path[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", exe_path, PATH_MAX - 1);
+    if (len != -1) {
+      exe_path[len] = '\0';
+      gchar* exe_dir = g_path_get_dirname(exe_path);
+      // Icon is installed in data/icon.png alongside the executable.
+      gchar* icon_path = g_build_filename(exe_dir, "data", "icon.png", NULL);
+      if (!gtk_window_set_icon_from_file(window, icon_path, NULL)) {
+        g_warning("Failed to load window icon from %s", icon_path);
+      }
+      g_free(icon_path);
+      g_free(exe_dir);
+    }
+  }
+
   gtk_window_set_default_size(window, 1280, 720);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
