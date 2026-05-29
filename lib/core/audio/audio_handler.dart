@@ -113,6 +113,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   bool _loading = false;
 
   Timer? _recalcDebounceTimer;
+  int? _shuffleSeed;
+  bool _snapshotRecalculating = false;
 
   void setCompanionAnalysis(BpmCache? cache) {
     _companionBpmCache = cache;
@@ -372,6 +374,21 @@ class MelodizeAudioHandler extends BaseAudioHandler {
             plannedSongs, _shufflePos),
       );
     }
+    // Shuffle is active but the virtual order is empty (e.g. after a rapid
+    // queue mutation or a code path that cleared it). Rebuild immediately
+    // rather than showing the stale fallback.
+    if (_shuffleMode != ShuffleMode.off &&
+        _loadQueueSongs.length >= 2 &&
+        !_snapshotRecalculating &&
+        !_deckTransitionActive) {
+      _snapshotRecalculating = true;
+      _recalculateShuffleOrderImpl();
+      _snapshotRecalculating = false;
+      if (_shuffleOrder.isNotEmpty) {
+        return _snapshot();
+      }
+    }
+
     _cachedShuffleOrder = null;
     _cachedPlannedSongs = null;
     _cachedShuffleHash = 0;
@@ -440,6 +457,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     if (_shuffleMode != ShuffleMode.off && songs.length > 1) {
       _shuffleOrder = List.generate(songs.length, (i) => i);
       _shufflePos = idx.clamp(0, _shuffleOrder.length - 1);
+      _shuffleSeed = DateTime.now().microsecondsSinceEpoch;
       _physicalToVirtual = {
         for (int vp = 0; vp < _shuffleOrder.length; vp++)
           _shuffleOrder[vp]: vp,
@@ -627,8 +645,23 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         _seekingVirtual = false;
         return;
       }
-      // End of virtual order — player continues in physical order.
-      _shuffleOrder = [];
+      // Wrap around to the beginning of the virtual order so the queue
+      // stays in shuffle/smart-shuffle mode instead of reverting to the
+      // original playlist order.
+      _shufflePos = 0;
+      final targetIndex = _shuffleOrder[_shufflePos];
+      _seekingVirtual = true;
+      try {
+        if (targetIndex >= 0 && targetIndex < _playlistSource.length) {
+          await player.seek(Duration.zero, index: targetIndex);
+          _queue.setCurrentIndex(targetIndex);
+        }
+      } catch (e) {
+        debugPrint('skipToNext wrap-around seek error: $e');
+      }
+      _emitQueueSnapshot();
+      _seekingVirtual = false;
+      return;
     }
     await player.seekToNext();
   }
@@ -743,7 +776,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
             songs: _loadQueueSongs,
             currentIndex: currentIdx,
             mode: PlaybackMode.shuffle,
-            seed: DateTime.now().microsecondsSinceEpoch,
+            seed: _shuffleSeed ?? DateTime.now().microsecondsSinceEpoch,
           );
           // Build the physical-index map from the actual player source so
           // that virtual indices always point to the correct source slot.
@@ -798,7 +831,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
             currentIndex: currentIdx.clamp(0, _loadQueueSongs.length - 1),
             mode: PlaybackMode.smartShuffle,
             cache: cache,
-            seed: DateTime.now().microsecondsSinceEpoch,
+            seed: _shuffleSeed ?? DateTime.now().microsecondsSinceEpoch,
           );
 
           // Build virtual order: map each ordered song to its physical index
