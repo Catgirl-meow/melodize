@@ -276,16 +276,19 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           buildDefaultDragHandles: false,
-          proxyDecorator: (child, index, animation) => Container(
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: scheme.outlineVariant.withValues(alpha: 0.5),
-                width: 1,
+          proxyDecorator: (child, index, animation) => Material(
+            type: MaterialType.transparency,
+            child: Container(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: scheme.outlineVariant.withValues(alpha: 0.5),
+                  width: 1,
+                ),
               ),
+              child: child,
             ),
-            child: child,
           ),
           itemCount: upNext.length,
           onReorder: (oldIndex, newIndex) {
