@@ -1,59 +1,91 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/audio/playback_core.dart';
+import '../../core/audio/audio_handler.dart';
+import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/widgets/cover_art_image.dart';
 
-class QueueScreen extends ConsumerWidget {
+class QueueScreen extends ConsumerStatefulWidget {
   const QueueScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<QueueScreen> createState() => _QueueScreenState();
+}
+
+class _QueueScreenState extends ConsumerState<QueueScreen> {
+  bool _playedExpanded = false;
+
+  @override
+  Widget build(BuildContext context) {
     final snapshot = ref.watch(queueSnapshotStreamProvider).valueOrNull;
-    final queue = snapshot?.songs ?? const [];
-    final queueLength = queue.length;
+    final songs = snapshot?.songs ?? const [];
     final currentIndex = snapshot?.currentIndex ?? 0;
+    final mode = snapshot?.mode ?? PlaybackMode.normal;
+    final transitions = snapshot?.upcomingTransitions ?? const [];
     final handler = ref.read(audioHandlerNotifierProvider);
     final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     final accent = ref.watch(currentAccentColorProvider);
     final fg =
         foregroundAccentColor(accent, scheme.brightness) ?? scheme.primary;
+    final isPlaying = ref.watch(
+      playerStateStreamProvider.select((s) => s.valueOrNull?.playing ?? false),
+    );
+
+    final nowPlaying =
+        (currentIndex >= 0 && currentIndex < songs.length)
+            ? songs[currentIndex]
+            : null;
+    final upNext = currentIndex + 1 < songs.length
+        ? songs.sublist(currentIndex + 1)
+        : <Song>[];
+    final played = currentIndex > 0
+        ? songs.sublist(0, currentIndex)
+        : <Song>[];
+
+    // Map target song index → transition that leads into it.
+    final transitionMap = <int, PlannedTransition>{};
+    for (int i = 0; i < transitions.length; i++) {
+      final targetIdx = currentIndex + i + 1;
+      if (targetIdx < songs.length) {
+        transitionMap[targetIdx] = transitions[i];
+      }
+    }
 
     return Material(
       color: scheme.surface,
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      // Clip.hardEdge avoids a GPU save layer (Clip.antiAlias forces one),
-      // which makes the modal dismiss animation smooth.
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
       clipBehavior: Clip.hardEdge,
       child: SizedBox(
-        height: MediaQuery.of(context).size.height * 0.75,
+        height: MediaQuery.of(context).size.height * 0.82,
         child: Column(
           children: [
-            // Handle
+            // Drag handle
             Center(
               child: Container(
-                margin: const EdgeInsets.symmetric(vertical: 12),
-                width: 36,
+                margin: const EdgeInsets.symmetric(vertical: 16),
+                width: 32,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: scheme.onSurfaceVariant.withValues(alpha: 0.38),
+                  color: scheme.onSurfaceVariant.withValues(alpha: 0.4),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
+            // Header row
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 8, 12),
+              padding: const EdgeInsets.fromLTRB(20, 0, 12, 16),
               child: Row(
                 children: [
-                  Text('Queue',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(fontWeight: FontWeight.bold)),
-                  const SizedBox(width: 8),
-                  Text('$queueLength songs',
-                      style: TextStyle(
-                          color: scheme.onSurfaceVariant, fontSize: 13)),
+                  Text(
+                    'Queue',
+                    style: textTheme.titleLarge
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(width: 12),
+                  _ModeChip(mode: mode, scheme: scheme),
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.close_rounded, size: 20),
@@ -63,75 +95,163 @@ class QueueScreen extends ConsumerWidget {
                 ],
               ),
             ),
+            // Content
             Expanded(
-              child: queue.isEmpty
+              child: songs.isEmpty
                   ? Center(
-                      child: Text('Queue is empty',
-                          style: TextStyle(color: scheme.onSurfaceVariant)),
-                    )
-                  : ReorderableListView.builder(
-                      padding: EdgeInsets.zero,
-                      // Limit pre-building of off-screen items
-                      cacheExtent: 50,
-                      proxyDecorator: (child, index, animation) => Material(
-                        color: scheme.surfaceContainerHighest,
-                        elevation: 4,
-                        shadowColor: Colors.black38,
-                        child: child,
+                      child: Text(
+                        'Queue is empty',
+                        style: TextStyle(color: scheme.onSurfaceVariant),
                       ),
-                      itemCount: queue.length,
-                      onReorder: (oldIndex, newIndex) {
-                        if (newIndex > oldIndex) newIndex--;
-                        handler?.reorderQueue(oldIndex, newIndex);
-                      },
-                      itemBuilder: (_, i) {
-                        final song = queue[i];
-                        final isCurrent = i == currentIndex;
-                        return RepaintBoundary(
-                          key: ValueKey(song.id),
-                          child: ListTile(
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 2),
-                            leading: CoverArtImage(
-                              coverArtId: song.coverArt,
-                              externalUrl: song.externalCoverUrl,
-                              size: 44,
-                            ),
-                            title: Text(
-                              song.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontWeight: isCurrent
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
-                                color: isCurrent ? fg : null,
+                    )
+                  : CustomScrollView(
+                      slivers: [
+                        // ── Now Playing ──
+                        if (nowPlaying != null)
+                          SliverToBoxAdapter(
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                  16, 0, 16, 16),
+                              child: _NowPlayingCard(
+                                song: nowPlaying,
+                                accent: fg,
+                                scheme: scheme,
+                                textTheme: textTheme,
+                                isPlaying: isPlaying,
+                                nextTransition: transitionMap[currentIndex + 1],
                               ),
                             ),
-                            subtitle: Text(
-                              song.artist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  color: scheme.onSurfaceVariant, fontSize: 12),
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (isCurrent) _AnimatedEqualizer(color: fg),
-                                IconButton(
-                                  icon:
-                                      const Icon(Icons.close_rounded, size: 18),
-                                  onPressed: () => handler?.removeFromQueue(i),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                const Icon(Icons.drag_handle_rounded, size: 20),
-                              ],
-                            ),
-                            onTap: () => handler?.skipToIndex(i),
                           ),
-                        );
-                      },
+
+                        // ── Up Next ──
+                        SliverToBoxAdapter(
+                          child: _SectionHeader(
+                            title: 'Up Next',
+                            count: upNext.length,
+                            scheme: scheme,
+                            trailing: mode == PlaybackMode.normal &&
+                                    upNext.length > 1
+                                ? Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.drag_handle_rounded,
+                                        size: 14,
+                                        color: scheme.onSurfaceVariant,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Hold to reorder',
+                                        style: textTheme.labelSmall?.copyWith(
+                                          color: scheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : mode != PlaybackMode.normal
+                                    ? Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.auto_awesome,
+                                            size: 14,
+                                            color: scheme.primary,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            'Auto-ordered',
+                                            style: textTheme.labelSmall
+                                                ?.copyWith(
+                                              color: scheme.primary,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : null,
+                          ),
+                        ),
+                        if (upNext.isNotEmpty)
+                          mode == PlaybackMode.normal
+                              ? _buildReorderableUpNext(
+                                  upNext,
+                                  currentIndex + 1,
+                                  handler,
+                                  fg,
+                                  scheme,
+                                  textTheme,
+                                  transitionMap,
+                                )
+                              : SliverPadding(
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 16),
+                                  sliver: SliverList(
+                                    delegate: SliverChildBuilderDelegate(
+                                      (context, i) => _UpNextItem(
+                                        song: upNext[i],
+                                        queueIndex: currentIndex + 1 + i,
+                                        number: i + 1,
+                                        accent: fg,
+                                        scheme: scheme,
+                                        textTheme: textTheme,
+                                        mode: mode,
+                                        transition: transitionMap[
+                                            currentIndex + 1 + i],
+                                        onTap: () =>
+                                            handler?.skipToIndex(
+                                                currentIndex + 1 + i),
+                                        onRemove: () =>
+                                            handler?.removeFromQueue(
+                                                currentIndex + 1 + i),
+                                      ),
+                                      childCount: upNext.length,
+                                    ),
+                                  ),
+                                )
+                        else
+                          const SliverToBoxAdapter(
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 12),
+                              child: Text('Nothing up next'),
+                            ),
+                          ),
+
+                        // ── Played ──
+                        SliverToBoxAdapter(
+                          child: _SectionHeader(
+                            title: 'Played',
+                            count: played.length,
+                            scheme: scheme,
+                            onTap: played.isNotEmpty
+                                ? () => setState(
+                                    () => _playedExpanded = !_playedExpanded)
+                                : null,
+                            expanded: _playedExpanded,
+                          ),
+                        ),
+                        if (played.isNotEmpty && _playedExpanded)
+                          SliverPadding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 16),
+                            sliver: SliverList(
+                              delegate: SliverChildBuilderDelegate(
+                                (context, i) => _PlayedItem(
+                                  song: played[i],
+                                  onTap: () => handler?.skipToIndex(i),
+                                  onRemove: () =>
+                                      handler?.removeFromQueue(i),
+                                  scheme: scheme,
+                                  textTheme: textTheme,
+                                ),
+                                childCount: played.length,
+                              ),
+                            ),
+                          ),
+
+                        const SliverPadding(
+                            padding: EdgeInsets.only(bottom: 24)),
+                      ],
                     ),
             ),
           ],
@@ -139,13 +259,540 @@ class QueueScreen extends ConsumerWidget {
       ),
     );
   }
+
+  Widget _buildReorderableUpNext(
+    List<Song> upNext,
+    int baseIndex,
+    MelodizeAudioHandler? handler,
+    Color accent,
+    ColorScheme scheme,
+    TextTheme textTheme,
+    Map<int, PlannedTransition> transitionMap,
+  ) {
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: ReorderableListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          buildDefaultDragHandles: false,
+          proxyDecorator: (child, index, animation) => Container(
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: scheme.outlineVariant.withValues(alpha: 0.5),
+                width: 1,
+              ),
+            ),
+            child: child,
+          ),
+          itemCount: upNext.length,
+          onReorder: (oldIndex, newIndex) {
+            if (newIndex > oldIndex) newIndex--;
+            handler?.reorderQueue(baseIndex + oldIndex, baseIndex + newIndex);
+          },
+          itemBuilder: (context, i) {
+            final song = upNext[i];
+            return _UpNextItem(
+              key: ValueKey('upnext_${baseIndex + i}'),
+              song: song,
+              queueIndex: baseIndex + i,
+              number: i + 1,
+              accent: accent,
+              scheme: scheme,
+              textTheme: textTheme,
+              mode: PlaybackMode.normal,
+              transition: transitionMap[baseIndex + i],
+              onTap: () => handler?.skipToIndex(baseIndex + i),
+              onRemove: () => handler?.removeFromQueue(baseIndex + i),
+              dragHandle: true,
+            );
+          },
+        ),
+      ),
+    );
+  }
 }
 
-// ---------------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────────────────────
+//  Mode chip
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ModeChip extends StatelessWidget {
+  final PlaybackMode mode;
+  final ColorScheme scheme;
+
+  const _ModeChip({required this.mode, required this.scheme});
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, label, bg, fg) = switch (mode) {
+      PlaybackMode.normal => (
+          Icons.playlist_play,
+          'Sequential',
+          scheme.surfaceContainerHighest,
+          scheme.onSurfaceVariant
+        ),
+      PlaybackMode.shuffle => (
+          Icons.shuffle,
+          'Shuffle',
+          scheme.primaryContainer,
+          scheme.onPrimaryContainer
+        ),
+      PlaybackMode.smartShuffle => (
+          Icons.auto_awesome,
+          'Smart',
+          scheme.tertiaryContainer,
+          scheme.onTertiaryContainer
+        ),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: fg),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: fg,
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Section header
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final int count;
+  final ColorScheme scheme;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+  final bool expanded;
+
+  const _SectionHeader({
+    required this.title,
+    required this.count,
+    required this.scheme,
+    this.trailing,
+    this.onTap,
+    this.expanded = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: GestureDetector(
+              onTap: onTap,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '$count',
+                      style: textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (onTap != null) ...[
+                    const SizedBox(width: 4),
+                    AnimatedRotation(
+                      turns: expanded ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 200),
+                      child: Icon(
+                        Icons.expand_more,
+                        size: 18,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          if (trailing != null) trailing!,
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Now Playing card
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _NowPlayingCard extends StatelessWidget {
+  final Song song;
+  final Color accent;
+  final ColorScheme scheme;
+  final TextTheme textTheme;
+  final bool isPlaying;
+  final PlannedTransition? nextTransition;
+
+  const _NowPlayingCard({
+    required this.song,
+    required this.accent,
+    required this.scheme,
+    required this.textTheme,
+    this.isPlaying = true,
+    this.nextTransition,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      color: scheme.surfaceContainerHighest,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: CoverArtImage(
+                    coverArtId: song.coverArt,
+                    externalUrl: song.externalCoverUrl,
+                    size: 64,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        song.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: accent,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        song.artist,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.bodyMedium?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                      if (song.album.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          song.album,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant.withValues(
+                                alpha: 0.7),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _AnimatedEqualizer(color: accent, isPlaying: isPlaying),
+              ],
+            ),
+            if (nextTransition != null) ...[
+              const SizedBox(height: 10),
+              const Divider(height: 1),
+              const SizedBox(height: 10),
+              _TransitionPill(transition: nextTransition!, scheme: scheme),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Up Next item
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _UpNextItem extends StatelessWidget {
+  final Song song;
+  final int queueIndex;
+  final int number;
+  final Color accent;
+  final ColorScheme scheme;
+  final TextTheme textTheme;
+  final PlaybackMode mode;
+  final PlannedTransition? transition;
+  final VoidCallback onTap;
+  final VoidCallback onRemove;
+  final bool dragHandle;
+
+  const _UpNextItem({
+    super.key,
+    required this.song,
+    required this.queueIndex,
+    required this.number,
+    required this.accent,
+    required this.scheme,
+    required this.textTheme,
+    this.mode = PlaybackMode.normal,
+    this.transition,
+    required this.onTap,
+    required this.onRemove,
+    this.dragHandle = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          leading: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 28,
+                child: Text(
+                  '$number',
+                  textAlign: TextAlign.center,
+                  style: textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurfaceVariant.withValues(alpha: 0.55),
+                  ),
+                ),
+              ),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: CoverArtImage(
+                  coverArtId: song.coverArt,
+                  externalUrl: song.externalCoverUrl,
+                  size: 44,
+                ),
+              ),
+            ],
+          ),
+          title: Text(
+            song.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: textTheme.bodyLarge?.copyWith(
+              fontWeight: FontWeight.w500,
+              color: scheme.onSurface,
+            ),
+          ),
+          subtitle: Text(
+            song.artist,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: textTheme.bodySmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.close_rounded, size: 18),
+                onPressed: onRemove,
+                visualDensity: VisualDensity.compact,
+                color: scheme.onSurfaceVariant,
+              ),
+              if (dragHandle)
+                ReorderableDragStartListener(
+                  index: number - 1,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 4, right: 8),
+                    child: Icon(
+                      Icons.drag_handle_rounded,
+                      size: 20,
+                      color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          onTap: onTap,
+        ),
+        // Transition hint between this song and the next — only in smart shuffle
+        if (mode == PlaybackMode.smartShuffle && transition != null)
+          Padding(
+            padding: const EdgeInsets.only(left: 36, bottom: 4),
+            child: _TransitionPill(transition: transition!, scheme: scheme),
+          ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Played item
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PlayedItem extends StatelessWidget {
+  final Song song;
+  final VoidCallback onTap;
+  final VoidCallback onRemove;
+  final ColorScheme scheme;
+  final TextTheme textTheme;
+
+  const _PlayedItem({
+    required this.song,
+    required this.onTap,
+    required this.onRemove,
+    required this.scheme,
+    required this.textTheme,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Opacity(
+      opacity: 0.5,
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+        leading: ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: CoverArtImage(
+            coverArtId: song.coverArt,
+            externalUrl: song.externalCoverUrl,
+            size: 36,
+          ),
+        ),
+        title: Text(
+          song.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w400,
+            color: scheme.onSurface,
+          ),
+        ),
+        subtitle: Text(
+          song.artist,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: textTheme.bodySmall?.copyWith(
+            color: scheme.onSurfaceVariant,
+          ),
+        ),
+        trailing: IconButton(
+          icon: const Icon(Icons.close_rounded, size: 16),
+          onPressed: onRemove,
+          visualDensity: VisualDensity.compact,
+          color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
+        ),
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Transition pill
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _TransitionPill extends StatelessWidget {
+  final PlannedTransition transition;
+  final ColorScheme scheme;
+
+  const _TransitionPill({required this.transition, required this.scheme});
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, label, color) = switch (transition.kind) {
+      TransitionKind.gapless => (
+          Icons.play_arrow_rounded,
+          'Gapless',
+          scheme.outline
+        ),
+      TransitionKind.volumeCrossfade => (
+          Icons.blur_on_rounded,
+          'Crossfade · ${transition.duration.inSeconds}s',
+          scheme.primary
+        ),
+      TransitionKind.djBlend => (
+          Icons.graphic_eq_rounded,
+          'DJ Blend · ${transition.duration.inSeconds}s',
+          scheme.tertiary
+        ),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: color.withValues(alpha: 0.20),
+          width: 0.5,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w500,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Animated equalizer (unchanged)
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _AnimatedEqualizer extends StatefulWidget {
   final Color color;
-  const _AnimatedEqualizer({required this.color});
+  final bool isPlaying;
+  const _AnimatedEqualizer({required this.color, this.isPlaying = true});
 
   @override
   State<_AnimatedEqualizer> createState() => _AnimatedEqualizerState();
@@ -161,16 +808,12 @@ class _AnimatedEqualizerState extends State<_AnimatedEqualizer>
     super.initState();
     _controllers = [
       AnimationController(
-          vsync: this, duration: const Duration(milliseconds: 380))
-        ..repeat(reverse: true),
+          vsync: this, duration: const Duration(milliseconds: 380)),
       AnimationController(
-          vsync: this, duration: const Duration(milliseconds: 500))
-        ..repeat(reverse: true),
+          vsync: this, duration: const Duration(milliseconds: 500)),
       AnimationController(
-          vsync: this, duration: const Duration(milliseconds: 420))
-        ..repeat(reverse: true),
+          vsync: this, duration: const Duration(milliseconds: 420)),
     ];
-    // Stagger start phases so bars aren't in sync
     _controllers[1].value = 0.5;
     _controllers[2].value = 0.25;
     _anims = [
@@ -181,6 +824,28 @@ class _AnimatedEqualizerState extends State<_AnimatedEqualizer>
       Tween<double>(begin: 0.35, end: 0.85).animate(
           CurvedAnimation(parent: _controllers[2], curve: Curves.easeInOut)),
     ];
+    _updateAnimationState();
+  }
+
+  @override
+  void didUpdateWidget(_AnimatedEqualizer old) {
+    super.didUpdateWidget(old);
+    if (widget.isPlaying != old.isPlaying) {
+      _updateAnimationState();
+    }
+  }
+
+  void _updateAnimationState() {
+    if (widget.isPlaying) {
+      for (final c in _controllers) {
+        c.repeat(reverse: true);
+      }
+    } else {
+      for (final c in _controllers) {
+        c.stop();
+        c.value = 0.25; // freeze at flat paused state
+      }
+    }
   }
 
   @override

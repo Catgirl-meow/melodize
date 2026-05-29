@@ -331,8 +331,7 @@ class _SlideDismiss extends StatefulWidget {
 class _SlideDismissState extends State<_SlideDismiss>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
-  VoidCallback? _listener;
-  double _dy = 0;
+  final _dy = ValueNotifier<double>(0.0);
   bool _dismissing = false;
 
   @override
@@ -343,71 +342,63 @@ class _SlideDismissState extends State<_SlideDismiss>
 
   @override
   void dispose() {
-    _clearListener();
+    _dy.dispose();
     _ctrl.dispose();
     super.dispose();
-  }
-
-  void _setListener(VoidCallback fn) {
-    _clearListener();
-    _listener = fn;
-    _ctrl.addListener(fn);
-  }
-
-  void _clearListener() {
-    if (_listener != null) {
-      _ctrl.removeListener(_listener!);
-      _listener = null;
-    }
   }
 
   void _onUpdate(DragUpdateDetails d) {
     if (_dismissing) return;
     _ctrl.stop();
-    final next = _dy + d.delta.dy;
+    final next = _dy.value + d.delta.dy;
     if (next < 0) return; // don't let user drag upward
-    setState(() => _dy = next);
+    _dy.value = next;
   }
 
   void _onEnd(DragEndDetails d) {
     if (_dismissing) return;
     final screenH = MediaQuery.of(context).size.height;
     final vel = d.velocity.pixelsPerSecond.dy;
-    if (_dy > screenH * 0.22 || vel > 500) {
-      _animateOut(vel);
+    if (_dy.value > screenH * 0.22 || vel > 500) {
+      _animateOut(vel, screenH);
     } else {
       _snapBack();
     }
   }
 
-  void _animateOut(double vel) {
+  void _animateOut(double vel, double screenH) {
     _dismissing = true;
-    final screenH = MediaQuery.of(context).size.height;
-    final remaining = screenH - _dy;
+    final remaining = screenH - _dy.value;
     final ms = (remaining / math.max(vel, 600) * 1000).clamp(80.0, 280.0).round();
-    final anim = Tween<double>(begin: _dy, end: screenH).animate(
+    final anim = Tween<double>(begin: _dy.value, end: screenH).animate(
       CurvedAnimation(parent: _ctrl, curve: Curves.easeIn),
     );
     _ctrl
       ..duration = Duration(milliseconds: ms)
       ..reset();
-    _setListener(() { if (mounted) setState(() => _dy = anim.value); });
+    late final VoidCallback listener;
+    listener = () { _dy.value = anim.value; };
+    _ctrl.addListener(listener);
     _ctrl.forward().whenComplete(() {
-      _clearListener();
+      _ctrl.removeListener(listener);
       if (mounted) Navigator.of(context).pop();
     });
   }
 
   void _snapBack() {
-    final startDy = _dy;
+    final startDy = _dy.value;
     final anim = Tween<double>(begin: startDy, end: 0).animate(
       CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic),
     );
     _ctrl
       ..duration = const Duration(milliseconds: 240)
       ..reset();
-    _setListener(() { if (mounted) setState(() => _dy = anim.value); });
-    _ctrl.forward().whenComplete(_clearListener);
+    late final VoidCallback listener;
+    listener = () { _dy.value = anim.value; };
+    _ctrl.addListener(listener);
+    _ctrl.forward().whenComplete(() {
+      _ctrl.removeListener(listener);
+    });
   }
 
   @override
@@ -415,8 +406,12 @@ class _SlideDismissState extends State<_SlideDismiss>
     return GestureDetector(
       onVerticalDragUpdate: _onUpdate,
       onVerticalDragEnd: _onEnd,
-      child: Transform.translate(
-        offset: Offset(0, _dy),
+      child: ValueListenableBuilder<double>(
+        valueListenable: _dy,
+        builder: (_, dy, child) => Transform.translate(
+          offset: Offset(0, dy),
+          child: child,
+        ),
         child: widget.child,
       ),
     );
