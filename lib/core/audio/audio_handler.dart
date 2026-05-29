@@ -62,6 +62,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   bool _deckTransitionActive = false;
   int? _deckTransitionFromIndex;
   int? _deckTransitionToIndex;
+  Song? _deckTransitionToSong;
   bool _mainPlayerMutedDuringTransition = false;
   Timer? _sleepTimer;
   bool _nowPlayingReported = false;
@@ -222,6 +223,10 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     // Update MediaSession media item on song change. Broadcast position=0
     // immediately so the system player shows the correct time.
     player.sequenceStateStream.listen((seqState) {
+      // Suppress metadata updates during a deck crossfade so the UI doesn't
+      // flash the auto-advanced main-player track before the handoff.
+      if (_deckTransitionActive) return;
+
       final rawTag = seqState?.currentSource?.tag;
       final song = rawTag is Song ? rawTag : null;
 
@@ -300,12 +305,14 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   void setStreamQuality(String quality) => _streamQuality = quality;
 
   Song? get currentSong {
+    if (_deckTransitionActive) return _deckTransitionToSong;
     final tag = player.sequenceState?.currentSource?.tag;
     if (tag is Song) return tag;
     return null;
   }
 
   Stream<Song?> get currentSongStream => player.sequenceStateStream.map((s) {
+        if (_deckTransitionActive) return _deckTransitionToSong;
         final tag = s?.currentSource?.tag;
         if (tag is Song) return tag;
         return null;
@@ -332,7 +339,9 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     if (_shuffleOrder.isNotEmpty &&
         _shufflePos < _shuffleOrder.length) {
       // Content-hash check for mutations that keep length but permute.
-      var hash = 0;
+      // Mix in _playlistSource.length so replacing the queue with another
+      // queue of the same length still invalidates the cache.
+      var hash = _playlistSource.length;
       for (int i = 0; i < _shuffleOrder.length; i++) {
         hash = hash * 31 + _shuffleOrder[i];
       }
@@ -421,17 +430,26 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       startIndex: idx,
       mode: _playbackModeFor(_shuffleMode),
     );
-    _emitQueueSnapshot();
 
     _loadQueueSongs = List.from(songs);
     _lastKnownPhysicalIndex = null;
+    // Invalidate any stale snapshot cache from a previous queue.
+    _cachedShuffleOrder = null;
+    _cachedPlannedSongs = null;
+    _cachedShuffleHash = 0;
     if (_shuffleMode != ShuffleMode.off && songs.length > 1) {
       _shuffleOrder = List.generate(songs.length, (i) => i);
       _shufflePos = idx.clamp(0, _shuffleOrder.length - 1);
+      _physicalToVirtual = {
+        for (int vp = 0; vp < _shuffleOrder.length; vp++)
+          _shuffleOrder[vp]: vp,
+      };
     } else {
       _shuffleOrder = [];
       _shufflePos = 0;
+      _physicalToVirtual = {};
     }
+    _emitQueueSnapshot(immediate: true);
 
     if (Platform.isLinux) {
       // Load the full queue upfront on Linux to avoid playlist-move bugs
@@ -498,25 +516,14 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         : index;
     _shuffleOrder = [];
     _physicalToVirtual = {};
-    if (physicalIndex < 0 || physicalIndex >= _queue.songs.length) {
+    if (physicalIndex < 0 ||
+        physicalIndex >= _queue.songs.length ||
+        physicalIndex >= _playlistSource.length) {
       return;
     }
-    Song? songAtSource;
-    if (physicalIndex >= 0 && physicalIndex < _playlistSource.length) {
-      final child = _playlistSource[physicalIndex];
-      final tag = child is IndexedAudioSource ? child.tag : null;
-      songAtSource = tag is Song ? tag : null;
-    }
-    int queueIndex = physicalIndex;
-    if (songAtSource != null) {
-      final found = _queue.songs.indexWhere((s) => s.id == songAtSource!.id);
-      if (found >= 0) queueIndex = found;
-    }
-    _queue.removeAt(queueIndex);
+    _queue.removeAt(physicalIndex);
     _loadQueueSongs = List.from(_queue.songs);
-    if (physicalIndex >= 0 && physicalIndex < _playlistSource.length) {
-      await _playlistSource.removeAt(physicalIndex);
-    }
+    await _playlistSource.removeAt(physicalIndex);
     _recalculateShuffleOrder();
   }
 
@@ -740,18 +747,27 @@ class MelodizeAudioHandler extends BaseAudioHandler {
           );
           // Build the physical-index map from the actual player source so
           // that virtual indices always point to the correct source slot.
-          final physMap = <String, int>{};
+          // Use a list-of-indices approach so duplicate song IDs are handled
+          // correctly (each planned song consumes the next available slot).
+          final physIndicesById = <String, List<int>>{};
           for (int i = 0; i < _playlistSource.length; i++) {
             final child = _playlistSource[i];
             if (child is IndexedAudioSource) {
               final tag = child.tag;
-              if (tag is Song) physMap[tag.id] = i;
+              if (tag is Song) {
+                physIndicesById.putIfAbsent(tag.id, () => []).add(i);
+              }
             }
           }
-          _shuffleOrder = planned
-              .map((s) => physMap[s.id] ?? -1)
-              .where((i) => i >= 0)
-              .toList();
+          final nextIndex = <String, int>{};
+          _shuffleOrder = planned.map((s) {
+            final indices = physIndicesById[s.id];
+            if (indices == null) return -1;
+            final i = nextIndex.putIfAbsent(s.id, () => 0);
+            if (i >= indices.length) return -1;
+            nextIndex[s.id] = i + 1;
+            return indices[i];
+          }).where((i) => i >= 0).toList();
           _shufflePos = _shuffleOrder.indexOf(currentIdx);
           if (_shufflePos < 0) _shufflePos = 0;
           _physicalToVirtual = {
@@ -787,19 +803,27 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
           // Build virtual order: map each ordered song to its physical index
           // in the actual player source so navigation always targets the
-          // correct source slot.
-          final physMap = <String, int>{};
+          // correct source slot.  Duplicate-safe so the same song ID appearing
+          // multiple times in the queue doesn't collapse into a single index.
+          final physIndicesById = <String, List<int>>{};
           for (int i = 0; i < _playlistSource.length; i++) {
             final child = _playlistSource[i];
             if (child is IndexedAudioSource) {
               final tag = child.tag;
-              if (tag is Song) physMap[tag.id] = i;
+              if (tag is Song) {
+                physIndicesById.putIfAbsent(tag.id, () => []).add(i);
+              }
             }
           }
-          _shuffleOrder = ordered
-              .map((s) => physMap[s.id] ?? -1)
-              .where((i) => i >= 0)
-              .toList();
+          final nextIndex = <String, int>{};
+          _shuffleOrder = ordered.map((s) {
+            final indices = physIndicesById[s.id];
+            if (indices == null) return -1;
+            final i = nextIndex.putIfAbsent(s.id, () => 0);
+            if (i >= indices.length) return -1;
+            nextIndex[s.id] = i + 1;
+            return indices[i];
+          }).where((i) => i >= 0).toList();
           _shufflePos = _shuffleOrder.indexOf(currentIdx);
           if (_shufflePos < 0) _shufflePos = 0;
           _physicalToVirtual = {
@@ -1009,6 +1033,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   ) async {
     _deckTransitionActive = true;
     _deckTransitionToIndex = toIndex;
+    _deckTransitionToSong = transition.to;
 
     final deck = _transitionDeck ?? AudioPlayer();
     _transitionDeck = deck;
@@ -1128,6 +1153,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       _seekingVirtual = false;
       _deckTransitionFromIndex = null;
       _deckTransitionToIndex = null;
+      _deckTransitionToSong = null;
       _mainPlayerMutedDuringTransition = false;
       await _stopTransitionDeck();
       _deckTransitionActive = false;
@@ -1140,6 +1166,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _deckTransitionActive = false;
     _deckTransitionFromIndex = null;
     _deckTransitionToIndex = null;
+    _deckTransitionToSong = null;
     _mainPlayerMutedDuringTransition = false;
     await _stopTransitionDeck();
     await player.setVolume(1.0);
