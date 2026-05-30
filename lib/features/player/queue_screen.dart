@@ -27,12 +27,6 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     final handler = ref.read(audioHandlerNotifierProvider);
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final accent = ref.watch(currentAccentColorProvider);
-    final fg =
-        foregroundAccentColor(accent, scheme.brightness) ?? scheme.primary;
-    final isPlaying = ref.watch(
-      playerStateStreamProvider.select((s) => s.valueOrNull?.playing ?? false),
-    );
 
     final nowPlaying =
         (currentIndex >= 0 && currentIndex < songs.length)
@@ -53,6 +47,8 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
         transitionMap[targetIdx] = transitions[i];
       }
     }
+
+    final baseIndex = currentIndex + 1;
 
     return Material(
       color: scheme.surface,
@@ -114,10 +110,8 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                                   16, 0, 16, 16),
                               child: _NowPlayingCard(
                                 song: nowPlaying,
-                                accent: fg,
                                 scheme: scheme,
                                 textTheme: textTheme,
-                                isPlaying: isPlaying,
                                 nextTransition: transitionMap[currentIndex + 1],
                               ),
                             ),
@@ -173,14 +167,59 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                         ),
                         if (upNext.isNotEmpty)
                           mode == PlaybackMode.normal
-                              ? _buildReorderableUpNext(
-                                  upNext,
-                                  currentIndex + 1,
-                                  handler,
-                                  fg,
-                                  scheme,
-                                  textTheme,
-                                  transitionMap,
+                              ? SliverPadding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16),
+                                  sliver: SliverReorderableList(
+                                    itemCount: upNext.length,
+                                    itemBuilder: (context, index) {
+                                      final song = upNext[index];
+                                      return _UpNextItem(
+                                        key: ValueKey(
+                                            'upnext_${baseIndex + index}'),
+                                        song: song,
+                                        queueIndex: baseIndex + index,
+                                        number: index + 1,
+                                        scheme: scheme,
+                                        textTheme: textTheme,
+                                        mode: PlaybackMode.normal,
+                                        transition:
+                                            transitionMap[baseIndex + index],
+                                        onTap: () => handler
+                                            ?.skipToIndex(baseIndex + index),
+                                        onRemove: () => handler
+                                            ?.removeFromQueue(baseIndex + index),
+                                        dragHandle: true,
+                                      );
+                                    },
+                                    onReorder: (oldIndex, newIndex) {
+                                      if (newIndex > oldIndex) newIndex--;
+                                      handler?.reorderQueue(
+                                        baseIndex + oldIndex,
+                                        baseIndex + newIndex,
+                                      );
+                                    },
+                                    proxyDecorator:
+                                        (child, index, animation) {
+                                      return Material(
+                                        type: MaterialType.transparency,
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            color: scheme
+                                                .surfaceContainerHighest,
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                            border: Border.all(
+                                              color: scheme.outlineVariant
+                                                  .withValues(alpha: 0.5),
+                                              width: 1,
+                                            ),
+                                          ),
+                                          child: child,
+                                        ),
+                                      );
+                                    },
+                                  ),
                                 )
                               : SliverPadding(
                                   padding:
@@ -191,7 +230,6 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                                         song: upNext[i],
                                         queueIndex: currentIndex + 1 + i,
                                         number: i + 1,
-                                        accent: fg,
                                         scheme: scheme,
                                         textTheme: textTheme,
                                         mode: mode,
@@ -260,62 +298,6 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
     );
   }
 
-  Widget _buildReorderableUpNext(
-    List<Song> upNext,
-    int baseIndex,
-    MelodizeAudioHandler? handler,
-    Color accent,
-    ColorScheme scheme,
-    TextTheme textTheme,
-    Map<int, PlannedTransition> transitionMap,
-  ) {
-    return SliverToBoxAdapter(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: ReorderableListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          buildDefaultDragHandles: false,
-          proxyDecorator: (child, index, animation) => Material(
-            type: MaterialType.transparency,
-            child: Container(
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: scheme.outlineVariant.withValues(alpha: 0.5),
-                  width: 1,
-                ),
-              ),
-              child: child,
-            ),
-          ),
-          itemCount: upNext.length,
-          onReorder: (oldIndex, newIndex) {
-            if (newIndex > oldIndex) newIndex--;
-            handler?.reorderQueue(baseIndex + oldIndex, baseIndex + newIndex);
-          },
-          itemBuilder: (context, i) {
-            final song = upNext[i];
-            return _UpNextItem(
-              key: ValueKey('upnext_${baseIndex + i}'),
-              song: song,
-              queueIndex: baseIndex + i,
-              number: i + 1,
-              accent: accent,
-              scheme: scheme,
-              textTheme: textTheme,
-              mode: PlaybackMode.normal,
-              transition: transitionMap[baseIndex + i],
-              onTap: () => handler?.skipToIndex(baseIndex + i),
-              onRemove: () => handler?.removeFromQueue(baseIndex + i),
-              dragHandle: true,
-            );
-          },
-        ),
-      ),
-    );
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -459,25 +441,27 @@ class _SectionHeader extends StatelessWidget {
 //  Now Playing card
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _NowPlayingCard extends StatelessWidget {
+class _NowPlayingCard extends ConsumerWidget {
   final Song song;
-  final Color accent;
   final ColorScheme scheme;
   final TextTheme textTheme;
-  final bool isPlaying;
   final PlannedTransition? nextTransition;
 
   const _NowPlayingCard({
     required this.song,
-    required this.accent,
     required this.scheme,
     required this.textTheme,
-    this.isPlaying = true,
     this.nextTransition,
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isPlaying = ref.watch(
+      playerStateStreamProvider.select((s) => s.valueOrNull?.playing ?? false),
+    );
+    final accent = ref.watch(currentAccentColorProvider);
+    final fg = foregroundAccentColor(accent, scheme.brightness) ?? scheme.primary;
+
     return Card(
       elevation: 0,
       color: scheme.surfaceContainerHighest,
@@ -489,12 +473,14 @@ class _NowPlayingCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: CoverArtImage(
-                    coverArtId: song.coverArt,
-                    externalUrl: song.externalCoverUrl,
-                    size: 64,
+                RepaintBoundary(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: CoverArtImage(
+                      coverArtId: song.coverArt,
+                      externalUrl: song.externalCoverUrl,
+                      size: 64,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 14),
@@ -508,7 +494,7 @@ class _NowPlayingCard extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w700,
-                          color: accent,
+                          color: fg,
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -536,7 +522,7 @@ class _NowPlayingCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                _AnimatedEqualizer(color: accent, isPlaying: isPlaying),
+                _AnimatedEqualizer(color: fg, isPlaying: isPlaying),
               ],
             ),
             if (nextTransition != null) ...[
@@ -560,7 +546,6 @@ class _UpNextItem extends StatelessWidget {
   final Song song;
   final int queueIndex;
   final int number;
-  final Color accent;
   final ColorScheme scheme;
   final TextTheme textTheme;
   final PlaybackMode mode;
@@ -574,7 +559,6 @@ class _UpNextItem extends StatelessWidget {
     required this.song,
     required this.queueIndex,
     required this.number,
-    required this.accent,
     required this.scheme,
     required this.textTheme,
     this.mode = PlaybackMode.normal,
@@ -605,12 +589,14 @@ class _UpNextItem extends StatelessWidget {
                   ),
                 ),
               ),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: CoverArtImage(
-                  coverArtId: song.coverArt,
-                  externalUrl: song.externalCoverUrl,
-                  size: 44,
+              RepaintBoundary(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: CoverArtImage(
+                    coverArtId: song.coverArt,
+                    externalUrl: song.externalCoverUrl,
+                    size: 44,
+                  ),
                 ),
               ),
             ],
@@ -693,12 +679,14 @@ class _PlayedItem extends StatelessWidget {
       opacity: 0.5,
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-        leading: ClipRRect(
-          borderRadius: BorderRadius.circular(6),
-          child: CoverArtImage(
-            coverArtId: song.coverArt,
-            externalUrl: song.externalCoverUrl,
-            size: 36,
+        leading: RepaintBoundary(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: CoverArtImage(
+              coverArtId: song.coverArt,
+              externalUrl: song.externalCoverUrl,
+              size: 36,
+            ),
           ),
         ),
         title: Text(
