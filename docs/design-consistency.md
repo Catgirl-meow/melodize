@@ -1,6 +1,6 @@
 # Design Consistency Backlog
 
-Audited 2026-04-27. Things that drift from M3E spec or from each other across screens. Pick from this list when doing visual-polish passes — none are blocking bugs.
+Audited 2026-04-27 — re-verified 2026-05-31 (statuses unchanged). Things that drift from M3E spec or from each other across screens. Pick from this list when doing visual-polish passes — none are blocking bugs.
 
 Status legend: ❌ open · 🟡 partial · ✅ shipped
 
@@ -11,7 +11,7 @@ Status legend: ❌ open · 🟡 partial · ✅ shipped
 | ID | Surface | Current | Target | Status |
 |----|---------|---------|--------|--------|
 | C1 | `lib/features/library/library_screen.dart:116` | plain `AppBar` + `TabBar` | `SliverAppBar.medium` w/ TabBar as `bottom`, in a `CustomScrollView` per tab | ❌ |
-| C2 | `lib/features/settings/settings_screen.dart:817` (`_SettingsPageScaffold`) | plain `AppBar` | `SliverAppBar.medium` for sub-pages | ❌ |
+| C2 | `lib/features/settings/settings_screen.dart:917` (`_SettingsPageScaffold`) | plain `AppBar` | `SliverAppBar.medium` for sub-pages | ❌ |
 | C3 | `lib/features/downloads/downloads_screen.dart:36` | plain `SliverAppBar` (no variant) | `SliverAppBar.medium` | ❌ |
 | C4 | `lib/features/settings/downloaded_songs_screen.dart:245` | plain `AppBar` | `SliverAppBar.medium` (this screen has its own scroll already) | ❌ |
 | — | `lib/features/home/home_screen.dart` | inline `SliverToBoxAdapter` + `SafeArea(top:true)` greeting | revisit M3E medium/large variant once a non-bottom-aligned title approach is found | 🟡 reverted v1.9.9 |
@@ -26,18 +26,18 @@ Album / Artist / Playlist detail screens use a deliberate full-bleed cover-art `
 
 | ID | File | Issue |
 |----|------|-------|
-| C5 | `lib/shared/widgets/deezer_track_tile.dart:67,114` | Reimplements `ClipRRect` + `CachedNetworkImage` with radius **6** instead of using `CoverArtImage(externalUrl:)` (radius 8). Used in search results + artist page. ✅ |
+| C5 | `lib/shared/widgets/deezer_track_tile.dart:66` | Now uses `CoverArtImage(externalUrl:)` (radius 8). Used in search results + artist page. ✅ |
 | C6 | `lib/shared/widgets/song_tile.dart:84` (`_QualityBadge`) | Radius **4** — different shape token vs everything else around it. Could use 6 or theme's small shape. ❌ |
 
-Fix C5 by routing the tile through `CoverArtImage` (it already supports `externalUrl`). Removes duplicate cache/placeholder logic too.
+C5 was fixed by routing the tile through `CoverArtImage(externalUrl:)`, which also removed the duplicate cache/placeholder logic.
 
 ## P1 — typography inconsistency on detail headers
 
 | ID | File | Issue |
 |----|------|-------|
-| C7 | `lib/features/library/album_detail_screen.dart:54` | Title hardcoded `fontSize: 20, FontWeight.bold` — should be `theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)`. ❌ |
-| C8 | `lib/features/library/playlist_detail_screen.dart:54` | Same. ❌ |
-| C9 | `lib/features/library/artist_detail_screen.dart` (header) | Same pattern, verify before fix. ❌ |
+| C7 | `lib/features/library/album_detail_screen.dart:55` | Title hardcoded `fontSize: 20, FontWeight.bold` — should be `theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)`. ❌ |
+| C8 | `lib/features/library/playlist_detail_screen.dart:55` | Same. ❌ |
+| C9 | `lib/features/library/artist_detail_screen.dart:98` (header) | Hardcoded `fontSize: 22, FontWeight.bold` — should be `theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)`. ❌ |
 
 ## P2 — deprecated API on detail gradient overlays
 
@@ -46,7 +46,7 @@ Fix C5 by routing the tile through `CoverArtImage` (it already supports `externa
 | ID | File:line |
 |----|-----------|
 | C10 | `lib/features/library/album_detail_screen.dart:41` | ✅ |
-| C11 | `lib/features/library/playlist_detail_screen.dart:40` | ✅ |
+| C11 | `lib/features/library/playlist_detail_screen.dart:41` | ✅ |
 | C12 | `lib/features/library/artist_detail_screen.dart` (gradient stack) | ✅ already clean |
 
 Part of broader analyzer cleanup (~35 minor warnings repo-wide).

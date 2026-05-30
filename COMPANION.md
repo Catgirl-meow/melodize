@@ -8,8 +8,8 @@ Subsonic/Navidrome API does not expose.
 |------------|-------------|
 | Delete songs from server | Removes the file from disk |
 | Download songs to server | Deezer FLAC via deemix; any URL via yt-dlp |
-| Audio analysis | Detects BPM, Camelot wheel key, energy, spectral centroid, and trailing silence per song |
-| Smart shuffle | BPM-progressive ordering using real analysis data (vs genre estimates) |
+| Audio analysis | Detects BPM, Camelot wheel key, energy, spectral centroid, trailing silence, and phrase positions per song |
+| Smart shuffle data | Real BPM, key, and energy values feed the app's DJ-arc planner (vs genre estimates without companion) |
 | Transition mixing | Server-side time-stretched crossfade mixes. Not used by the app (client-side mixing removed in [2h](docs/pass-2/2h-playback-architecture.md)). |
 
 **Requirements**
@@ -27,6 +27,11 @@ curl -fsSL https://raw.githubusercontent.com/Catgirl-meow/melodize/main/companio
   -o /usr/local/bin/melodize-companion
 chmod +x /usr/local/bin/melodize-companion
 ```
+
+The single `melodize-companion` script contains the HTTP server, download
+orchestration, analysis cache, and transition mixing. Two supporting modules
+(`audio_analysis.py` and `analysis_cache.py`) are bundled at the top of the
+same file.
 
 ---
 
@@ -50,12 +55,17 @@ Create `/etc/melodize-companion/config.json`:
 
 ```json
 {
-  "api_key":      "PASTE_YOUR_GENERATED_KEY_HERE",
-  "port":         8765,
-  "music_dir":    "/opt/navidrome/music",
-  "navidrome_db": "/var/lib/navidrome/navidrome.db",
-  "download_format": "flac",
-  "deezer_arl":   ""
+  "api_key":             "PASTE_YOUR_GENERATED_KEY_HERE",
+  "port":                8765,
+  "music_dir":           "/opt/navidrome/music",
+  "navidrome_db":        "/var/lib/navidrome/navidrome.db",
+  "download_format":     "flac",
+  "deezer_arl":          "",
+  "analysis_threads":    2,
+  "analysis_cache_path": "/var/lib/melodize-companion/analysis_cache.db",
+  "mix_cache_dir":       "/var/lib/melodize-companion/mix_cache",
+  "ytdlp_path":          "/usr/local/bin/yt-dlp",
+  "deemix_path":         "deemix"
 }
 ```
 
@@ -67,6 +77,11 @@ Create `/etc/melodize-companion/config.json`:
 | `navidrome_db` | Path to Navidrome's SQLite database. |
 | `download_format` | Format for non-Deezer downloads: `flac`, `opus`, `mp3`. |
 | `deezer_arl` | Optional Deezer ARL for HiFi FLAC. The app can also send this per-request. |
+| `analysis_threads` | Max concurrent analysis workers. Default `2`. Increase for large libraries. |
+| `analysis_cache_path` | Path to the SQLite analysis cache DB. Created automatically. |
+| `mix_cache_dir` | Directory for cached transition WAV files. Created automatically. |
+| `ytdlp_path` | Path to yt-dlp binary. Default searches `$PATH`. |
+| `deemix_path` | Path to deemix binary. Default searches `$PATH`. |
 
 ### Finding your paths
 
@@ -114,7 +129,7 @@ WantedBy=multi-user.target
 ```
 
 > **Important:** `ReadWritePaths` must match your `music_dir`. `/var/lib/melodize-companion`
-> is the companion's state directory (used for deemix config) — it must also be writable.
+> is the companion's state directory (used for deemix config and analysis cache) — it must also be writable.
 
 Create the state directory and enable the service:
 
@@ -435,7 +450,7 @@ Replace `BASE_URL` with your companion URL from the table in Section 7
 
 ```bash
 curl $BASE_URL/health
-# Expected: {"status": "ok", "version": "1.1.0"}
+# Expected: {"status": "ok", "version": "1.2.0"}
 ```
 
 Test authentication:
@@ -454,7 +469,26 @@ curl -X DELETE $BASE_URL/api/songs/nonexistent \
 
 ---
 
-## 9. Updating the companion
+## 9. Data flow: companion → smart shuffle
+
+When the companion is connected, the Melodize app periodically polls
+`GET /api/audio/analysis` to sync all cached analysis results. These
+real BPM, key, energy, and spectral-centroid values are fed into the
+Smart Shuffle engine, which replaces genre-based estimates with actual
+audio measurements. The engine uses three quality tiers:
+
+| Tier | Data source | Features |
+|------|-------------|----------|
+| 1 — Full DJ | Companion (real BPM, key, energy) | Tight beatmatching (±3 %), harmonic key mixing (Camelot wheel), energy-curve DJ arc planning, spectral-timbre matching |
+| 2 — Partial | Deezer metadata + genre estimates | Real BPM only, wider genre-based tolerances |
+| 3 — Offline | Genre estimates only | Simple BPM proximity, genre compatibility |
+
+Auto-detection: if ≥30 % of songs in the queue have companion-derived
+BPM or energy, tier 1 is used automatically.
+
+---
+
+## 10. Updating the companion
 
 ```bash
 # Download the new version
@@ -469,12 +503,14 @@ systemctl restart melodize-companion
 curl http://localhost:8765/health
 ```
 
+The analysis cache is stored in a SQLite database (default:
+`/var/lib/melodize-companion/analysis_cache.db`) and survives restarts.
 No database migrations or config changes are needed between versions unless
 the changelog says otherwise.
 
 ---
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 ### Companion won't start
 
@@ -543,6 +579,18 @@ a `/companion` suffix. Remove it.
    the app to v1.7.8+ which validates the health response body instead of
    just checking the HTTP status code
 
+### Analysis results not appearing in the app
+
+The Melodize app polls `GET /api/audio/analysis` automatically. If results
+are missing:
+
+1. Check analysis has run: `curl -H "X-API-Key: YOUR_KEY" $BASE_URL/api/audio/analysis`
+2. If the results list is empty, start a batch analysis from the app or
+   send a `POST` to `/api/audio/analyze-batch` with an empty body
+3. Verify librosa is installed: `python3 -c "import librosa; print(librosa.__version__)"`
+4. Check the companion log for per-song analysis errors — bad audio files
+   are skipped silently
+
 ### Song reappears after deletion
 
 Navidrome takes a moment to rescan and remove the song from its database. The
@@ -560,7 +608,7 @@ All endpoints require the `X-API-Key` header except `/health`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/health` | Liveness probe. Returns `{"status":"ok","version":"...", "analysis":"available\|unavailable"}` |
+| `GET` | `/health` | Liveness probe. Returns `{"status":"ok","version":"1.2.0"}` |
 
 ### Song management
 
@@ -568,15 +616,15 @@ All endpoints require the `X-API-Key` header except `/health`.
 |--------|------|-------------|
 | `DELETE` | `/api/songs/{id}` | Delete a song by its Navidrome ID. Removes the file from disk. |
 | `POST` | `/api/songs/download` | Start a background download job. Body: `{"url":"...", "deezer_arl":"..."}`. Returns `{"job_id":"..."}` |
-| `GET` | `/api/songs/download/{job_id}` | Poll a download job. Returns `{"status":"queued\|downloading\|done\|error", ...}` |
+| `GET` | `/api/songs/download/{job_id}` | Poll a download job. Returns `{"status":"queued|downloading|done|error", ...}` |
 
 ### Audio analysis
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/audio/analyze-batch` | Start batch analysis. Body: `{"song_ids":["..."]}` (omit for all songs). Returns `{"job_id":"..."}` |
-| `GET` | `/api/audio/analyze-batch/{job_id}` | Poll analysis job progress |
-| `GET` | `/api/audio/analysis` | All cached analysis results. Returns `{"results":[{song_id, bpm, key, energy, spectral_centroid, duration, tail_silence, data_version}, ...]}` |
+| `POST` | `/api/audio/analyze-batch` | Start batch analysis. Body: `{"song_ids":["..."]}` (omit for all songs). Returns `{"job_id":"...","status":"in_progress","total":...,"analyzed":0,"skipped":...,"failed":0}` |
+| `GET` | `/api/audio/analyze-batch/{job_id}` | Poll analysis job progress. Returns `{"status":"in_progress|done","total":...,"analyzed":...,"skipped":...,"failed":...,"results":[...]}` |
+| `GET` | `/api/audio/analysis` | All cached analysis results. Returns `{"results":[{song_id, bpm, key, energy, spectral_centroid, duration, tail_silence, data_version, phrase_positions}, ...]}` |
 | `GET` | `/api/audio/analysis/{song_id}` | Single song's cached analysis |
 
 ### Transition mixing (server-side only)
@@ -586,8 +634,8 @@ All endpoints require the `X-API-Key` header except `/health`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/audio/mix-transition` | Request a mix. Body: `{"song_a_id":"...", "song_b_id":"...", "mix_duration":10}`. Returns `{"job_id":"...", "status":"mixing"}` |
-| `GET` | `/api/audio/mix-transition/{job_id}` | Poll mix job. When done: `{"status":"done", "url":"/api/audio/transition/{id}.wav"}` |
+| `POST` | `/api/audio/mix-transition` | Request a mix. Body: `{"song_a_id":"...", "song_b_id":"...", "mix_duration":10}`. Returns `{"job_id":"...","status":"mixing","quality":"perfect|good|acceptable|skip"}` |
+| `GET` | `/api/audio/mix-transition/{job_id}` | Poll mix job. When done: `{"status":"done","url":"/api/audio/transition/{id}.wav"}` |
 | `GET` | `/api/audio/transition/{filename}` | Download a completed WAV mix |
 
 ### Response format
@@ -611,3 +659,5 @@ Responses are always JSON. Non-2xx responses include an `"error"` field.
 | `spectral_centroid` | float | Spectral centroid (brightness proxy) in Hz |
 | `duration` | float | Total file duration in seconds |
 | `tail_silence` | float | Seconds of trailing silence at end of track — detected by scanning backward from file end; used by crossfade and transition mixing to avoid fading during silence |
+| `phrase_positions` | array of float (nullable) | Timestamps of 16-bar phrase boundaries in seconds; used by future mixing features |
+| `data_version` | integer | Schema version for cache-invalidation logic (currently `3`) |

@@ -35,6 +35,8 @@ Each sub-plan is self-contained under [`docs/pass-2/`](pass-2/).
 | 2f | Mini-player + dock design fixes | [pass-2/2f-miniplayer-dock.md](pass-2/2f-miniplayer-dock.md) | shape/radius shipped v1.8.4 — tiles + app bars pending |
 | 2g | Menu + visual-glitch triage | — | ✅ shipped v1.9.9 |
 | 2h | Smart shuffle + playback architecture rework | [pass-2/2h-playback-architecture.md](pass-2/2h-playback-architecture.md) | ✅ implemented May 2026 |
+| 2i | Queue screen reorder FPS + stability | — | ✅ shipped v1.10.x |
+| 2j | Companion cache guard + deterministic shuffle seed | — | ✅ shipped v1.10.3 |
 
 **Visual-polish backlog:** [design-consistency.md](design-consistency.md)
 
@@ -43,6 +45,7 @@ Each sub-plan is self-contained under [`docs/pass-2/`](pass-2/).
 - **v1.8.5** — Downloaded songs overhaul (search, filter, sort); Settings sub-pages
 - **v1.8.6–1.8.9** — Artist detail screen; Deezer two-pass artist search; More Like This fixes
 - **v1.9.0–v1.9.5** — SliverAppBar.medium, CarouselView, M3E entrance animations, `DynamicSchemeVariant.expressive`, section header tracking
+- **v1.10.x–v1.11.0** — Queue screen rewrite (`SliverReorderableList` + scoped rebuilds, reorder crash fix, paused equalizer, transition pills, correct shuffle ordering in queue view); companion cache guard + deterministic shuffle seed; comprehensive smart shuffle test suite
 
 ---
 
