@@ -117,6 +117,12 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   bool _snapshotRecalculating = false;
 
   void setCompanionAnalysis(BpmCache? cache) {
+    // Guard: only recalculate if the analysis data actually changed.
+    // The companion provider refreshes every ~30 s via health polling;
+    // without this guard the smart-shuffle queue would jump constantly.
+    if (_isSameCompanionCache(_companionBpmCache, cache)) {
+      return;
+    }
     _companionBpmCache = cache;
     // Re-plan when real data arrives mid-session.
     if (_shuffleMode == ShuffleMode.smartShuffle) {
@@ -126,12 +132,49 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     }
   }
 
+  static bool _isSameCompanionCache(BpmCache? a, BpmCache? b) {
+    if (identical(a, b)) return true;
+    if (a == null && b == null) return true;
+    if (a == null || b == null) return false;
+    if (!_mapEquals(a.bpm, b.bpm)) return false;
+    if (!_mapEquals(a.key, b.key)) return false;
+    if (!_mapEquals(a.isEstimated, b.isEstimated)) return false;
+    if (!_mapEquals(a.tailSilence, b.tailSilence)) return false;
+    if (!_mapEquals(a.energy, b.energy)) return false;
+    if (!_mapEquals(a.spectralCentroid, b.spectralCentroid)) return false;
+    if (!_mapEquals(a.genreCache, b.genreCache)) return false;
+    if (!_mapEquals(a.parsedKeyCache, b.parsedKeyCache)) return false;
+    return true;
+  }
+
+  static bool _mapEquals<K, V>(Map<K, V> a, Map<K, V> b) {
+    if (a.length != b.length) return false;
+    for (final entry in a.entries) {
+      if (!b.containsKey(entry.key) || b[entry.key] != entry.value) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   // Restore persisted shuffle mode on startup.
   void restoreShuffleMode(ShuffleMode mode) {
     _shuffleMode = mode;
     _queue.setMode(_playbackModeFor(mode));
     _shuffleModeCtrl.add(mode);
+
+    _ensureShuffleSeed();
     _recalculateShuffleOrder();
+  }
+
+  /// Ensures a deterministic seed exists whenever shuffle is active.
+  /// If the user loaded a queue in normal mode then later toggled shuffle,
+  /// [_shuffleSeed] would still be null, causing every recalculation to
+  /// generate a brand-new random order. This fixes that.
+  void _ensureShuffleSeed() {
+    if (_shuffleMode != ShuffleMode.off && _shuffleSeed == null) {
+      _shuffleSeed = DateTime.now().microsecondsSinceEpoch;
+    }
   }
 
   Stream<ShuffleMode> get shuffleModeStream => _shuffleModeCtrl.stream;
@@ -888,6 +931,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _shuffleHistory.clear();
     _lastHistoryIndex = null;
 
+    _ensureShuffleSeed();
     _recalculateShuffleOrder();
   }
 
@@ -899,6 +943,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _shuffleHistory.clear();
     _lastHistoryIndex = null;
 
+    _ensureShuffleSeed();
     _recalculateShuffleOrder();
   }
 
