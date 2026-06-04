@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -194,15 +195,17 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       }
     });      // Track shuffle history and correct auto-advance in virtual orders.
       player.currentIndexStream.listen((index) {
-      if (index == null) return;        if (_queueSnapshotCtrl.isClosed || _playlistSource.length == 0) return;
+      if (index == null) return;
+      if (_queueSnapshotCtrl.isClosed || _playlistSource.length == 0) return;
 
       final prevPhysical = _lastKnownPhysicalIndex;
-      _lastKnownPhysicalIndex = index;        if (_deckTransitionActive || _loading) {
-          // Mute the main player if it auto-advanced during a crossfade.
-          if (_deckTransitionActive &&
-              !_seekingVirtual &&
-              _deckTransitionFromIndex != null &&
-              index != _deckTransitionFromIndex) {
+      _lastKnownPhysicalIndex = index;
+      if (_deckTransitionActive || _loading) {
+        // Mute the main player if it auto-advanced during a crossfade.
+        if (_deckTransitionActive &&
+            !_seekingVirtual &&
+            _deckTransitionFromIndex != null &&
+            index != _deckTransitionFromIndex) {
           _mainPlayerMutedDuringTransition = true;
           unawaited(player.setVolume(0.0));
         }
@@ -302,6 +305,15 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   void _broadcastState({Duration? positionOverride}) {
     final ps = player.processingState;
+    // Report the virtual queue index to the system player so shuffle
+    // positions match what the user sees in the app.
+    int reportQueueIndex;
+    if (_shuffleOrder.isNotEmpty) {
+      final vp = _physicalToVirtual[player.currentIndex ?? -1];
+      reportQueueIndex = vp ?? _shufflePos;
+    } else {
+      reportQueueIndex = player.currentIndex ?? 0;
+    }
     playbackState.add(PlaybackState(
       controls: [
         MediaControl.skipToPrevious,
@@ -325,7 +337,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       updatePosition: positionOverride ?? player.position,
       bufferedPosition: player.bufferedPosition,
       speed: player.speed,
-      queueIndex: player.currentIndex,
+      queueIndex: reportQueueIndex,
     ));
   }
 
@@ -420,8 +432,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     // Shuffle is active but the virtual order is empty (e.g. after a rapid
     // queue mutation or a code path that cleared it). Rebuild immediately
     // rather than showing the stale fallback.
-    if (_shuffleMode != ShuffleMode.off &&
-        _loadQueueSongs.length >= 2 &&
+    if (_shuffleMode != ShuffleMode.off && _loadQueueSongs.length >= 2 &&
         !_snapshotRecalculating &&
         !_deckTransitionActive) {
       _snapshotRecalculating = true;
@@ -575,8 +586,6 @@ class MelodizeAudioHandler extends BaseAudioHandler {
             index < _shuffleOrder.length)
         ? _shuffleOrder[index]
         : index;
-    _shuffleOrder = [];
-    _physicalToVirtual = {};
     if (physicalIndex < 0 ||
         physicalIndex >= _queue.songs.length ||
         physicalIndex >= _playlistSource.length) {
@@ -585,13 +594,28 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _queue.removeAt(physicalIndex);
     _loadQueueSongs = List.from(_queue.songs);
     await _playlistSource.removeAt(physicalIndex);
+    // Adjust virtual order in place so skip/next stay valid immediately.
+    if (_shuffleOrder.isNotEmpty) {
+      final removedVp = _physicalToVirtual[physicalIndex];
+      _shuffleOrder = _shuffleOrder
+          .where((i) => i != physicalIndex)
+          .map((i) => i > physicalIndex ? i - 1 : i)
+          .toList();
+      if (removedVp != null && removedVp < _shufflePos) {
+        _shufflePos--;
+      }
+      _shufflePos = _shufflePos.clamp(0, max(0, _shuffleOrder.length - 1));
+      _physicalToVirtual = {
+        for (int vp = 0; vp < _shuffleOrder.length; vp++)
+          _shuffleOrder[vp]: vp,
+      };
+      _emitQueueSnapshot(immediate: true);
+    }
     _recalculateShuffleOrder();
   }
 
   Future<void> removeSongById(String songId) async {
     await _cancelDeckTransition();
-    _shuffleOrder = [];
-    _physicalToVirtual = {};
     _queue.removeById(songId);
     _loadQueueSongs = List.from(_queue.songs);
     for (int i = _playlistSource.length - 1; i >= 0; i--) {
@@ -601,7 +625,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         await _playlistSource.removeAt(i);
       }
     }
-    _recalculateShuffleOrder();
+    // Rebuild immediately so the virtual order is never stale.
+    _recalculateShuffleOrderImpl();
   }
 
   Future<void> reorderQueue(int oldIndex, int newIndex) async {
@@ -684,8 +709,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         } catch (e) {
           debugPrint('skipToNext seek error: $e');
         }
-        _emitQueueSnapshot();
-        _seekingVirtual = false;
+        _emitQueueSnapshot(immediate: true);
+        Future.microtask(() => _seekingVirtual = false);
         return;
       }
       // Wrap around to the beginning of the virtual order so the queue
@@ -702,8 +727,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       } catch (e) {
         debugPrint('skipToNext wrap-around seek error: $e');
       }
-      _emitQueueSnapshot();
-      _seekingVirtual = false;
+      _emitQueueSnapshot(immediate: true);
+      Future.microtask(() => _seekingVirtual = false);
       return;
     }
     await player.seekToNext();
@@ -734,8 +759,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       } catch (e) {
         debugPrint('skipToPrevious seek error: $e');
       }
-      _emitQueueSnapshot();
-      _seekingVirtual = false;
+      _emitQueueSnapshot(immediate: true);
+      Future.microtask(() => _seekingVirtual = false);
       return;
     } else if (_shuffleMode != ShuffleMode.off && _shuffleHistory.isNotEmpty) {
       final prevIndex = _shuffleHistory.removeLast();
@@ -744,9 +769,9 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       try {
         await player.seek(Duration.zero, index: prevIndex);
         _queue.setCurrentIndex(prevIndex);
-        _emitQueueSnapshot();
+        _emitQueueSnapshot(immediate: true);
       } finally {
-        _seekingVirtual = false;
+        Future.microtask(() => _seekingVirtual = false);
       }
     } else {
       await player.seekToPrevious();
@@ -772,8 +797,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     physicalIndex = physicalIndex.clamp(0, maxIndex);
     await player.seek(Duration.zero, index: physicalIndex);
     _queue.setCurrentIndex(physicalIndex);
-    _emitQueueSnapshot();
-    _seekingVirtual = false;
+    _emitQueueSnapshot(immediate: true);
+    Future.microtask(() => _seekingVirtual = false);
   }
 
   /// Debounced wrapper for [_recalculateShuffleOrderImpl]. Rapid queue
@@ -795,7 +820,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   /// Called on mid-playback toggle — no source rebuild, instant (~O(n)).
   void _recalculateShuffleOrderImpl() {
     final loaded = _playlistSource.length;
-    if (loaded < 2 || _config == null || _loadQueueSongs.length < 2) {
+    if (loaded < 2 || _loadQueueSongs.length < 2) {
       _shuffleOrder = [];
       _shufflePos = 0;
       _physicalToVirtual = {};
@@ -1223,6 +1248,18 @@ class MelodizeAudioHandler extends BaseAudioHandler {
           _emitQueueSnapshot();
         } catch (_) {}
         _seekingVirtual = false;
+      } else if (_shuffleOrder.isNotEmpty) {
+        // Shuffle mode: jump to the first virtual song rather than
+        // physical next so we don't break the virtual order.
+        final fallbackVp = _shufflePos.clamp(0, _shuffleOrder.length - 1);
+        final fallbackIdx = _shuffleOrder[fallbackVp];
+        _seekingVirtual = true;
+        try {
+          await player.seek(Duration.zero, index: fallbackIdx);
+          _queue.setCurrentIndex(fallbackIdx);
+          _emitQueueSnapshot();
+        } catch (_) {}
+        _seekingVirtual = false;
       } else {
         await player.seekToNext();
       }
@@ -1231,10 +1268,38 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       _seekingVirtual = false;
       _deckTransitionFromIndex = null;
       _deckTransitionToIndex = null;
-      _deckTransitionToSong = null;
       _mainPlayerMutedDuringTransition = false;
       await _stopTransitionDeck();
+      // End the transition BEFORE nulling the target song so currentSong
+      // never returns null during the handoff window.
       _deckTransitionActive = false;
+      _deckTransitionToSong = null;
+      // Force a metadata broadcast because the sequenceStateStream emission
+      // that happened during the seek was suppressed while the transition
+      // flag was still true. Without this, Android shows the old song.
+      final seqState = player.sequenceState;
+      final rawTag = seqState?.currentSource?.tag;
+      final song = rawTag is Song ? rawTag : null;
+      if (song != null) {
+        Uri? artUri;
+        if (_config != null && (song.coverArt?.isNotEmpty ?? false)) {
+          artUri = Uri.tryParse(
+              SubsonicClient(_config!).coverArtUrl(song.coverArt!));
+        } else if (song.externalCoverUrl != null) {
+          artUri = Uri.tryParse(song.externalCoverUrl!);
+        }
+        mediaItem.add(MediaItem(
+          id: song.id,
+          title: song.title,
+          artist: song.artist,
+          album: song.album,
+          duration: song.duration != null
+              ? Duration(seconds: song.duration!)
+              : null,
+          artUri: artUri,
+        ));
+        _broadcastState(positionOverride: Duration.zero);
+      }
     }
   }
 
