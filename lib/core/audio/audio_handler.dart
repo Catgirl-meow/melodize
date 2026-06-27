@@ -57,13 +57,13 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   SubsonicConfig? _config;
   String _streamQuality = 'lossless';
   StreamSubscription<Duration>? _crossfadeSub;
-  AudioPlayer? _transitionDeck;
-  Timer? _transitionFadeTimer;
-  bool _deckTransitionActive = false;
-  int? _deckTransitionFromIndex;
-  int? _deckTransitionToIndex;
-  Song? _deckTransitionToSong;
-  bool _mainPlayerMutedDuringTransition = false;
+  // Single-player crossfade: no second deck, just a volume ramp on the
+  // main player. Eliminates double-playback, handoff races, and seek
+  // desyncs across platforms.
+  Timer? _crossfadeTimer;
+  bool _isTransitionFading = false;
+  bool _crossfadeActive = false;
+  int? _crossfadeNextIndex;
 
   /// User's preferred volume level (0.0–1.0).  Crossfade ramps are scaled
   /// relative to this so a user who likes quiet playback doesn't get blasted
@@ -75,9 +75,10 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   bool _scrobbled = false;
   LinuxMprisService? _mpris;
 
-  /// Linux dead-man's switch: if auto-advance never fires after a fade
-  /// completes, this Timer calls _finishDeckTransition as a fallback.
-  Timer? _deadMansSwitchTimer;
+  /// Safety timeout: if a crossfade fade-out completes but the player
+  /// never auto-advances (e.g. network stall), restore volume after a
+  /// few seconds so the user isn't stuck muted.
+  Timer? _crossfadeTimeout;
 
   // Playback history for skipToPrevious in shuffle mode.
   final _shuffleHistory = <int>[]; // original-sequence indices (fallback)
@@ -238,6 +239,15 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   void _initStateSync() {
     player.playerStateStream.listen((_) => _broadcastState());
 
+    // Restore volume if a playback error happens during a crossfade so
+    // the user isn't left muted.
+    player.playbackEventStream.listen((event) {
+      if (event.processingState == ProcessingState.idle &&
+          _isTransitionFading) {
+        _cancelCrossfade();
+      }
+    });
+
     // Clear media item on idle/completed so OriginOS doesn't show stale info.
     player.processingStateStream.listen((state) {
       if (state == ProcessingState.idle || state == ProcessingState.completed) {
@@ -250,31 +260,12 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
       final prevPhysical = _lastKnownPhysicalIndex;
       _lastKnownPhysicalIndex = index;
-      if (_deckTransitionActive || _loading) {
-        // The main player auto-advanced during a crossfade.
-        if (_deckTransitionActive &&
-            !_seekingVirtual &&
-            _deckTransitionFromIndex != null &&
-            index != _deckTransitionFromIndex) {
-          // On Linux with shuffle modes the physical next index rarely
-          // matches the virtual next index the deck is fading into.
-          // Always hand off immediately — _earlyHandoff() already handles
-          // index mismatches by seeking the main player to the correct
-          // target.  Waiting for _finishDeckTransition() causes a gap
-          // and/or a blip of the wrong song.
-          //
-          // The main player is already being faded out by the crossfade
-          // timer. At t >= 0.95 it is pre-muted. We MUST NOT call
-          // player.setVolume(0.0) here because the discarded Future can
-          // race with _earlyHandoff()'s volume restore and leave the
-          // player permanently muted. The flag alone is enough to keep
-          // the volumeStream listener from corrupting _userVolume.
-          _mainPlayerMutedDuringTransition = true;
-          unawaited(_earlyHandoff());
-          return;
-        }
-        return;
+      if (_crossfadeActive && index == _crossfadeNextIndex) {
+        // Natural auto-advance happened while a crossfade fade-out was
+        // in progress. Start the fade-in on the new song.
+        _startCrossfadeFadeIn();
       }
+      if (_loading) return;
 
       if (_seekingVirtual) {
         final vp = _physicalToVirtual[index];
@@ -335,10 +326,6 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     // Update MediaSession media item on song change. Broadcast position=0
     // immediately so the system player shows the correct time.
     player.sequenceStateStream.listen((seqState) {
-      // Suppress metadata updates during a deck crossfade so the UI doesn't
-      // flash the auto-advanced main-player track before the handoff.
-      if (_deckTransitionActive) return;
-
       final rawTag = seqState?.currentSource?.tag;
       final song = rawTag is Song ? rawTag : null;
 
@@ -426,14 +413,12 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   void setStreamQuality(String quality) => _streamQuality = quality;
 
   Song? get currentSong {
-    if (_deckTransitionActive) return _deckTransitionToSong;
     final tag = player.sequenceState?.currentSource?.tag;
     if (tag is Song) return tag;
     return null;
   }
 
   Stream<Song?> get currentSongStream => player.sequenceStateStream.map((s) {
-        if (_deckTransitionActive) return _deckTransitionToSong;
         final tag = s?.currentSource?.tag;
         if (tag is Song) return tag;
         return null;
@@ -503,8 +488,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     // queue mutation or a code path that cleared it). Rebuild immediately
     // rather than showing the stale fallback.
     if (_shuffleMode != ShuffleMode.off && _loadQueueSongs.length >= 2 &&
-        !_snapshotRecalculating &&
-        !_deckTransitionActive) {
+        !_snapshotRecalculating) {
       _snapshotRecalculating = true;
       _recalculateShuffleOrderImpl();
       _snapshotRecalculating = false;
@@ -568,7 +552,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   Future<void> loadQueue(List<Song> songs, {int startIndex = 0}) async {
     if (_config == null || songs.isEmpty || _loading) return;
     _loading = true;
-    await _cancelDeckTransition();
+    await _cancelCrossfade();
     _shuffleHistory.clear();
     _lastHistoryIndex = null;
     final idx = startIndex.clamp(0, songs.length - 1);
@@ -655,7 +639,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   }
 
   Future<void> playNext(Song song) async {
-    await _cancelDeckTransition();
+    await _cancelCrossfade();
     if (_config == null) return;
     final idx =
         ((player.currentIndex ?? 0) + 1).clamp(0, _playlistSource.length);
@@ -667,7 +651,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   }
 
   Future<void> addToQueue(Song song) async {
-    await _cancelDeckTransition();
+    await _cancelCrossfade();
     if (_config == null) return;
     _queue.add(song);
     _loadQueueSongs = List.from(_queue.songs);
@@ -677,7 +661,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   }
 
   Future<void> removeFromQueue(int index) async {
-    await _cancelDeckTransition();
+    await _cancelCrossfade();
     final physicalIndex = (_shuffleOrder.isNotEmpty &&
             index >= 0 &&
             index < _shuffleOrder.length)
@@ -713,7 +697,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   }
 
   Future<void> removeSongById(String songId) async {
-    await _cancelDeckTransition();
+    await _cancelCrossfade();
     _queue.removeById(songId);
     _loadQueueSongs = List.from(_queue.songs);
     _cachedNormalSnapshot = null;
@@ -729,7 +713,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   }
 
   Future<void> reorderQueue(int oldIndex, int newIndex) async {
-    await _cancelDeckTransition();
+    await _cancelCrossfade();
     // When shuffle is active, reorder the virtual playback order
     // instead of the physical source (which never changes mid-shuffle).
     if (_shuffleOrder.isNotEmpty) {
@@ -773,25 +757,25 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   @override
   Future<void> pause() async {
-    await _cancelDeckTransition();
+    await _cancelCrossfade();
     await player.pause();
   }
 
   @override
   Future<void> stop() async {
-    await _cancelDeckTransition();
+    await _cancelCrossfade();
     await player.stop();
   }
 
   @override
   Future<void> seek(Duration position) async {
-    await _cancelDeckTransition();
+    await _cancelCrossfade();
     await player.seek(position);
   }
 
   @override
   Future<void> skipToNext() async {
-    await _cancelDeckTransition();
+    await _cancelCrossfade();
     if (_shuffleOrder.isNotEmpty) {
       final nextVp = _shufflePos + 1;
       if (nextVp < _shuffleOrder.length) {
@@ -836,7 +820,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   @override
   Future<void> skipToPrevious() async {
-    await _cancelDeckTransition();
+    await _cancelCrossfade();
     if (player.position.inSeconds > 3) {
       await player.seek(Duration.zero);
       return;
@@ -879,7 +863,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   }
 
   Future<void> skipToIndex(int index) async {
-    await _cancelDeckTransition();
+    await _cancelCrossfade();
     _seekingVirtual = true;
     int physicalIndex = index;
     if (_shuffleOrder.isNotEmpty) {
@@ -1176,42 +1160,43 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     return false;
   }
 
-  // Crossfade: overlap the main player with a temporary deck.
+  // Single-player crossfade: volume ramp on the main player only.
+  // No second deck, no handoff races, no double playback.
 
   void _initCrossfade() {
-    // Listen to the player's volume stream to keep _userVolume in sync
-    // when external controllers (system UI, MPRIS) change it.
+    // Keep _userVolume in sync with external controllers (system UI, MPRIS).
     player.volumeStream.listen((vol) {
-      if (!_deckTransitionActive && !_mainPlayerMutedDuringTransition) {
+      if (!_isTransitionFading) {
         _userVolume = vol.clamp(0.0, 1.0);
       }
     });
 
     _crossfadeSub = player.positionStream.listen((position) {
-      if (_queueSnapshotCtrl.isClosed ||
-          _deckTransitionActive ||
-          _transitionFadeTimer?.isActive == true) {
+      if (_queueSnapshotCtrl.isClosed || _isTransitionFading || _loading) {
         return;
       }
       final index = player.currentIndex;
       if (!player.playing ||
           index == null ||
           _loading ||
-          _deckTransitionFromIndex == index) {
+          index < 0 ||
+          index >= _loadQueueSongs.length) {
         return;
       }
 
-      if (index < 0 || index >= _loadQueueSongs.length) return;
-      final from = _loadQueueSongs[index];
+      // Crossfade is too fragile with virtual shuffle orders — the main
+      // player's physical auto-advance rarely matches the virtual next
+      // song. Rely on simple gapless playback in shuffle modes.
+      if (_shuffleMode != ShuffleMode.off) return;
 
+      final from = _loadQueueSongs[index];
       final nextIdx = _resolveNextPhysicalIndex(index);
       if (nextIdx == null) return;
       if (nextIdx < 0 || nextIdx >= _loadQueueSongs.length) return;
       final to = _loadQueueSongs[nextIdx];
 
-      if (!_canPlayOffline(to)) return;
-
       if (from.id.isEmpty || to.id.isEmpty) return;
+      if (!_canPlayOffline(to)) return;
 
       final actualDuration = player.duration?.inSeconds;
       final transition = _transitionPolicy.planPair(
@@ -1225,469 +1210,130 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         return;
       }
 
-      _deckTransitionFromIndex = index;
-      unawaited(_startDeckTransition(transition, index, nextIdx));
+      _startCrossfadeFadeOut(transition, nextIdx);
     });
   }
 
-  Future<void> _startDeckTransition(
-    PlannedTransition transition,
-    int fromIndex,
-    int toIndex,
-  ) async {
-    _deadMansSwitchTimer?.cancel();
-    _deadMansSwitchTimer = null;
-    _deckTransitionActive = true;
-    _deckTransitionToIndex = toIndex;
-    _deckTransitionToSong = transition.to;
+  void _startCrossfadeFadeOut(PlannedTransition transition, int nextIdx) {
+    _cancelCrossfade();
+    _crossfadeActive = true;
+    _crossfadeNextIndex = nextIdx;
 
-    final deck = _transitionDeck ?? AudioPlayer();
-    _transitionDeck = deck;
-    try {
-      await deck.setAudioSource(
-        _songToSource(transition.to),
-        initialPosition: transition.toStart,
-      );
-      await deck.play();
-      await deck.setVolume(0.0);
-    } catch (e) {
-      debugPrint('Deck transition load failed: $e');
-      await _cancelDeckTransition();
-      return;
-    }
+    final totalMs = transition.duration.inMilliseconds.clamp(100, 30000);
+    final startVol = _userVolume;
+    final startTime = DateTime.now();
 
-    // Guard: if the user skipped during the async gap above, cancel immediately.
-    if (!_deckTransitionActive) {
-      await deck.stop();
-      return;
-    }
+    _isTransitionFading = true;
 
-    final totalMs = transition.duration.inMilliseconds.clamp(1, 60000);
-
-    // Delay so the deck initializes before the volume ramp starts.
-    await Future.delayed(const Duration(milliseconds: 300));
-    if (!_deckTransitionActive) {
-      await deck.stop();
-      return;
-    }
-
-    final startedAt = DateTime.now();
-    _transitionFadeTimer = Timer.periodic(
+    _crossfadeTimer = Timer.periodic(
       const Duration(milliseconds: 100),
       (timer) {
         if (_queueSnapshotCtrl.isClosed) {
           timer.cancel();
           return;
         }
-        final elapsed = DateTime.now().difference(startedAt).inMilliseconds;
+        final elapsed = DateTime.now().difference(startTime).inMilliseconds;
         final t = (elapsed / totalMs).clamp(0.0, 1.0);
-
-        // Pre-mute the main player near the end of the fade so that if
-        // auto-advance fires slightly before t=1.0 there is no audible
-        // blip from the main player starting the next track at position 0.
-        if (t >= 0.95 && !_mainPlayerMutedDuringTransition) {
-          _mainPlayerMutedDuringTransition = true;
-          try {
-            player.setVolume(0.0);
-          } catch (e) {
-            debugPrint('Crossfade pre-mute error: $e');
-          }
-        }
-
-        if (!_mainPlayerMutedDuringTransition) {
-          try {
-            player.setVolume(((1.0 - t) * _userVolume).clamp(0.0, 1.0));
-          } catch (e) {
-            debugPrint('Crossfade main-player volume error: $e');
-          }
-        }
+        final vol = (startVol * (1.0 - t)).clamp(0.0, 1.0);
         try {
-          deck.setVolume((t * _userVolume).clamp(0.0, 1.0));
+          player.setVolume(vol);
         } catch (e) {
-          debugPrint('Crossfade deck volume error: $e');
+          debugPrint('Crossfade fade-out error: $e');
         }
         if (t >= 1.0) {
           timer.cancel();
-          // On Linux, _finishDeckTransition's cross-index seek often fails
-          // because MPV is in a file-loading transient state. Instead,
-          // rely on currentIndexStream to call _earlyHandoff when the
-          // main player naturally auto-advances. For the last song (no
-          // auto-advance), fall back to _finishDeckTransition.
-          if (Platform.isLinux && toIndex < _playlistSource.length - 1) {
-            // Wait for auto-advance + _earlyHandoff.
-            // If auto-advance never comes (e.g. next track fails to load),
-            // schedule a dead-man's switch so we don't leave the transition
-            // flags set forever.
-            _deadMansSwitchTimer?.cancel();
-            _deadMansSwitchTimer = Timer(const Duration(seconds: 3), () {
-              if (_deckTransitionActive) {
-                unawaited(_finishDeckTransition(transition, fromIndex));
-              }
-            });
-          } else {
-            unawaited(_finishDeckTransition(transition, fromIndex));
-          }
+          // Volume is now 0. Start a safety timer: if the player never
+          // auto-advances (stuck track, network stall), restore volume.
+          _crossfadeTimeout = Timer(const Duration(seconds: 5), () {
+            if (_crossfadeActive) {
+              _cancelCrossfade();
+            }
+          });
         }
       },
     );
   }
 
-  /// Immediate handoff when the main player auto-advanced to the exact
-  /// target song the deck is fading into. Stops the deck and seeks the
-  /// main player to continue seamlessly from where the deck left off.
-  Future<void> _earlyHandoff() async {
-    if (!_deckTransitionActive) return;
+  void _startCrossfadeFadeIn() {
+    _crossfadeTimeout?.cancel();
+    _crossfadeTimeout = null;
+    _crossfadeActive = false;
+    _crossfadeNextIndex = null;
 
-    _transitionFadeTimer?.cancel();
-    _transitionFadeTimer = null;
-    _deadMansSwitchTimer?.cancel();
-    _deadMansSwitchTimer = null;
-
-    // Save the user's volume BEFORE we clear the transition flag.
-    // The volumeStream listener will fire when we mute below and would
-    // permanently overwrite _userVolume with 0.0 if we didn't restore it.
-    final savedVol = _userVolume;
-
-    // Set false immediately so a concurrent _finishDeckTransition (from the
-    // timer callback or dead-man's switch) sees the flag and exits.
-    _deckTransitionActive = false;
-
-    final deck = _transitionDeck;
-    final toIndex = _deckTransitionToIndex;
-    final toSong = _deckTransitionToSong;
-    Duration? handoffPosition;
-
-    if (deck != null && toIndex != null) {
-      _seekingVirtual = true;
-
-      // Capture deck position BEFORE any async work so we hand off to the
-      // exact spot the deck reached.
-      Duration deckPosition;
-      try {
-        deckPosition = deck.position;
-      } catch (_) {
-        deckPosition = Duration.zero;
-      }
-
-      // STOP THE DECK FIRST. If anything below throws we must not leave
-      // the deck playing alongside the main player — that's the double-
-      // playback bug the user is reporting.
-      try {
-        await deck.stop();
-      } catch (e) {
-        debugPrint('Deck stop during handoff failed: $e');
-      }
-
-      try {
-        // Mute the main player unconditionally as a safety net. On Linux
-        // it was already muted by currentIndexStream, but an explicit
-        // mute here is cheap insurance against any race.
-        await player.setVolume(0.0);
-
-        if (toIndex >= 0 && toIndex < _playlistSource.length) {
-          final currentIdx = player.currentIndex;
-
-      // If the main player landed on a different index, seek to the
-      // correct one. On Linux we do this as two separate operations
-      // (index then position) because a combined seek can restart
-      // the track from 0.
-      if (currentIdx != toIndex) {
-        await _seekWithRetry(
-          () => player.seek(Duration.zero, index: toIndex),
-          label: 'handoff index seek',
-        );
-      }
-
-          final toSongDuration = (_loadQueueSongs.length > toIndex)
-              ? _loadQueueSongs[toIndex].duration
-              : null;
-          final rawHandoff = deckPosition + const Duration(milliseconds: 100);
-          handoffPosition = (toSongDuration != null && toSongDuration > 0)
-              ? Duration(
-                  milliseconds: rawHandoff.inMilliseconds.clamp(
-                    0,
-                    (toSongDuration * 1000).round(),
-                  ),
-                )
-              : rawHandoff;
-
-          await _seekWithRetry(
-            () => player.seek(handoffPosition),
-            label: 'handoff position seek',
-          );
-        }
-
-        await player.setVolume(savedVol);
-        _userVolume = savedVol;
-
-        // On Linux the main player may have been paused when auto-advance
-        // was detected — resume it now so playback doesn't stall.
-        if (Platform.isLinux && !player.playing) {
-          await player.play();
-        }
-      } catch (e) {
-        debugPrint('Early handoff failed: $e');
-        await player.setVolume(savedVol);
-        _userVolume = savedVol;
-        if (Platform.isLinux && !player.playing) {
-          await player.play();
-        }
-      } finally {
-        _seekingVirtual = false;
-      }
+    // If the player isn't ready yet (buffering on Android/network),
+    // wait before starting the fade-in so we don't ramp volume while
+    // the track is still loading.
+    if (player.processingState != ProcessingState.ready) {
+      _waitForReadyThenFadeIn();
+      return;
     }
 
-    _deckTransitionFromIndex = null;
-    _deckTransitionToIndex = null;
-    _deckTransitionToSong = null;
-    _mainPlayerMutedDuringTransition = false;
-
-    if (toSong != null && toIndex != null) {
-      _queue.setCurrentIndex(toIndex);
-      // Update virtual position so skip/next stay correct after handoff.
-      // The currentIndexStream listener did NOT update this because it
-      // returned early when it called _earlyHandoff().
-      if (_shuffleOrder.isNotEmpty) {
-        final newVp = _physicalToVirtual[toIndex];
-        if (newVp != null) _shufflePos = newVp;
-      }
-      _emitQueueSnapshot(immediate: true);
-      _broadcastCurrentMetadata(position: handoffPosition);
-    }
+    _runFadeIn();
   }
 
-  /// Broadcast metadata for the current sequence state. Used after
-  /// handoffs when the sequenceStateStream emission was suppressed.
-  /// [position] defaults to the player's current position; pass a value
-  /// after a handoff so the UI doesn't jump to 0.
-  void _broadcastCurrentMetadata({Duration? position}) {
-    final seqState = player.sequenceState;
-    final rawTag = seqState?.currentSource?.tag;
-    final song = rawTag is Song ? rawTag : null;
-    if (song == null) return;
-    Uri? artUri;
-    if (_config != null && (song.coverArt?.isNotEmpty ?? false)) {
-      artUri =
-          Uri.tryParse(SubsonicClient(_config!).coverArtUrl(song.coverArt!));
-    } else if (song.externalCoverUrl != null) {
-      artUri = Uri.tryParse(song.externalCoverUrl!);
-    }
-    mediaItem.add(MediaItem(
-      id: song.id,
-      title: song.title,
-      artist: song.artist,
-      album: song.album,
-      duration:
-          song.duration != null ? Duration(seconds: song.duration!) : null,
-      artUri: artUri,
-    ));
-    _broadcastState(positionOverride: position);
+  void _waitForReadyThenFadeIn() {
+    StreamSubscription<ProcessingState>? sub;
+    sub = player.processingStateStream.listen((state) {
+      if (state == ProcessingState.ready) {
+        sub?.cancel();
+        _runFadeIn();
+      } else if (state == ProcessingState.completed ||
+          state == ProcessingState.idle) {
+        sub?.cancel();
+        _cancelCrossfade();
+      }
+    });
   }
 
-  Future<void> _finishDeckTransition(
-    PlannedTransition transition,
-    int fromIndex,
-  ) async {
-    if (!_deckTransitionActive) return;
-
-    final toIndex = _deckTransitionToIndex ?? fromIndex + 1;
-    // Account for the 300 ms pre-fade delay so the handoff doesn't repeat
-    // the first 300 ms of the next song.
-    final handoffPosition = transition.toStart + transition.duration + const Duration(milliseconds: 300);
-    Duration? broadcastPosition;
-    final toSongDuration = (_loadQueueSongs.length > toIndex && toIndex >= 0)
-        ? _loadQueueSongs[toIndex].duration
-        : null;
-    final clampedHandoff = (toSongDuration != null && toSongDuration > 0)
-        ? Duration(
-            milliseconds: handoffPosition.inMilliseconds.clamp(
-              0,
-              (toSongDuration * 1000).round(),
-            ),
-          )
-        : handoffPosition;
-
-    // Update virtual shuffle position to reflect where we're going.
-    if (_shuffleOrder.isNotEmpty) {
-      final newVp = _physicalToVirtual[toIndex];
-      if (newVp != null) _shufflePos = newVp;
+  void _runFadeIn() {
+    // Guard: don't start a second fade-in if one is already running.
+    if (_crossfadeTimer?.isActive == true && _isTransitionFading) {
+      return;
     }
 
+    const totalMs = 1200; // Slightly snappier fade-in than fade-out
+    final startVol = player.volume; // Usually 0.0
+    final targetVol = _userVolume;
+    final startTime = DateTime.now();
+
+    _isTransitionFading = true;
+
+    _crossfadeTimer = Timer.periodic(
+      const Duration(milliseconds: 100),
+      (timer) {
+        if (_queueSnapshotCtrl.isClosed) {
+          timer.cancel();
+          return;
+        }
+        final elapsed = DateTime.now().difference(startTime).inMilliseconds;
+        final t = (elapsed / totalMs).clamp(0.0, 1.0);
+        final vol = (startVol + (targetVol - startVol) * t).clamp(0.0, 1.0);
+        try {
+          player.setVolume(vol);
+        } catch (e) {
+          debugPrint('Crossfade fade-in error: $e');
+        }
+        if (t >= 1.0) {
+          timer.cancel();
+          _isTransitionFading = false;
+        }
+      },
+    );
+  }
+
+  Future<void> _cancelCrossfade() async {
+    _crossfadeTimer?.cancel();
+    _crossfadeTimer = null;
+    _crossfadeTimeout?.cancel();
+    _crossfadeTimeout = null;
+    _crossfadeActive = false;
+    _crossfadeNextIndex = null;
+    _isTransitionFading = false;
     try {
-      _seekingVirtual = true;
-      final currentIdx = player.currentIndex;
-      if (toIndex >= 0 && toIndex < _playlistSource.length) {
-        if (currentIdx != toIndex) {
-          // On Linux, MPV can reject a seek that crosses files while
-          // playing. Pause first, seek, then resume.
-          if (Platform.isLinux) {
-            await player.pause();
-            await Future.delayed(const Duration(milliseconds: 50));
-          }
-          await _seekWithRetry(
-            () => player.seek(Duration.zero, index: toIndex),
-            label: 'finish index seek',
-          );
-          if (Platform.isLinux) {
-            await Future.delayed(const Duration(milliseconds: 50));
-          }
-        }
-        broadcastPosition = clampedHandoff;
-        await _seekWithRetry(
-          () => player.seek(clampedHandoff),
-          label: 'finish position seek',
-        );
-      } else if (_playlistSource.length > 0) {
-        await player.seekToNext();
-      }
-      // On Linux the main player may have been paused when auto-advance
-      // was detected during the transition — resume it now.
-      if (Platform.isLinux && !player.playing) {
-        await player.play();
-      }
       await player.setVolume(_userVolume);
-      _queue.setCurrentIndex(toIndex.clamp(0, _playlistSource.length - 1));
-      _emitQueueSnapshot(immediate: true);
     } catch (e) {
-      debugPrint('Deck transition handoff failed: $e');
-      // Fallback: seek to the pinned target at position 0.
-      if (toIndex >= 0 && toIndex < _playlistSource.length) {
-        _seekingVirtual = true;
-        try {
-          final currentIdx = player.currentIndex;
-          if (currentIdx != toIndex) {
-            if (Platform.isLinux) {
-              await player.pause();
-              await Future.delayed(const Duration(milliseconds: 50));
-            }
-            await _seekWithRetry(
-              () => player.seek(Duration.zero, index: toIndex),
-              label: 'fallback index seek',
-            );
-          }
-          broadcastPosition = Duration.zero;
-          await _seekWithRetry(
-            () => player.seek(Duration.zero),
-            label: 'fallback position seek',
-          );
-          if (Platform.isLinux && !player.playing) {
-            await player.play();
-          }
-          _queue.setCurrentIndex(toIndex);
-          _emitQueueSnapshot(immediate: true);
-        } catch (e) {
-          debugPrint('Fallback seek failed for toIndex=$toIndex: $e');
-          // Last resort: just restore volume so the user isn't stuck muted.
-          await player.setVolume(_userVolume);
-        }
-        _seekingVirtual = false;
-      } else if (_shuffleOrder.isNotEmpty) {
-        // Shuffle mode: jump to the first virtual song rather than
-        // physical next so we don't break the virtual order.
-        final fallbackVp = _shufflePos.clamp(0, _shuffleOrder.length - 1);
-        final fallbackIdx = _shuffleOrder[fallbackVp];
-        _seekingVirtual = true;
-        try {
-          final currentIdx = player.currentIndex;
-          if (currentIdx != fallbackIdx) {
-            if (Platform.isLinux) {
-              await player.pause();
-              await Future.delayed(const Duration(milliseconds: 50));
-            }
-            await _seekWithRetry(
-              () => player.seek(Duration.zero, index: fallbackIdx),
-              label: 'fallback shuffle index seek',
-            );
-          }
-          broadcastPosition = Duration.zero;
-          await _seekWithRetry(
-            () => player.seek(Duration.zero),
-            label: 'fallback shuffle position seek',
-          );
-          if (Platform.isLinux && !player.playing) {
-            await player.play();
-          }
-          _queue.setCurrentIndex(fallbackIdx);
-          _emitQueueSnapshot(immediate: true);
-        } catch (e) {
-          debugPrint('Fallback seek failed for fallbackIdx=$fallbackIdx: $e');
-          await player.setVolume(_userVolume);
-        }
-        _seekingVirtual = false;
-      } else {
-        broadcastPosition = Duration.zero;
-        await player.seekToNext();
-      }
-      await player.setVolume(_userVolume);
-    } finally {
-      _seekingVirtual = false;
-      _deckTransitionFromIndex = null;
-      _deckTransitionToIndex = null;
-      _mainPlayerMutedDuringTransition = false;
-      await _stopTransitionDeck();
-      // End the transition BEFORE nulling the target song so currentSong
-      // never returns null during the handoff window.
-      _deckTransitionActive = false;
-      _deckTransitionToSong = null;
-      // Force a metadata broadcast because the sequenceStateStream emission
-      // that happened during the seek was suppressed while the transition
-      // flag was still true. Without this, Android shows the old song.
-      _broadcastCurrentMetadata(position: broadcastPosition);
+      debugPrint('Crossfade cancel restore volume error: $e');
     }
-  }
-
-  Future<void> _cancelDeckTransition() async {
-    _transitionFadeTimer?.cancel();
-    _transitionFadeTimer = null;
-    _deadMansSwitchTimer?.cancel();
-    _deadMansSwitchTimer = null;
-    _deckTransitionActive = false;
-    _deckTransitionFromIndex = null;
-    _deckTransitionToIndex = null;
-    _deckTransitionToSong = null;
-    _mainPlayerMutedDuringTransition = false;
-    await _stopTransitionDeck();
-    await player.setVolume(_userVolume);
-  }
-
-  Future<void> _stopTransitionDeck() async {
-    final deck = _transitionDeck;
-    if (deck == null) return;
-    try {
-      await deck.stop();
-    } catch (_) {}
-    // Don't dispose — reuse for next transition.
-  }
-
-  /// Retry a seek operation up to 3 times with small delays.
-  /// just_audio_media_kit can fail when MPV is still loading a file.
-  Future<void> _seekWithRetry(
-    Future<void> Function() seek, {
-    String label = 'seek',
-  }) async {
-    for (int attempt = 0; attempt < 3; attempt++) {
-      try {
-        await seek();
-        return;
-      } catch (e) {
-        if (attempt == 2) {
-          debugPrint('Seek retry exhausted ($label): $e');
-          rethrow;
-        }
-        debugPrint('Seek attempt ${attempt + 1} failed ($label): $e');
-        await Future.delayed(const Duration(milliseconds: 100));
-      }
-    }
-  }
-
-  Future<void> _disposeTransitionDeck() async {
-    final deck = _transitionDeck;
-    _transitionDeck = null;
-    if (deck == null) return;
-    try {
-      await deck.stop();
-    } catch (_) {}
-    await deck.dispose();
   }
 
   // ---------------------------------------------------------------------------
@@ -1845,10 +1491,10 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _cachedNormalCurrentIndex = -1;
     _loadQueueSongs = const [];
     _crossfadeSub?.cancel();
-    _transitionFadeTimer?.cancel();
-    _deadMansSwitchTimer?.cancel();
+    _crossfadeTimer?.cancel();
+    _crossfadeTimeout?.cancel();
     _recalcDebounceTimer?.cancel();
-    unawaited(_disposeTransitionDeck());
+    // No transition deck to dispose (single-player crossfade).
     _sleepTimer?.cancel();
     _historyController.close();
     player.dispose();
