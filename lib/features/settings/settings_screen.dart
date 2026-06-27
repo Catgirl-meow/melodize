@@ -66,22 +66,6 @@ const _themeOptions = [
   ),
 ];
 
-String _analysisStatusLabel(CompanionAnalysisStatus? status) {
-  if (status == null) return 'Use analysis when available';
-  switch (status.phase) {
-    case CompanionAnalysisPhase.ready:
-      return 'Analysis cache ready';
-    case CompanionAnalysisPhase.queued:
-      return '${status.missingSongs} songs queued for analysis';
-    case CompanionAnalysisPhase.running:
-      return '${status.missingSongs} songs analyzing';
-    case CompanionAnalysisPhase.error:
-      return status.message ?? 'Analysis unavailable';
-    case CompanionAnalysisPhase.unavailable:
-      return 'Use analysis when available';
-  }
-}
-
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
@@ -96,9 +80,6 @@ class SettingsScreen extends ConsumerWidget {
       ),
     );
     final config = ref.watch(serverConfigProvider).valueOrNull;
-    final analysisStatus = ref.watch(companionAnalysisSyncProvider).valueOrNull;
-    final analysisLabel = _analysisStatusLabel(analysisStatus);
-
     return _SettingsPageScaffold(
       title: 'Settings',
       automaticallyImplyLeading: false,
@@ -168,46 +149,11 @@ class SettingsScreen extends ConsumerWidget {
                 );
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.swap_horiz_rounded),
-              title: const Text('Crossfade'),
-              subtitle: Row(
-                children: [
-                  Text(
-                    prefs.crossfadeSeconds > 0
-                        ? '${prefs.crossfadeSeconds}s'
-                        : 'Off',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  Expanded(
-                    child: Slider(
-                      value: prefs.crossfadeSeconds.toDouble(),
-                      min: 0,
-                      max: 8,
-                      divisions: 8,
-                      label: prefs.crossfadeSeconds > 0
-                          ? '${prefs.crossfadeSeconds}s'
-                          : 'Off',
-                      onChanged: (value) {
-                        ref.read(preferencesNotifierProvider.notifier).update(
-                              prefs.copyWith(crossfadeSeconds: value.round()),
-                            );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            SwitchListTile(
-              secondary: const Icon(Icons.auto_awesome_rounded),
-              title: const Text('DJ transitions'),
-              subtitle: Text(analysisLabel),
-              value: prefs.djTransitionsEnabled,
-              onChanged: (value) {
-                ref.read(preferencesNotifierProvider.notifier).update(
-                      prefs.copyWith(djTransitionsEnabled: value),
-                    );
-              },
+            const ListTile(
+              leading: Icon(Icons.auto_awesome_rounded),
+              title: Text('Smart transitions'),
+              subtitle: Text('Auto crossfade per song pair'),
+              trailing: Icon(Icons.info_outline_rounded, size: 18),
             ),
           ],
         ),

@@ -23,7 +23,7 @@ class DeezerClient {
     String? genreHint,
   }) async {
     final seedNorm = normalize(artistName);
-    bool _matches(String? name) {
+    bool matches(String? name) {
       if (name == null) return false;
       final h = normalize(name);
       return h == seedNorm || h.contains(seedNorm) || seedNorm.contains(h);
@@ -35,7 +35,7 @@ class DeezerClient {
       final r1 = await _dio.get('/search/artist?q=$q1&limit=8');
       for (final a in (r1.data?['data'] as List? ?? [])) {
         final id = (a as Map<String, dynamic>)['id'] as int?;
-        if (id != null && _matches(a['name'] as String?)) return id;
+        if (id != null && matches(a['name'] as String?)) return id;
       }
 
       // Pass 2: track search fallback — strict name-match only, no fallback ID.
@@ -49,7 +49,7 @@ class DeezerClient {
         final artistObj = (t as Map<String, dynamic>)['artist']
             as Map<String, dynamic>?;
         final id = artistObj?['id'] as int?;
-        if (id != null && _matches(artistObj?['name'] as String?)) return id;
+        if (id != null && matches(artistObj?['name'] as String?)) return id;
       }
     } catch (_) {}
     return null;

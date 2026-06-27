@@ -158,10 +158,6 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
       } else if (prefs.shuffleMode == 'smartShuffle') {
         h.restoreShuffleMode(ShuffleMode.smartShuffle);
       }
-      if (prefs.crossfadeSeconds > 0) {
-        h.setCrossfadeDuration(prefs.crossfadeSeconds);
-      }
-      h.setDjTransitionsEnabled(prefs.djTransitionsEnabled);
     });
 
     _historySubscription = handler?.playHistoryStream.listen((song) async {
@@ -254,12 +250,6 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
       ref
           .read(audioHandlerNotifierProvider)
           ?.setStreamQuality(next.streamQuality);
-      ref
-          .read(audioHandlerNotifierProvider)
-          ?.setCrossfadeDuration(next.crossfadeSeconds);
-      ref
-          .read(audioHandlerNotifierProvider)
-          ?.setDjTransitionsEnabled(next.djTransitionsEnabled);
       if (prev != null && prev.downloadQuality != next.downloadQuality) {
         _redownloadAll(ref, next.downloadQuality);
       }

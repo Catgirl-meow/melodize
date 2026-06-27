@@ -47,13 +47,18 @@ class AlbumDetailScreen extends ConsumerWidget {
               ),
               titlePadding: const EdgeInsets.fromLTRB(16, 0, 16, 64),
               title: Column(
+                mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.end,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(album.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 20)),
                   Text(album.artist,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                           fontSize: 14, color: scheme.onSurfaceVariant)),
                 ],
@@ -65,7 +70,7 @@ class AlbumDetailScreen extends ConsumerWidget {
             child: Padding(
               padding:
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: songsAsync.whenOrNull(
+              child: songsAsync.when(
                 data: (songs) => Row(
                   children: [
                     Expanded(
@@ -88,6 +93,8 @@ class AlbumDetailScreen extends ConsumerWidget {
                     ),
                   ],
                 ),
+                loading: () => const SizedBox.shrink(),
+                error: (_, __) => const SizedBox.shrink(),
               ),
             ),
           ),

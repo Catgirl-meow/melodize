@@ -270,9 +270,7 @@ class _MainShellState extends ConsumerState<MainShell>
         : scheme.surface;
 
     // Navigation indicator pill uses accent when available.
-    final navIndicator = accentColor != null
-        ? accentColor.withValues(alpha: 0.30)
-        : null; // use theme default
+    final navIndicator = accentColor?.withValues(alpha: 0.30);
 
     final scaffold = Scaffold(
       // extendBodyBehindAppBar: body fills behind the status bar so the

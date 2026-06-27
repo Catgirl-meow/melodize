@@ -56,7 +56,6 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   SubsonicConfig? _config;
   String _streamQuality = 'lossless';
-  int _crossfadeSeconds = 0;
   StreamSubscription<Duration>? _crossfadeSub;
   AudioPlayer? _transitionDeck;
   Timer? _transitionFadeTimer;
@@ -65,10 +64,20 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   int? _deckTransitionToIndex;
   Song? _deckTransitionToSong;
   bool _mainPlayerMutedDuringTransition = false;
+
+  /// User's preferred volume level (0.0–1.0).  Crossfade ramps are scaled
+  /// relative to this so a user who likes quiet playback doesn't get blasted
+  /// when a transition ends.
+  double _userVolume = 1.0;
+
   Timer? _sleepTimer;
   bool _nowPlayingReported = false;
   bool _scrobbled = false;
   LinuxMprisService? _mpris;
+
+  /// Linux dead-man's switch: if auto-advance never fires after a fade
+  /// completes, this Timer calls _finishDeckTransition as a fallback.
+  Timer? _deadMansSwitchTimer;
 
   // Playback history for skipToPrevious in shuffle mode.
   final _shuffleHistory = <int>[]; // original-sequence indices (fallback)
@@ -109,7 +118,6 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   /// Optional companion analysis cache for real BPM/key data.
   BpmCache? _companionBpmCache;
 
-  bool _djTransitionsEnabled = true;
   DateTime _lastSnapshotEmit = DateTime(2000);
   bool _loading = false;
 
@@ -125,6 +133,10 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       return;
     }
     _companionBpmCache = cache;
+    // Invalidate transition-plan cache so transition pills update.
+    _cachedNormalSnapshot = null;
+    _cachedShuffleOrder = null;
+    _cachedPlannedSongs = null;
     // Re-plan when real data arrives mid-session.
     if (_shuffleMode == ShuffleMode.smartShuffle) {
       _recalculateShuffleOrder();
@@ -143,8 +155,46 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     if (!_mapEquals(a.tailSilence, b.tailSilence)) return false;
     if (!_mapEquals(a.energy, b.energy)) return false;
     if (!_mapEquals(a.spectralCentroid, b.spectralCentroid)) return false;
+    if (!_mapEquals(a.firstBeatOffset, b.firstBeatOffset)) return false;
+    if (!_vocalSectionsEquals(a.vocalSections, b.vocalSections)) return false;
+    if (!_phrasePositionsEquals(a.phrasePositions, b.phrasePositions)) {
+      return false;
+    }
     if (!_mapEquals(a.genreCache, b.genreCache)) return false;
     if (!_mapEquals(a.parsedKeyCache, b.parsedKeyCache)) return false;
+    return true;
+  }
+
+  static bool _phrasePositionsEquals(
+    Map<String, List<double>> a,
+    Map<String, List<double>> b,
+  ) {
+    if (a.length != b.length) return false;
+    for (final entry in a.entries) {
+      final other = b[entry.key];
+      if (other == null || other.length != entry.value.length) return false;
+      for (int i = 0; i < entry.value.length; i++) {
+        if (other[i] != entry.value[i]) return false;
+      }
+    }
+    return true;
+  }
+
+  static bool _vocalSectionsEquals(
+    Map<String, List<VocalSection>> a,
+    Map<String, List<VocalSection>> b,
+  ) {
+    if (a.length != b.length) return false;
+    for (final entry in a.entries) {
+      final other = b[entry.key];
+      if (other == null || other.length != entry.value.length) return false;
+      for (int i = 0; i < entry.value.length; i++) {
+        if (other[i].start != entry.value[i].start ||
+            other[i].end != entry.value[i].end) {
+          return false;
+        }
+      }
+    }
     return true;
   }
 
@@ -201,13 +251,27 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       final prevPhysical = _lastKnownPhysicalIndex;
       _lastKnownPhysicalIndex = index;
       if (_deckTransitionActive || _loading) {
-        // Mute the main player if it auto-advanced during a crossfade.
+        // The main player auto-advanced during a crossfade.
         if (_deckTransitionActive &&
             !_seekingVirtual &&
             _deckTransitionFromIndex != null &&
             index != _deckTransitionFromIndex) {
+          // On Linux with shuffle modes the physical next index rarely
+          // matches the virtual next index the deck is fading into.
+          // Always hand off immediately — _earlyHandoff() already handles
+          // index mismatches by seeking the main player to the correct
+          // target.  Waiting for _finishDeckTransition() causes a gap
+          // and/or a blip of the wrong song.
+          //
+          // The main player is already being faded out by the crossfade
+          // timer. At t >= 0.95 it is pre-muted. We MUST NOT call
+          // player.setVolume(0.0) here because the discarded Future can
+          // race with _earlyHandoff()'s volume restore and leave the
+          // player permanently muted. The flag alone is enough to keep
+          // the volumeStream listener from corrupting _userVolume.
           _mainPlayerMutedDuringTransition = true;
-          unawaited(player.setVolume(0.0));
+          unawaited(_earlyHandoff());
+          return;
         }
         return;
       }
@@ -382,8 +446,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       };
 
   TransitionPolicy get _transitionPolicy => TransitionPolicy(
-        crossfadeSeconds: _crossfadeSeconds,
-        djTransitionsEnabled: _djTransitionsEnabled,
+        djTransitionsEnabled: _shuffleMode == ShuffleMode.smartShuffle,
         analysis: _companionBpmCache,
       );
 
@@ -391,6 +454,13 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   List<Song>? _cachedPlannedSongs;
   List<int>? _cachedShuffleOrder;
   int _cachedShuffleHash = 0;
+
+  // Normal-mode snapshot cache.
+  PlaybackQueueSnapshot? _cachedNormalSnapshot;
+  int _cachedNormalQueueLength = -1;
+  int _cachedNormalCurrentIndex = -1;
+  PlaybackMode _cachedNormalMode = PlaybackMode.normal;
+  int _cachedNormalCompanionHash = 0;
 
   PlaybackQueueSnapshot _snapshot() {
     if (_shuffleOrder.isNotEmpty &&
@@ -446,12 +516,31 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _cachedShuffleOrder = null;
     _cachedPlannedSongs = null;
     _cachedShuffleHash = 0;
-    return _queue.snapshot(
+
+    // Cache normal-mode snapshots so the queue screen doesn't rebuild
+    // on every position tick when nothing changed.
+    final qLength = _queue.length;
+    final qIndex = _queue.currentIndex;
+    final qMode = _queue.mode;
+    final companionHash = _companionBpmCache?.hashCode ?? 0;
+    if (_cachedNormalSnapshot != null &&
+        _cachedNormalQueueLength == qLength &&
+        _cachedNormalCurrentIndex == qIndex &&
+        _cachedNormalMode == qMode &&
+        _cachedNormalCompanionHash == companionHash) {
+      return _cachedNormalSnapshot!;
+    }
+    _cachedNormalQueueLength = qLength;
+    _cachedNormalCurrentIndex = qIndex;
+    _cachedNormalMode = qMode;
+    _cachedNormalCompanionHash = companionHash;
+    _cachedNormalSnapshot = _queue.snapshot(
       upcomingTransitions: _transitionPolicy.planUpcoming(
         _queue.songs,
         _queue.currentIndex,
       ),
     );
+    return _cachedNormalSnapshot!;
   }
 
   static bool _listEquals<T>(List<T> a, List<T> b) {
@@ -467,7 +556,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     if (_queueSnapshotCtrl.isClosed) return;
     if (!immediate) {
       final now = DateTime.now();
-      if (now.difference(_lastSnapshotEmit).inMilliseconds < 500) return;
+      if (now.difference(_lastSnapshotEmit).inMilliseconds < 150) return;
       _lastSnapshotEmit = now;
     }
     _queueSnapshotCtrl.add(_snapshot());
@@ -488,7 +577,10 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         knownKeys: _companionBpmCache?.key,
         knownEnergy: _companionBpmCache?.energy,
         knownSpectralCentroid: _companionBpmCache?.spectralCentroid,
-        knownTailSilence: _companionBpmCache?.tailSilence);
+        knownTailSilence: _companionBpmCache?.tailSilence,
+        knownPhrasePositions: _companionBpmCache?.phrasePositions,
+        knownFirstBeatOffset: _companionBpmCache?.firstBeatOffset,
+        knownVocalSections: _companionBpmCache?.vocalSections);
     songs = _planner.plan(
       songs: songs,
       currentIndex: idx,
@@ -508,6 +600,9 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _cachedShuffleOrder = null;
     _cachedPlannedSongs = null;
     _cachedShuffleHash = 0;
+    _cachedNormalSnapshot = null;
+    _cachedNormalQueueLength = -1;
+    _cachedNormalCurrentIndex = -1;
     if (_shuffleMode != ShuffleMode.off && songs.length > 1) {
       _shuffleOrder = List.generate(songs.length, (i) => i);
       _shufflePos = idx.clamp(0, _shuffleOrder.length - 1);
@@ -566,6 +661,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         ((player.currentIndex ?? 0) + 1).clamp(0, _playlistSource.length);
     _queue.playNext(song);
     _loadQueueSongs = List.from(_queue.songs);
+    _cachedNormalSnapshot = null;
     await _playlistSource.insert(idx, _songToSource(song));
     _recalculateShuffleOrder();
   }
@@ -575,6 +671,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     if (_config == null) return;
     _queue.add(song);
     _loadQueueSongs = List.from(_queue.songs);
+    _cachedNormalSnapshot = null;
     await _playlistSource.add(_songToSource(song));
     _recalculateShuffleOrder();
   }
@@ -593,6 +690,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     }
     _queue.removeAt(physicalIndex);
     _loadQueueSongs = List.from(_queue.songs);
+    _cachedNormalSnapshot = null;
     await _playlistSource.removeAt(physicalIndex);
     // Adjust virtual order in place so skip/next stay valid immediately.
     if (_shuffleOrder.isNotEmpty) {
@@ -618,6 +716,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     await _cancelDeckTransition();
     _queue.removeById(songId);
     _loadQueueSongs = List.from(_queue.songs);
+    _cachedNormalSnapshot = null;
     for (int i = _playlistSource.length - 1; i >= 0; i--) {
       final child = _playlistSource[i];
       final tag = child is IndexedAudioSource ? child.tag : null;
@@ -657,6 +756,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     }
     _queue.reorder(oldIndex, newIndex);
     _loadQueueSongs = List.from(_queue.songs);
+    _cachedNormalSnapshot = null;
     if (oldIndex >= 0 &&
         oldIndex < _playlistSource.length &&
         newIndex >= 0 &&
@@ -893,7 +993,10 @@ class MelodizeAudioHandler extends BaseAudioHandler {
               knownKeys: _companionBpmCache?.key,
               knownEnergy: _companionBpmCache?.energy,
               knownSpectralCentroid: _companionBpmCache?.spectralCentroid,
-              knownTailSilence: _companionBpmCache?.tailSilence);
+              knownTailSilence: _companionBpmCache?.tailSilence,
+              knownPhrasePositions: _companionBpmCache?.phrasePositions,
+              knownFirstBeatOffset: _companionBpmCache?.firstBeatOffset,
+              knownVocalSections: _companionBpmCache?.vocalSections);
           final ordered = _planner.plan(
             songs: _loadQueueSongs,
             currentIndex: currentIdx.clamp(0, _loadQueueSongs.length - 1),
@@ -1076,11 +1179,11 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   // Crossfade: overlap the main player with a temporary deck.
 
   void _initCrossfade() {
-    player.sequenceStateStream.listen((_) {
-      if (!_deckTransitionActive &&
-          _crossfadeSeconds > 0 &&
-          player.volume < 0.99) {
-        player.setVolume(1.0);
+    // Listen to the player's volume stream to keep _userVolume in sync
+    // when external controllers (system UI, MPRIS) change it.
+    player.volumeStream.listen((vol) {
+      if (!_deckTransitionActive && !_mainPlayerMutedDuringTransition) {
+        _userVolume = vol.clamp(0.0, 1.0);
       }
     });
 
@@ -1090,10 +1193,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
           _transitionFadeTimer?.isActive == true) {
         return;
       }
-      final secs = _crossfadeSeconds;
       final index = player.currentIndex;
-      if (secs <= 0 ||
-          !player.playing ||
+      if (!player.playing ||
           index == null ||
           _loading ||
           _deckTransitionFromIndex == index) {
@@ -1134,6 +1235,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     int fromIndex,
     int toIndex,
   ) async {
+    _deadMansSwitchTimer?.cancel();
+    _deadMansSwitchTimer = null;
     _deckTransitionActive = true;
     _deckTransitionToIndex = toIndex;
     _deckTransitionToSong = transition.to;
@@ -1178,24 +1281,207 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         }
         final elapsed = DateTime.now().difference(startedAt).inMilliseconds;
         final t = (elapsed / totalMs).clamp(0.0, 1.0);
+
+        // Pre-mute the main player near the end of the fade so that if
+        // auto-advance fires slightly before t=1.0 there is no audible
+        // blip from the main player starting the next track at position 0.
+        if (t >= 0.95 && !_mainPlayerMutedDuringTransition) {
+          _mainPlayerMutedDuringTransition = true;
+          try {
+            player.setVolume(0.0);
+          } catch (e) {
+            debugPrint('Crossfade pre-mute error: $e');
+          }
+        }
+
         if (!_mainPlayerMutedDuringTransition) {
           try {
-            player.setVolume((1.0 - t).clamp(0.0, 1.0));
+            player.setVolume(((1.0 - t) * _userVolume).clamp(0.0, 1.0));
           } catch (e) {
             debugPrint('Crossfade main-player volume error: $e');
           }
         }
         try {
-          deck.setVolume(t.clamp(0.0, 1.0));
+          deck.setVolume((t * _userVolume).clamp(0.0, 1.0));
         } catch (e) {
           debugPrint('Crossfade deck volume error: $e');
         }
         if (t >= 1.0) {
           timer.cancel();
-          unawaited(_finishDeckTransition(transition, fromIndex));
+          // On Linux, _finishDeckTransition's cross-index seek often fails
+          // because MPV is in a file-loading transient state. Instead,
+          // rely on currentIndexStream to call _earlyHandoff when the
+          // main player naturally auto-advances. For the last song (no
+          // auto-advance), fall back to _finishDeckTransition.
+          if (Platform.isLinux && toIndex < _playlistSource.length - 1) {
+            // Wait for auto-advance + _earlyHandoff.
+            // If auto-advance never comes (e.g. next track fails to load),
+            // schedule a dead-man's switch so we don't leave the transition
+            // flags set forever.
+            _deadMansSwitchTimer?.cancel();
+            _deadMansSwitchTimer = Timer(const Duration(seconds: 3), () {
+              if (_deckTransitionActive) {
+                unawaited(_finishDeckTransition(transition, fromIndex));
+              }
+            });
+          } else {
+            unawaited(_finishDeckTransition(transition, fromIndex));
+          }
         }
       },
     );
+  }
+
+  /// Immediate handoff when the main player auto-advanced to the exact
+  /// target song the deck is fading into. Stops the deck and seeks the
+  /// main player to continue seamlessly from where the deck left off.
+  Future<void> _earlyHandoff() async {
+    if (!_deckTransitionActive) return;
+
+    _transitionFadeTimer?.cancel();
+    _transitionFadeTimer = null;
+    _deadMansSwitchTimer?.cancel();
+    _deadMansSwitchTimer = null;
+
+    // Save the user's volume BEFORE we clear the transition flag.
+    // The volumeStream listener will fire when we mute below and would
+    // permanently overwrite _userVolume with 0.0 if we didn't restore it.
+    final savedVol = _userVolume;
+
+    // Set false immediately so a concurrent _finishDeckTransition (from the
+    // timer callback or dead-man's switch) sees the flag and exits.
+    _deckTransitionActive = false;
+
+    final deck = _transitionDeck;
+    final toIndex = _deckTransitionToIndex;
+    final toSong = _deckTransitionToSong;
+    Duration? handoffPosition;
+
+    if (deck != null && toIndex != null) {
+      _seekingVirtual = true;
+
+      // Capture deck position BEFORE any async work so we hand off to the
+      // exact spot the deck reached.
+      Duration deckPosition;
+      try {
+        deckPosition = deck.position;
+      } catch (_) {
+        deckPosition = Duration.zero;
+      }
+
+      // STOP THE DECK FIRST. If anything below throws we must not leave
+      // the deck playing alongside the main player — that's the double-
+      // playback bug the user is reporting.
+      try {
+        await deck.stop();
+      } catch (e) {
+        debugPrint('Deck stop during handoff failed: $e');
+      }
+
+      try {
+        // Mute the main player unconditionally as a safety net. On Linux
+        // it was already muted by currentIndexStream, but an explicit
+        // mute here is cheap insurance against any race.
+        await player.setVolume(0.0);
+
+        if (toIndex >= 0 && toIndex < _playlistSource.length) {
+          final currentIdx = player.currentIndex;
+
+      // If the main player landed on a different index, seek to the
+      // correct one. On Linux we do this as two separate operations
+      // (index then position) because a combined seek can restart
+      // the track from 0.
+      if (currentIdx != toIndex) {
+        await _seekWithRetry(
+          () => player.seek(Duration.zero, index: toIndex),
+          label: 'handoff index seek',
+        );
+      }
+
+          final toSongDuration = (_loadQueueSongs.length > toIndex)
+              ? _loadQueueSongs[toIndex].duration
+              : null;
+          final rawHandoff = deckPosition + const Duration(milliseconds: 100);
+          handoffPosition = (toSongDuration != null && toSongDuration > 0)
+              ? Duration(
+                  milliseconds: rawHandoff.inMilliseconds.clamp(
+                    0,
+                    (toSongDuration * 1000).round(),
+                  ),
+                )
+              : rawHandoff;
+
+          await _seekWithRetry(
+            () => player.seek(handoffPosition),
+            label: 'handoff position seek',
+          );
+        }
+
+        await player.setVolume(savedVol);
+        _userVolume = savedVol;
+
+        // On Linux the main player may have been paused when auto-advance
+        // was detected — resume it now so playback doesn't stall.
+        if (Platform.isLinux && !player.playing) {
+          await player.play();
+        }
+      } catch (e) {
+        debugPrint('Early handoff failed: $e');
+        await player.setVolume(savedVol);
+        _userVolume = savedVol;
+        if (Platform.isLinux && !player.playing) {
+          await player.play();
+        }
+      } finally {
+        _seekingVirtual = false;
+      }
+    }
+
+    _deckTransitionFromIndex = null;
+    _deckTransitionToIndex = null;
+    _deckTransitionToSong = null;
+    _mainPlayerMutedDuringTransition = false;
+
+    if (toSong != null && toIndex != null) {
+      _queue.setCurrentIndex(toIndex);
+      // Update virtual position so skip/next stay correct after handoff.
+      // The currentIndexStream listener did NOT update this because it
+      // returned early when it called _earlyHandoff().
+      if (_shuffleOrder.isNotEmpty) {
+        final newVp = _physicalToVirtual[toIndex];
+        if (newVp != null) _shufflePos = newVp;
+      }
+      _emitQueueSnapshot(immediate: true);
+      _broadcastCurrentMetadata(position: handoffPosition);
+    }
+  }
+
+  /// Broadcast metadata for the current sequence state. Used after
+  /// handoffs when the sequenceStateStream emission was suppressed.
+  /// [position] defaults to the player's current position; pass a value
+  /// after a handoff so the UI doesn't jump to 0.
+  void _broadcastCurrentMetadata({Duration? position}) {
+    final seqState = player.sequenceState;
+    final rawTag = seqState?.currentSource?.tag;
+    final song = rawTag is Song ? rawTag : null;
+    if (song == null) return;
+    Uri? artUri;
+    if (_config != null && (song.coverArt?.isNotEmpty ?? false)) {
+      artUri =
+          Uri.tryParse(SubsonicClient(_config!).coverArtUrl(song.coverArt!));
+    } else if (song.externalCoverUrl != null) {
+      artUri = Uri.tryParse(song.externalCoverUrl!);
+    }
+    mediaItem.add(MediaItem(
+      id: song.id,
+      title: song.title,
+      artist: song.artist,
+      album: song.album,
+      duration:
+          song.duration != null ? Duration(seconds: song.duration!) : null,
+      artUri: artUri,
+    ));
+    _broadcastState(positionOverride: position);
   }
 
   Future<void> _finishDeckTransition(
@@ -1208,6 +1494,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     // Account for the 300 ms pre-fade delay so the handoff doesn't repeat
     // the first 300 ms of the next song.
     final handoffPosition = transition.toStart + transition.duration + const Duration(milliseconds: 300);
+    Duration? broadcastPosition;
     final toSongDuration = (_loadQueueSongs.length > toIndex && toIndex >= 0)
         ? _loadQueueSongs[toIndex].duration
         : null;
@@ -1228,25 +1515,71 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
     try {
       _seekingVirtual = true;
-      // Only seek if the target index is valid; otherwise fall through to seekToNext.
+      final currentIdx = player.currentIndex;
       if (toIndex >= 0 && toIndex < _playlistSource.length) {
-        await player.seek(clampedHandoff, index: toIndex);
+        if (currentIdx != toIndex) {
+          // On Linux, MPV can reject a seek that crosses files while
+          // playing. Pause first, seek, then resume.
+          if (Platform.isLinux) {
+            await player.pause();
+            await Future.delayed(const Duration(milliseconds: 50));
+          }
+          await _seekWithRetry(
+            () => player.seek(Duration.zero, index: toIndex),
+            label: 'finish index seek',
+          );
+          if (Platform.isLinux) {
+            await Future.delayed(const Duration(milliseconds: 50));
+          }
+        }
+        broadcastPosition = clampedHandoff;
+        await _seekWithRetry(
+          () => player.seek(clampedHandoff),
+          label: 'finish position seek',
+        );
       } else if (_playlistSource.length > 0) {
         await player.seekToNext();
       }
-      await player.setVolume(1.0);
+      // On Linux the main player may have been paused when auto-advance
+      // was detected during the transition — resume it now.
+      if (Platform.isLinux && !player.playing) {
+        await player.play();
+      }
+      await player.setVolume(_userVolume);
       _queue.setCurrentIndex(toIndex.clamp(0, _playlistSource.length - 1));
-      _emitQueueSnapshot();
+      _emitQueueSnapshot(immediate: true);
     } catch (e) {
       debugPrint('Deck transition handoff failed: $e');
       // Fallback: seek to the pinned target at position 0.
       if (toIndex >= 0 && toIndex < _playlistSource.length) {
         _seekingVirtual = true;
         try {
-          await player.seek(Duration.zero, index: toIndex);
+          final currentIdx = player.currentIndex;
+          if (currentIdx != toIndex) {
+            if (Platform.isLinux) {
+              await player.pause();
+              await Future.delayed(const Duration(milliseconds: 50));
+            }
+            await _seekWithRetry(
+              () => player.seek(Duration.zero, index: toIndex),
+              label: 'fallback index seek',
+            );
+          }
+          broadcastPosition = Duration.zero;
+          await _seekWithRetry(
+            () => player.seek(Duration.zero),
+            label: 'fallback position seek',
+          );
+          if (Platform.isLinux && !player.playing) {
+            await player.play();
+          }
           _queue.setCurrentIndex(toIndex);
-          _emitQueueSnapshot();
-        } catch (_) {}
+          _emitQueueSnapshot(immediate: true);
+        } catch (e) {
+          debugPrint('Fallback seek failed for toIndex=$toIndex: $e');
+          // Last resort: just restore volume so the user isn't stuck muted.
+          await player.setVolume(_userVolume);
+        }
         _seekingVirtual = false;
       } else if (_shuffleOrder.isNotEmpty) {
         // Shuffle mode: jump to the first virtual song rather than
@@ -1255,15 +1588,37 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         final fallbackIdx = _shuffleOrder[fallbackVp];
         _seekingVirtual = true;
         try {
-          await player.seek(Duration.zero, index: fallbackIdx);
+          final currentIdx = player.currentIndex;
+          if (currentIdx != fallbackIdx) {
+            if (Platform.isLinux) {
+              await player.pause();
+              await Future.delayed(const Duration(milliseconds: 50));
+            }
+            await _seekWithRetry(
+              () => player.seek(Duration.zero, index: fallbackIdx),
+              label: 'fallback shuffle index seek',
+            );
+          }
+          broadcastPosition = Duration.zero;
+          await _seekWithRetry(
+            () => player.seek(Duration.zero),
+            label: 'fallback shuffle position seek',
+          );
+          if (Platform.isLinux && !player.playing) {
+            await player.play();
+          }
           _queue.setCurrentIndex(fallbackIdx);
-          _emitQueueSnapshot();
-        } catch (_) {}
+          _emitQueueSnapshot(immediate: true);
+        } catch (e) {
+          debugPrint('Fallback seek failed for fallbackIdx=$fallbackIdx: $e');
+          await player.setVolume(_userVolume);
+        }
         _seekingVirtual = false;
       } else {
+        broadcastPosition = Duration.zero;
         await player.seekToNext();
       }
-      await player.setVolume(1.0);
+      await player.setVolume(_userVolume);
     } finally {
       _seekingVirtual = false;
       _deckTransitionFromIndex = null;
@@ -1277,42 +1632,22 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       // Force a metadata broadcast because the sequenceStateStream emission
       // that happened during the seek was suppressed while the transition
       // flag was still true. Without this, Android shows the old song.
-      final seqState = player.sequenceState;
-      final rawTag = seqState?.currentSource?.tag;
-      final song = rawTag is Song ? rawTag : null;
-      if (song != null) {
-        Uri? artUri;
-        if (_config != null && (song.coverArt?.isNotEmpty ?? false)) {
-          artUri = Uri.tryParse(
-              SubsonicClient(_config!).coverArtUrl(song.coverArt!));
-        } else if (song.externalCoverUrl != null) {
-          artUri = Uri.tryParse(song.externalCoverUrl!);
-        }
-        mediaItem.add(MediaItem(
-          id: song.id,
-          title: song.title,
-          artist: song.artist,
-          album: song.album,
-          duration: song.duration != null
-              ? Duration(seconds: song.duration!)
-              : null,
-          artUri: artUri,
-        ));
-        _broadcastState(positionOverride: Duration.zero);
-      }
+      _broadcastCurrentMetadata(position: broadcastPosition);
     }
   }
 
   Future<void> _cancelDeckTransition() async {
     _transitionFadeTimer?.cancel();
     _transitionFadeTimer = null;
+    _deadMansSwitchTimer?.cancel();
+    _deadMansSwitchTimer = null;
     _deckTransitionActive = false;
     _deckTransitionFromIndex = null;
     _deckTransitionToIndex = null;
     _deckTransitionToSong = null;
     _mainPlayerMutedDuringTransition = false;
     await _stopTransitionDeck();
-    await player.setVolume(1.0);
+    await player.setVolume(_userVolume);
   }
 
   Future<void> _stopTransitionDeck() async {
@@ -1324,6 +1659,27 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     // Don't dispose — reuse for next transition.
   }
 
+  /// Retry a seek operation up to 3 times with small delays.
+  /// just_audio_media_kit can fail when MPV is still loading a file.
+  Future<void> _seekWithRetry(
+    Future<void> Function() seek, {
+    String label = 'seek',
+  }) async {
+    for (int attempt = 0; attempt < 3; attempt++) {
+      try {
+        await seek();
+        return;
+      } catch (e) {
+        if (attempt == 2) {
+          debugPrint('Seek retry exhausted ($label): $e');
+          rethrow;
+        }
+        debugPrint('Seek attempt ${attempt + 1} failed ($label): $e');
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+  }
+
   Future<void> _disposeTransitionDeck() async {
     final deck = _transitionDeck;
     _transitionDeck = null;
@@ -1332,19 +1688,6 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       await deck.stop();
     } catch (_) {}
     await deck.dispose();
-  }
-
-  void setCrossfadeDuration(int seconds) {
-    _crossfadeSeconds = seconds.clamp(0, 12);
-    if (seconds <= 0) {
-      unawaited(_cancelDeckTransition());
-    }
-    _emitQueueSnapshot(immediate: true);
-  }
-
-  void setDjTransitionsEnabled(bool enabled) {
-    _djTransitionsEnabled = enabled;
-    _emitQueueSnapshot(immediate: true);
   }
 
   // ---------------------------------------------------------------------------
@@ -1410,6 +1753,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   void _adjustVolume(double delta) {
     final vol = (player.volume + delta).clamp(0.0, 1.0);
+    _userVolume = vol;
     player.setVolume(vol);
   }
 
@@ -1468,7 +1812,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         _adjustVolume(0.05);
         return true;
       case LogicalKeyboardKey.keyM:
-        player.setVolume(player.volume > 0 ? 0.0 : 1.0);
+        _userVolume = player.volume > 0 ? 0.0 : 1.0;
+        player.setVolume(_userVolume);
         return true;
       case LogicalKeyboardKey.keyS:
         toggleShuffle();
@@ -1495,9 +1840,13 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _cachedShuffleOrder = null;
     _cachedPlannedSongs = null;
     _cachedShuffleHash = 0;
+    _cachedNormalSnapshot = null;
+    _cachedNormalQueueLength = -1;
+    _cachedNormalCurrentIndex = -1;
     _loadQueueSongs = const [];
     _crossfadeSub?.cancel();
     _transitionFadeTimer?.cancel();
+    _deadMansSwitchTimer?.cancel();
     _recalcDebounceTimer?.cancel();
     unawaited(_disposeTransitionDeck());
     _sleepTimer?.cancel();

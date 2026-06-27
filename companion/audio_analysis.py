@@ -65,17 +65,16 @@ def analyze_song(file_path: str) -> Optional[dict]:
         cent = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
         spectral_centroid = float(np.mean(cent))
 
-        # --- Phrase boundary detection (16-bar, only when BPM is reliable) ---
+        # --- Beat tracking (first beat offset, phrase boundaries) ---
+        first_beat_offset: Optional[float] = None
         phrase_positions: Optional[list] = None
         if bpm is not None and not (isinstance(bpm, float) and np.isnan(bpm)):
             try:
-                # If beats were already computed, reuse them; otherwise compute
-                # again at full resolution (the previous beat_track was at 22050).
                 tempo, beats = librosa.beat.beat_track(y=y, sr=sr, units="time")
                 if len(beats) > 0:
+                    first_beat_offset = float(beats[0])
                     beat_interval = 60.0 / bpm if bpm > 0 else 0.5
                     phrase_beats = 16  # 16-bar phrases (16 × 4 beats)
-                    phrase_interval = beat_interval * phrase_beats
                     # Pick beats that align closest to 16-bar boundaries.
                     phrases = []
                     for i in range(0, len(beats), phrase_beats):
@@ -83,6 +82,10 @@ def analyze_song(file_path: str) -> Optional[dict]:
                     phrase_positions = phrases
             except Exception:
                 phrase_positions = None
+                first_beat_offset = None
+
+        # --- Vocal section detection ---
+        vocal_sections = _detect_vocal_sections(y, sr)
 
         # --- Trailing silence detection ---
         # Scan backward from the end in 0.1s windows.  If the RMS in that
@@ -109,6 +112,8 @@ def analyze_song(file_path: str) -> Optional[dict]:
             "duration": round(duration, 2),
             "tail_silence": round(tail_silence, 2),
             "phrase_positions": phrase_positions,
+            "first_beat_offset": first_beat_offset,
+            "vocal_sections": vocal_sections,
         }
 
     except Exception as e:
@@ -156,6 +161,74 @@ def _detect_tail_silence(
             break
         tail_sec += window_ms / 1000.0
     return tail_sec
+
+
+# ---------------------------------------------------------------------------
+# Vocal section detection
+
+def _detect_vocal_sections(y: np.ndarray, sr: int) -> list[dict]:
+    """
+    Detect vocal (singing) sections in an audio signal.
+
+    Uses a simple but effective approach:
+    1. Separate harmonic (vocal-like) from percussive using HPSS
+    2. Compute RMS energy of the harmonic component in short windows
+    3. Threshold against the median + 1.5× MAD to find "active" windows
+    4. Merge contiguous active windows into sections
+
+    Returns a list of {"start": float, "end": float} dicts.
+    """
+    try:
+        import librosa
+
+        # Separate harmonic (vocal-like) from percussive
+        y_harmonic, _ = librosa.effects.hpss(y)
+
+        # Compute RMS in 0.5-second windows
+        hop = int(sr * 0.5)
+        rms = []
+        for i in range(0, len(y_harmonic) - hop, hop):
+            window = y_harmonic[i:i + hop]
+            rms.append(float(np.sqrt(np.mean(window ** 2))))
+
+        if not rms:
+            return []
+
+        # Dynamic threshold: median + 1.5 × median absolute deviation
+        median_rms = float(np.median(rms))
+        mad = float(np.median(np.abs(np.array(rms) - median_rms)))
+        threshold = median_rms + 1.5 * mad
+
+        # Find contiguous regions above threshold
+        sections = []
+        in_vocal = False
+        start_sec = 0.0
+        for i, val in enumerate(rms):
+            sec = i * 0.5
+            if val > threshold and not in_vocal:
+                in_vocal = True
+                start_sec = sec
+            elif val <= threshold and in_vocal:
+                in_vocal = False
+                if sec - start_sec >= 2.0:  # Min 2-second vocal section
+                    sections.append({
+                        "start": round(start_sec, 2),
+                        "end": round(sec, 2),
+                    })
+
+        # Close trailing section
+        if in_vocal:
+            end_sec = len(rms) * 0.5
+            if end_sec - start_sec >= 2.0:
+                sections.append({
+                    "start": round(start_sec, 2),
+                    "end": round(end_sec, 2),
+                })
+
+        return sections
+
+    except Exception:
+        return []
 
 
 # ---------------------------------------------------------------------------

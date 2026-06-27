@@ -7,7 +7,7 @@ class AppPreferences {
   final String autoDownload; // 'never' | 'on_play' | 'all'
   final String downloadQuality; // 'lossless' | '320' | '192' | '128'
   final String
-      companionUrl; // e.g. 'http://100.73.73.73:8765'  (empty = disabled)
+      companionUrl; // e.g. 'http://192.0.2.1:8765'  (empty = disabled)
   final String companionApiKey; // X-API-Key value
   final String
       deezerArl; // Deezer ARL cookie — enables FLAC downloads via companion
@@ -22,8 +22,6 @@ class AppPreferences {
       floatingNavBar; // true = floating pill dock, false = classic nav bar
   final String themeMode; // 'dark' | 'light' | 'system'
   final String shuffleMode; // 'off' | 'shuffle' | 'smartShuffle'
-  final int crossfadeSeconds; // 0 = off, 1–8 = fade duration between tracks
-  final bool djTransitionsEnabled; // true = allow enhanced analyzed transitions
 
   const AppPreferences({
     this.streamQuality = 'lossless',
@@ -41,8 +39,6 @@ class AppPreferences {
     this.floatingNavBar = true,
     this.themeMode = 'dark',
     this.shuffleMode = 'off',
-    this.crossfadeSeconds = 0,
-    this.djTransitionsEnabled = true,
   });
 
   bool get hasCompanion =>
@@ -65,8 +61,6 @@ class AppPreferences {
     bool? floatingNavBar,
     String? themeMode,
     String? shuffleMode,
-    int? crossfadeSeconds,
-    bool? djTransitionsEnabled,
   }) =>
       AppPreferences(
         streamQuality: streamQuality ?? this.streamQuality,
@@ -86,8 +80,6 @@ class AppPreferences {
         floatingNavBar: floatingNavBar ?? this.floatingNavBar,
         themeMode: themeMode ?? this.themeMode,
         shuffleMode: shuffleMode ?? this.shuffleMode,
-        crossfadeSeconds: crossfadeSeconds ?? this.crossfadeSeconds,
-        djTransitionsEnabled: djTransitionsEnabled ?? this.djTransitionsEnabled,
       );
 
   factory AppPreferences.fromJson(Map<String, dynamic> j) => AppPreferences(
@@ -106,8 +98,6 @@ class AppPreferences {
         floatingNavBar: j['floatingNavBar'] as bool? ?? true,
         themeMode: j['themeMode'] as String? ?? 'dark',
         shuffleMode: j['shuffleMode'] as String? ?? 'off',
-        crossfadeSeconds: j['crossfadeSeconds'] as int? ?? 0,
-        djTransitionsEnabled: j['djTransitionsEnabled'] as bool? ?? true,
       );
 
   Map<String, dynamic> toJson() => {
@@ -126,8 +116,6 @@ class AppPreferences {
         'floatingNavBar': floatingNavBar,
         'themeMode': themeMode,
         'shuffleMode': shuffleMode,
-        'crossfadeSeconds': crossfadeSeconds,
-        'djTransitionsEnabled': djTransitionsEnabled,
       };
 
   static Future<File> get _file async {

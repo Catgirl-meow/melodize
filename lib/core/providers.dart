@@ -132,6 +132,9 @@ final companionAnalysisProvider = FutureProvider<BpmCache?>((ref) async {
   final tailSilence = <String, double>{};
   final energy = <String, double>{};
   final spectralCentroid = <String, double>{};
+  final phrasePositions = <String, List<double>>{};
+  final firstBeatOffset = <String, double>{};
+  final vocalSections = <String, List<VocalSection>>{};
 
   for (final r in results) {
     final songId = r['song_id'] as String?;
@@ -158,6 +161,24 @@ final companionAnalysisProvider = FutureProvider<BpmCache?>((ref) async {
     if (centroidVal is num && centroidVal > 0) {
       spectralCentroid[songId] = centroidVal.toDouble();
     }
+    final pp = r['phrase_positions'];
+    if (pp is List && pp.isNotEmpty) {
+      phrasePositions[songId] = pp.whereType<num>().map((n) => n.toDouble()).toList();
+    }
+    final fbo = r['first_beat_offset'];
+    if (fbo is num && fbo >= 0) {
+      firstBeatOffset[songId] = fbo.toDouble();
+    }
+    final vs = r['vocal_sections'];
+    if (vs is List && vs.isNotEmpty) {
+      vocalSections[songId] = vs
+          .whereType<Map>()
+          .map((m) => VocalSection(
+                start: (m['start'] as num?)?.toDouble() ?? 0.0,
+                end: (m['end'] as num?)?.toDouble() ?? 0.0,
+              ))
+          .toList();
+    }
   }
 
   return BpmCache(
@@ -167,6 +188,9 @@ final companionAnalysisProvider = FutureProvider<BpmCache?>((ref) async {
     tailSilence: tailSilence,
     energy: energy,
     spectralCentroid: spectralCentroid,
+    phrasePositions: phrasePositions,
+    firstBeatOffset: firstBeatOffset,
+    vocalSections: vocalSections,
   );
 });
 
@@ -429,12 +453,12 @@ final allSongsProvider = StreamProvider<List<Song>>((ref) async* {
   final client = ref.watch(subsonicClientProvider);
   final deletedIds = ref.watch(_pendingDeleteIdsProvider);
 
-  List<Song> _filter(List<Song> songs) =>
+  List<Song> filter(List<Song> songs) =>
       deletedIds.isEmpty ? songs : songs.where((s) => !deletedIds.contains(s.id)).toList();
 
   // Always emit cached songs immediately (with correct isDownloaded from DB)
   final cached = await db.getAllCachedSongs();
-  yield _filter(cached.map(_rowToSong).toList());
+  yield filter(cached.map(_rowToSong).toList());
 
   if (client != null) {
     try {
@@ -461,7 +485,7 @@ final allSongsProvider = StreamProvider<List<Song>>((ref) async* {
         ref.read(_pendingDeleteIdsProvider.notifier).update(
             (s) => s.intersection(freshIds));
       }
-      yield _filter(updatedSongs);
+      yield filter(updatedSongs);
     } catch (_) {
       // Offline or server error — keep showing cached data, no rethrow
     }

@@ -126,7 +126,7 @@ class DownloadsScreen extends ConsumerWidget {
 /// Rebuilds only when this song's own download progress/status changes.
 class _ActiveTile extends ConsumerWidget {
   final String songId;
-  const _ActiveTile({required this.songId, super.key});
+  const _ActiveTile({required this.songId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

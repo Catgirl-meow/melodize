@@ -149,11 +149,11 @@ class _MprisObject extends DBusObject {
       map[const DBusString('xesam:artist')] = DBusVariant(
         DBusArray(
           DBusSignature('s'),
-          [DBusString(song.artist ?? '')],
+          [DBusString(song.artist)],
         ),
       );
       map[const DBusString('xesam:album')] =
-          DBusVariant(DBusString(song.album ?? ''));
+          DBusVariant(DBusString(song.album));
       if (song.duration != null) {
         map[const DBusString('mpris:length')] =
             DBusVariant(DBusInt64((song.duration! * 1000000).toInt()));

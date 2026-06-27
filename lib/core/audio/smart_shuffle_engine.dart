@@ -14,6 +14,14 @@ String _normArtist(Song s) => _normArtistExpando[s] ??= s.artist.trim().toLowerC
 //   3 — genre-estimated BPM only, genre compatibility, arc
 
 // In-memory cache for BPM, key, energy, and trailing silence.
+/// A contiguous vocal section in a song, in seconds.
+class VocalSection {
+  final double start;
+  final double end;
+
+  const VocalSection({required this.start, required this.end});
+}
+
 class BpmCache {
   final Map<String, int> bpm; // songId → BPM
   final Map<String, String> key; // songId → Camelot key
@@ -21,6 +29,14 @@ class BpmCache {
   final Map<String, double> tailSilence; // songId → seconds of trailing silence
   final Map<String, double> energy; // songId → RMS energy (0.0–1.0)
   final Map<String, double> spectralCentroid; // songId → spectral centroid (brightness proxy)
+  /// Phrase boundaries (16-bar) in seconds, sorted ascending.
+  final Map<String, List<double>> phrasePositions;
+  /// Offset of the first detected beat in seconds. Used to align crossfade
+  /// start so the incoming song begins on a downbeat.
+  final Map<String, double> firstBeatOffset;
+  /// Vocal sections detected in each song. Empty list = no vocals detected
+  /// or analysis not available.
+  final Map<String, List<VocalSection>> vocalSections;
   // Precomputed derived data for fast DJ scoring (no repeated regex/string ops).
   final Map<String, DjGroup> genreCache; // songId → DJ group
   final Map<String, ({int number, bool minor})?> parsedKeyCache; // songId → parsed Camelot key
@@ -32,6 +48,9 @@ class BpmCache {
     this.tailSilence = const {},
     this.energy = const {},
     this.spectralCentroid = const {},
+    this.phrasePositions = const {},
+    this.firstBeatOffset = const {},
+    this.vocalSections = const {},
     this.genreCache = const {},
     this.parsedKeyCache = const {},
   });
@@ -42,6 +61,9 @@ class BpmCache {
   double? tailSilenceFor(Song song) => tailSilence[song.id];
   double? energyFor(Song song) => energy[song.id];
   double? spectralCentroidFor(Song song) => spectralCentroid[song.id];
+  List<double>? phrasePositionsFor(Song song) => phrasePositions[song.id];
+  double? firstBeatOffsetFor(Song song) => firstBeatOffset[song.id];
+  List<VocalSection>? vocalSectionsFor(Song song) => vocalSections[song.id];
 
   DjGroup djGroupFor(Song song) => genreCache[song.id] ?? _classifyGenre(song.genre);
 
@@ -64,6 +86,9 @@ BpmCache buildBpmCache(
   Map<String, double>? knownEnergy,
   Map<String, double>? knownSpectralCentroid,
   Map<String, double>? knownTailSilence,
+  Map<String, List<double>>? knownPhrasePositions,
+  Map<String, double>? knownFirstBeatOffset,
+  Map<String, List<VocalSection>>? knownVocalSections,
 }) {
   final bpm = <String, int>{};
   final key = <String, String>{};
@@ -71,6 +96,9 @@ BpmCache buildBpmCache(
   final energy = <String, double>{};
   final spectralCentroid = <String, double>{};
   final tailSilence = <String, double>{};
+  final phrasePositions = <String, List<double>>{};
+  final firstBeatOffset = <String, double>{};
+  final vocalSections = <String, List<VocalSection>>{};
   final genreCache = <String, DjGroup>{};
   final parsedKeyCache = <String, ({int number, bool minor})?>{};
 
@@ -102,6 +130,19 @@ BpmCache buildBpmCache(
     final ts = knownTailSilence?[song.id];
     if (ts != null && ts > 0) tailSilence[song.id] = ts;
 
+    final pp = knownPhrasePositions?[song.id];
+    if (pp != null && pp.isNotEmpty) {
+      phrasePositions[song.id] = List.unmodifiable(pp);
+    }
+
+    final fbo = knownFirstBeatOffset?[song.id];
+    if (fbo != null && fbo >= 0) firstBeatOffset[song.id] = fbo;
+
+    final vs = knownVocalSections?[song.id];
+    if (vs != null && vs.isNotEmpty) {
+      vocalSections[song.id] = List.unmodifiable(vs);
+    }
+
     // Precompute genre classification and parsed Camelot key once per song.
     genreCache[song.id] = _classifyGenre(song.genre);
     final keyVal = knownKeys?[song.id];
@@ -125,6 +166,9 @@ BpmCache buildBpmCache(
     energy: energy,
     spectralCentroid: spectralCentroid,
     tailSilence: tailSilence,
+    phrasePositions: phrasePositions,
+    firstBeatOffset: firstBeatOffset,
+    vocalSections: vocalSections,
     genreCache: genreCache,
     parsedKeyCache: parsedKeyCache,
   );
@@ -515,6 +559,11 @@ List<Song> orderSongs(List<Song> songs, int anchorIndex, BpmCache cache,
   final upcoming = songs.sublist(idx + 1);
   if (upcoming.isEmpty) return List.from(songs);
 
+  // If this looks like a well-sequenced album, keep the artist's order.
+  if (_isWellSequencedAlbum(anchor, upcoming, cache)) {
+    return List.from(songs);
+  }
+
   // Safety: if literally zero usable data, fall back to random shuffle
   final hasAnyBpm = songs.any((s) => cache.bpmFor(s) != null);
   if (!hasAnyBpm && songs.length > 1) {
@@ -526,7 +575,70 @@ List<Song> orderSongs(List<Song> songs, int anchorIndex, BpmCache cache,
       _buildAndPolishDjArc(anchor, upcoming, cache, tier, songs.length, seed);
 
   return [...songs.sublist(0, idx + 1), ...orderedUpcoming];
-}  // Auto-select tier based on available data quality.
+}
+
+/// Returns true when [anchor] + [upcoming] look like a deliberately
+/// sequenced album that the artist already ordered for flow.
+///
+/// Heuristics:
+///   • All songs share the same album.
+///   • Total tracks ≤ 20 (compilations / various-artists albums are
+///     usually longer and less carefully sequenced).
+///   • If every song has a track number, they must be in ascending
+///     track-number order — a strong signal the user loaded the album
+///     in its intended sequence.
+///   • When companion analysis (real BPM / key) is available, the
+///     original sequence must average ≥ 0.50 DJ-score — we only
+///     preserve orders that are objectively good, not just any album.
+///   • Without companion data we trust the artist for albums ≤ 15 tracks.
+bool _isWellSequencedAlbum(Song anchor, List<Song> upcoming, BpmCache cache) {
+  final albumId = anchor.albumId ?? anchor.album;
+  if (albumId.isEmpty) return false;
+
+  for (final s in upcoming) {
+    final sAlbumId = s.albumId ?? s.album;
+    if (sAlbumId != albumId) return false;
+  }
+
+  final totalTracks = upcoming.length + 1;
+  if (totalTracks > 20) return false;
+
+  // Check track-number ordering.
+  final allHaveTrackNumbers =
+      upcoming.every((s) => s.track != null) && anchor.track != null;
+  if (allHaveTrackNumbers) {
+    final originalOrder = [anchor, ...upcoming];
+    final isTrackOrder = List.generate(originalOrder.length, (i) => i).every(
+        (i) =>
+            i == 0 ||
+            (originalOrder[i].track! >= originalOrder[i - 1].track!));
+
+    if (isTrackOrder) {
+      final hasCompanionData = [anchor, ...upcoming]
+          .any((s) => cache.isEstimated[s.id] == false);
+      if (hasCompanionData) {
+        double totalScore = 0;
+        int pairs = 0;
+        for (int i = 0; i < originalOrder.length - 1; i++) {
+          // Pass totalSongs = 1 so the artist-penalty (×0.1 for same-artist
+          // pairs when totalSongs > 5) is skipped.  We want to evaluate the
+          // album's *intrinsic* sequence quality, not penalise it for being
+          // a single-artist album.
+          totalScore += _djScore(
+              originalOrder[i], originalOrder[i + 1], cache, 1, 1);
+          pairs++;
+        }
+        return pairs > 0 && (totalScore / pairs) >= 0.50;
+      }
+      // No companion data: trust the artist's sequencing for normal albums.
+      return totalTracks <= 15;
+    }
+  }
+
+  return false;
+}
+
+// Auto-select tier based on available data quality.
   int _detectDjTier(List<Song> songs, BpmCache cache, int requestedTier) {
   if (requestedTier < 3) return requestedTier; // caller explicitly chose
 

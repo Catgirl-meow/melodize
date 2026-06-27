@@ -210,7 +210,14 @@ class HomeScreen extends ConsumerWidget {
                           ),
                           children: [
                             for (final album in albums)
-                              _AlbumCard(album: album),
+                              _AlbumCard(
+                                album: album,
+                                onTap: () => Navigator.of(context, rootNavigator: true).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => AlbumDetailScreen(album: album),
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -539,12 +546,13 @@ class _SongCard extends ConsumerWidget {
 
 class _AlbumCard extends ConsumerWidget {
   final Album album;
-  const _AlbumCard({required this.album});
+  final VoidCallback? onTap;
+  const _AlbumCard({required this.album, this.onTap});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    return Padding(
+    Widget child = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -569,6 +577,14 @@ class _AlbumCard extends ConsumerWidget {
         ],
       ),
     );
+    if (onTap != null) {
+      child = GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: child,
+      );
+    }
+    return child;
   }
 }
 

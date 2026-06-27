@@ -229,11 +229,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
       isScrollControlled: true,
       enableDrag: false, // _SlideDismiss owns the drag
       // Zero reverse duration — the sheet is already off-screen via Transform.
-      sheetAnimationStyle: AnimationStyle(reverseDuration: Duration.zero),
+      sheetAnimationStyle: const AnimationStyle(reverseDuration: Duration.zero),
       backgroundColor: Colors.transparent,
       barrierColor: Colors.transparent,
-      builder: (_) => _SlideDismiss(
-        child: const RepaintBoundary(child: QueueScreen()),
+      builder: (_) => const _SlideDismiss(
+        child: RepaintBoundary(child: QueueScreen()),
       ),
     ).whenComplete(() {
       if (mounted) _sheetOpen.value = false;
@@ -250,7 +250,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
       barrierColor: Colors.transparent,
       backgroundColor: Colors.transparent,
       enableDrag: false,
-      sheetAnimationStyle: AnimationStyle(reverseDuration: Duration.zero),
+      sheetAnimationStyle: const AnimationStyle(reverseDuration: Duration.zero),
       builder: (_) {
         final scheme = Theme.of(context).colorScheme;
         return _SlideDismiss(child: Material(
@@ -685,13 +685,13 @@ class _PlayerPage extends StatelessWidget {
           const Spacer(flex: 2),
           _SongInfoRow(song: song, fgAccent: fgAccent),
           const SizedBox(height: 16),
-          RepaintBoundary(child: _SeekSlider()),
+          const RepaintBoundary(child: _SeekSlider()),
           if (Platform.isLinux) ...[
             const SizedBox(height: 8),
             const RepaintBoundary(child: _VolumeSlider()),
           ],
           const SizedBox(height: 4),
-          RepaintBoundary(child: _PlayControls()),
+          const RepaintBoundary(child: _PlayControls()),
           const SizedBox(height: 12),
           RepaintBoundary(
             child: _BottomActions(

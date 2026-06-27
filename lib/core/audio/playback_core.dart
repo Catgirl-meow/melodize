@@ -53,6 +53,7 @@ class PlaybackQueue {
   PlaybackMode _mode = PlaybackMode.normal;
 
   List<Song> get songs => List.unmodifiable(_songs);
+  int get length => _songs.length;
   int get currentIndex =>
       _songs.isEmpty ? 0 : _currentIndex.clamp(0, _songs.length - 1);
   PlaybackMode get mode => _mode;
@@ -232,12 +233,10 @@ class PlaybackPlanner {
 }
 
 class TransitionPolicy {
-  final int crossfadeSeconds;
   final bool djTransitionsEnabled;
   final BpmCache? analysis;
 
   const TransitionPolicy({
-    required this.crossfadeSeconds,
     this.djTransitionsEnabled = true,
     this.analysis,
   });
@@ -260,29 +259,108 @@ class TransitionPolicy {
   }
 
   PlannedTransition planPair(Song from, Song to, {int? actualDurationSeconds}) {
-    final requested = crossfadeSeconds.clamp(0, 12);
     final durationSeconds = actualDurationSeconds ?? from.duration;
-    if (requested <= 0) {
-      return _gapless(from, to, 'crossfade disabled');
-    }
+
     // Safety: corrupted metadata may produce negative or zero duration.
     if (durationSeconds == null || durationSeconds <= 0) {
       return _gapless(from, to, 'unknown duration');
     }
-    // Safety: cap tail silence to the smaller of half the track and
-    // 1.5× the crossfade duration. The latter prevents the fade from
-    // starting while the current song is still audibly playing.
+
+    // Compute auto per-pair crossfade duration from BPM, energy, tail silence.
+    final fadeSeconds = _computeAutoDuration(from, to,
+        actualDurationSeconds: actualDurationSeconds);
+
+    // --- Outro start detection ---
+    // Use phrase boundaries when available: the crossfade should start at a
+    // phrase boundary so we don't cut mid-phrase. If no phrase data, fall
+    // back to duration minus tail silence.
     final rawTail = analysis?.tailSilenceFor(from) ?? 0.0;
-    final maxTail = min(durationSeconds * 0.5, crossfadeSeconds * 1.5);
+    final maxTail = durationSeconds * 0.5;
     final tailSilence = rawTail.clamp(0.0, maxTail);
     final effectiveMs =
         max(0, (durationSeconds * 1000) - (tailSilence * 1000).round());
+
+    // Safety: the track must have at least 15 s of audible content.
     if (effectiveMs < 15000) {
       return _gapless(from, to, 'track too short');
     }
 
-    final fadeMs = min(requested * 1000, max(1000, effectiveMs ~/ 3));
-    final startMs = max(0, effectiveMs - fadeMs);
+    // Cap fade duration to 1/3 of the effective track length, matching
+    // the original safety rule. Phrase boundaries change where the fade
+    // starts, not how long it lasts.
+    final fadeMs = min(
+      fadeSeconds * 1000,
+      max(1000, effectiveMs ~/ 3),
+    );
+
+    int fromStartMs;
+    final phrases = analysis?.phrasePositionsFor(from);
+    if (phrases != null && phrases.isNotEmpty) {
+      // Find the last phrase boundary that still leaves room for the actual
+      // fade duration (fadeMs), not the requested fadeSeconds.
+      final desiredStartSec =
+          durationSeconds - tailSilence - (fadeMs / 1000.0);
+      int? bestPhrase;
+      for (final p in phrases.reversed) {
+        if (p <= desiredStartSec) {
+          bestPhrase = (p * 1000).round();
+          break;
+        }
+      }
+      fromStartMs = bestPhrase ?? max(0, effectiveMs - fadeMs);
+    } else {
+      fromStartMs = max(0, effectiveMs - fadeMs);
+    }
+
+    // --- Vocal-aware fromStart adjustment ---
+    // If the crossfade would start inside a vocal section, nudge it earlier
+    // to land in an instrumental gap.
+    final vocals = analysis?.vocalSectionsFor(from);
+    if (vocals != null && vocals.isNotEmpty) {
+      final fadeStartSec = fromStartMs / 1000.0;
+      final fadeEndSec = fadeStartSec + (fadeMs / 1000.0);
+      bool overlapsVocal = false;
+      for (final v in vocals) {
+        if (v.start < fadeEndSec && v.end > fadeStartSec) {
+          overlapsVocal = true;
+          break;
+        }
+      }
+      if (overlapsVocal) {
+        // Try to find the last instrumental gap before the fade window.
+        int? candidateMs;
+        // Start from the desired fade start and walk backward.
+        for (int probeSec = fadeStartSec.round();
+            probeSec >= 15;
+            probeSec--) {
+          final probeStart = probeSec.toDouble();
+          final probeEnd = probeStart + (fadeMs / 1000.0);
+          bool probeClean = true;
+          for (final v in vocals) {
+            if (v.start < probeEnd && v.end > probeStart) {
+              probeClean = false;
+              break;
+            }
+          }
+          if (probeClean) {
+            candidateMs = probeSec * 1000;
+            break;
+          }
+        }
+        if (candidateMs != null) {
+          fromStartMs = candidateMs;
+        }
+      }
+    }
+
+    // --- Beat-grid aligned toStart ---
+    // Start the incoming song on its first detected beat so the crossfade
+    // lands on a downbeat. If no beat-grid data, start at 0.
+    final beatOffset = analysis?.firstBeatOffsetFor(to);
+    final toStartMs = beatOffset != null && beatOffset >= 0
+        ? (beatOffset * 1000).round()
+        : 0;
+
     final canBlend = _canDjBlend(from, to);
     final kind = canBlend
         ? TransitionKind.djBlend
@@ -296,10 +374,64 @@ class TransitionPolicy {
       to: to,
       kind: kind,
       duration: Duration(milliseconds: fadeMs),
-      fromStart: Duration(milliseconds: startMs),
-      toStart: Duration.zero,
+      fromStart: Duration(milliseconds: fromStartMs),
+      toStart: Duration(milliseconds: toStartMs),
       reason: reason,
     );
+  }
+
+  /// Compute an auto per-pair crossfade duration based on BPM, energy
+  /// differential, tail silence, and track length. Returns seconds in [2,12].
+  int _computeAutoDuration(Song from, Song to,
+      {int? actualDurationSeconds}) {
+    final bpm = analysis?.bpmFor(from);
+    final tailSilence = analysis?.tailSilenceFor(from) ?? 0.0;
+    final fromEnergy = analysis?.energyFor(from);
+    final toEnergy = analysis?.energyFor(to);
+    final duration = actualDurationSeconds ?? from.duration;
+
+    // Base: 16 beats at from-song BPM, or 6 s default.
+    double seconds;
+    if (bpm != null && bpm > 0) {
+      seconds = (16 * 60) / bpm;
+    } else {
+      seconds = 6.0;
+    }
+
+    // Clamp to usable range.
+    seconds = seconds.clamp(2.0, 12.0);
+
+    // Energy differential: big gap → snappier; similar → smoother/longer.
+    if (fromEnergy != null && toEnergy != null) {
+      final diff = (fromEnergy - toEnergy).abs();
+      if (diff > 0.30) {
+        seconds *= 0.75;
+      } else if (diff < 0.10) {
+        seconds *= 1.15;
+      }
+    }
+
+    // Tail silence adjustment — only when we have real data (> 0).
+    if (tailSilence > 0.0 && tailSilence < 2.0) {
+      // Short tail → don't cut into actual content.
+      seconds = seconds.clamp(2.0, max(2.0, tailSilence * 1.5));
+    } else if (tailSilence > 8.0) {
+      // Long tail → room for a longer blend.
+      seconds = min(seconds * 1.1, 12.0);
+    }
+
+    // Track length safety cap.
+    if (duration != null && duration > 0) {
+      final maxFade = (duration * 0.35).clamp(2.0, 12.0);
+      seconds = seconds.clamp(2.0, maxFade);
+    }
+
+    // Short tracks get shorter fades.
+    if (duration != null && duration < 90) {
+      seconds = seconds.clamp(2.0, 4.0);
+    }
+
+    return seconds.round().clamp(2, 12);
   }
 
   bool _canDjBlend(Song from, Song to) {

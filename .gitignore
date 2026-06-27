@@ -59,6 +59,16 @@ app.*.map.json
 # Accidental project copy
 /melodize/
 
+# Flutter SDK source (local clone, not part of this repo)
+/flutter/
+
+# Python bytecode cache
+companion/__pycache__/
+companion/*.pyc
+
+# DevTools user-specific options
+devtools_options.yaml
+
 # Flutter generated
 .flutter-plugins
 

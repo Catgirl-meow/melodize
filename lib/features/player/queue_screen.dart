@@ -2,7 +2,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/audio/playback_core.dart';
-import '../../core/audio/audio_handler.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/widgets/cover_art_image.dart';
@@ -167,32 +166,34 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                         ),
                         if (upNext.isNotEmpty)
                           mode == PlaybackMode.normal
-                              ? SliverPadding(
+                              ?                              SliverPadding(
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 16),
                                   sliver: SliverReorderableList(
                                     itemCount: upNext.length,
                                     itemBuilder: (context, index) {
                                       final song = upNext[index];
-                                      return _UpNextItem(
-                                        key: ValueKey(
-                                            'upnext_${baseIndex + index}'),
-                                        song: song,
-                                        queueIndex: baseIndex + index,
-                                        number: index + 1,
-                                        scheme: scheme,
-                                        textTheme: textTheme,
-                                        mode: PlaybackMode.normal,
-                                        transition:
-                                            transitionMap[baseIndex + index],
-                                        onTap: () => handler
-                                            ?.skipToIndex(baseIndex + index),
-                                        onRemove: () => handler
-                                            ?.removeFromQueue(baseIndex + index),
-                                        dragHandle: true,
+                                      return RepaintBoundary(
+                                        child: _UpNextItem(
+                                          key: ValueKey(
+                                              'upnext_${baseIndex + index}'),
+                                          song: song,
+                                          queueIndex: baseIndex + index,
+                                          number: index + 1,
+                                          scheme: scheme,
+                                          textTheme: textTheme,
+                                          mode: PlaybackMode.normal,
+                                          transition:
+                                              transitionMap[baseIndex + index],
+                                          onTap: () => handler
+                                              ?.skipToIndex(baseIndex + index),
+                                          onRemove: () => handler
+                                              ?.removeFromQueue(baseIndex + index),
+                                          dragHandle: true,
+                                        ),
                                       );
                                     },
-                                    onReorder: (oldIndex, newIndex) {
+                                    onReorderItem: (oldIndex, newIndex) {
                                       if (newIndex > oldIndex) newIndex--;
                                       handler?.reorderQueue(
                                         baseIndex + oldIndex,
@@ -226,21 +227,23 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                                       const EdgeInsets.symmetric(horizontal: 16),
                                   sliver: SliverList(
                                     delegate: SliverChildBuilderDelegate(
-                                      (context, i) => _UpNextItem(
-                                        song: upNext[i],
-                                        queueIndex: currentIndex + 1 + i,
-                                        number: i + 1,
-                                        scheme: scheme,
-                                        textTheme: textTheme,
-                                        mode: mode,
-                                        transition: transitionMap[
-                                            currentIndex + 1 + i],
-                                        onTap: () =>
-                                            handler?.skipToIndex(
-                                                currentIndex + 1 + i),
-                                        onRemove: () =>
-                                            handler?.removeFromQueue(
-                                                currentIndex + 1 + i),
+                                      (context, i) => RepaintBoundary(
+                                        child: _UpNextItem(
+                                          song: upNext[i],
+                                          queueIndex: currentIndex + 1 + i,
+                                          number: i + 1,
+                                          scheme: scheme,
+                                          textTheme: textTheme,
+                                          mode: mode,
+                                          transition: transitionMap[
+                                              currentIndex + 1 + i],
+                                          onTap: () =>
+                                              handler?.skipToIndex(
+                                                  currentIndex + 1 + i),
+                                          onRemove: () =>
+                                              handler?.removeFromQueue(
+                                                  currentIndex + 1 + i),
+                                        ),
                                       ),
                                       childCount: upNext.length,
                                     ),
@@ -274,13 +277,15 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                                 const EdgeInsets.symmetric(horizontal: 16),
                             sliver: SliverList(
                               delegate: SliverChildBuilderDelegate(
-                                (context, i) => _PlayedItem(
-                                  song: played[i],
-                                  onTap: () => handler?.skipToIndex(i),
-                                  onRemove: () =>
-                                      handler?.removeFromQueue(i),
-                                  scheme: scheme,
-                                  textTheme: textTheme,
+                                (context, i) => RepaintBoundary(
+                                  child: _PlayedItem(
+                                    song: played[i],
+                                    onTap: () => handler?.skipToIndex(i),
+                                    onRemove: () =>
+                                        handler?.removeFromQueue(i),
+                                    scheme: scheme,
+                                    textTheme: textTheme,
+                                  ),
                                 ),
                                 childCount: played.length,
                               ),

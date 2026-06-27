@@ -236,7 +236,7 @@ opening extra ports. Choose the option that matches your setup.
    }
    ```
    Replace `YOUR_NAVIDROME_SERVER_IP` with the LAN or Tailscale IP of the
-   machine running the companion (e.g. `192.168.1.50` or `100.73.73.73`).
+   machine running the companion (e.g. `192.0.2.50` or `203.0.113.1`).
 
 3. Test and reload:
    ```bash
@@ -353,12 +353,12 @@ On the **reverse proxy host** (the machine running SafeLine), create
 # Adjust IPs/ports to match your Tailscale or LAN addresses.
 
 upstream navidrome {
-    server YOUR_NAVIDROME_HOST:4533;   # e.g. 100.73.73.73:4533
+    server YOUR_NAVIDROME_HOST:4533;   # e.g. 203.0.113.1:4533
     keepalive 32;
 }
 
 upstream companion {
-    server YOUR_COMPANION_HOST:8765;   # e.g. 100.73.73.73:8765
+    server YOUR_COMPANION_HOST:8765;   # e.g. 203.0.113.1:8765
     keepalive 8;
 }
 

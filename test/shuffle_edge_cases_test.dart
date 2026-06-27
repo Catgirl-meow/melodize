@@ -502,7 +502,7 @@ void main() {
       final b = song('dup', genre: 'house');
       final c = song('other', genre: 'rock');
       final songs = [a, b, c];
-      final cache = const BpmCache();
+      const cache = BpmCache();
       // No BPM data → falls back to _randomWithArtistSep
       final ordered = orderSongs(songs, 0, cache, seed: 1);
       expect(ordered.length, 3,
@@ -542,26 +542,8 @@ void main() {
   });
 
   group('TransitionPolicy edge cases', () {
-    test('zero crossfade seconds → gapless', () {
-      final t = const TransitionPolicy(crossfadeSeconds: 0).planPair(
-        song('from', duration: 180),
-        song('to'),
-      );
-      expect(t.kind, TransitionKind.gapless);
-      expect(t.duration, Duration.zero);
-    });
-
-    test('crossfade clamped at 12 seconds max', () {
-      final from = song('from', duration: 300);
-      final t = const TransitionPolicy(crossfadeSeconds: 20).planPair(
-        from,
-        song('to'),
-      );
-      expect(t.duration, const Duration(seconds: 12));
-    });
-
     test('null duration → gapless', () {
-      final t = const TransitionPolicy(crossfadeSeconds: 6).planPair(
+      final t = const TransitionPolicy().planPair(
         song('from', duration: null),
         song('to'),
       );
@@ -569,7 +551,7 @@ void main() {
     });
 
     test('zero duration → gapless', () {
-      final t = const TransitionPolicy(crossfadeSeconds: 6).planPair(
+      final t = const TransitionPolicy().planPair(
         song('from', duration: 0),
         song('to'),
       );
@@ -577,7 +559,7 @@ void main() {
     });
 
     test('negative duration → gapless', () {
-      final t = const TransitionPolicy(crossfadeSeconds: 6).planPair(
+      final t = const TransitionPolicy().planPair(
         song('from', duration: -10),
         song('to'),
       );
@@ -585,7 +567,7 @@ void main() {
     });
 
     test('very short track (<15s effective) → gapless', () {
-      final t = const TransitionPolicy(crossfadeSeconds: 6).planPair(
+      final t = const TransitionPolicy().planPair(
         song('from', duration: 14),
         song('to'),
       );
@@ -593,40 +575,40 @@ void main() {
     });
 
     test('exactly 15s effective → crossfade allowed', () {
-      final t = const TransitionPolicy(crossfadeSeconds: 6).planPair(
+      final t = const TransitionPolicy().planPair(
         song('from', duration: 15),
         song('to'),
       );
-      // effectiveMs = 15000, fadeMs = min(6000, max(1000, 5000)) = 5000
+      // Short track (< 90s) → auto duration clamped to 4s.
+      // effectiveMs = 15000, fadeMs = min(4000, max(1000, 5000)) = 4000ms
       expect(t.kind, TransitionKind.volumeCrossfade);
-      expect(t.duration, const Duration(seconds: 5));
+      expect(t.duration, const Duration(seconds: 4));
     });
 
     test('tail silence larger than duration is capped', () {
       final t = const TransitionPolicy(
-        crossfadeSeconds: 8,
         analysis: BpmCache(tailSilence: {'from': 200.0}),
       ).planPair(
         song('from', duration: 180),
         song('to'),
       );
-      // maxTail = min(90, 12) = 12
-      // effectiveMs = 180000 - 12000 = 168000
-      // fadeMs = min(8000, max(1000, 56000)) = 8000
+      // maxTail = 180 * 0.5 = 90
+      // effectiveMs = 180000 - 90000 = 90000
+      // Long tail (> 8s) → base 6s * 1.1 = 6.6s → rounds to 7s
+      // fadeMs = min(6600, max(1000, 30000)) = 6600
       expect(t.kind, TransitionKind.volumeCrossfade);
-      expect(t.duration, const Duration(seconds: 8));
+      expect(t.duration, const Duration(seconds: 7));
     });
 
     test('tail silence negative is treated as zero', () {
       final t = const TransitionPolicy(
-        crossfadeSeconds: 8,
         analysis: BpmCache(tailSilence: {'from': -5.0}),
       ).planPair(
         song('from', duration: 180),
         song('to'),
       );
       // rawTail.clamp(0.0, maxTail) → 0.0
-      expect(t.fromStart, const Duration(seconds: 172));
+      expect(t.fromStart, const Duration(seconds: 174));
     });
 
     test('dj blend requires BPM ratio ≤ 1.15', () {
@@ -635,7 +617,6 @@ void main() {
 
       // Exact boundary: 120 vs 138 → ratio = 1.15
       var policy = const TransitionPolicy(
-        crossfadeSeconds: 6,
         djTransitionsEnabled: true,
         analysis: BpmCache(
           bpm: {'from': 120, 'to': 138},
@@ -646,7 +627,6 @@ void main() {
 
       // Just over: 120 vs 139 → ratio ≈ 1.158
       policy = const TransitionPolicy(
-        crossfadeSeconds: 6,
         djTransitionsEnabled: true,
         analysis: BpmCache(
           bpm: {'from': 120, 'to': 139},
@@ -659,8 +639,7 @@ void main() {
     test('dj blend blocked when disabled', () {
       final from = song('from');
       final to = song('to');
-      final policy = const TransitionPolicy(
-        crossfadeSeconds: 6,
+      const policy = TransitionPolicy(
         djTransitionsEnabled: false,
         analysis: BpmCache(
           bpm: {'from': 120, 'to': 126},
@@ -673,8 +652,7 @@ void main() {
     test('dj blend blocked by estimated BPM', () {
       final from = song('from');
       final to = song('to');
-      final policy = const TransitionPolicy(
-        crossfadeSeconds: 6,
+      const policy = TransitionPolicy(
         djTransitionsEnabled: true,
         analysis: BpmCache(
           bpm: {'from': 120, 'to': 126},
@@ -687,8 +665,7 @@ void main() {
     test('dj blend with missing keys but real BPM falls back to BPM-only', () {
       final from = song('from');
       final to = song('to');
-      final policy = const TransitionPolicy(
-        crossfadeSeconds: 6,
+      const policy = TransitionPolicy(
         djTransitionsEnabled: true,
         analysis: BpmCache(
           bpm: {'from': 120, 'to': 126},
@@ -699,23 +676,23 @@ void main() {
     });
 
     test('planUpcoming with empty list', () {
-      final policy = const TransitionPolicy(crossfadeSeconds: 6);
+      const policy = TransitionPolicy();
       expect(policy.planUpcoming([], 0), isEmpty);
     });
 
     test('planUpcoming with single song', () {
-      final policy = const TransitionPolicy(crossfadeSeconds: 6);
+      const policy = TransitionPolicy();
       expect(policy.planUpcoming([song('a')], 0), isEmpty);
     });
 
     test('planUpcoming at last index returns empty', () {
-      final policy = const TransitionPolicy(crossfadeSeconds: 6);
+      const policy = TransitionPolicy();
       final songs = [song('a'), song('b')];
       expect(policy.planUpcoming(songs, 1), isEmpty);
     });
 
     test('planUpcoming limits to 3 transitions ahead', () {
-      final policy = const TransitionPolicy(crossfadeSeconds: 6);
+      const policy = TransitionPolicy();
       final songs = List.generate(10, (i) => song('$i', duration: 180));
       final transitions = policy.planUpcoming(songs, 0);
       expect(transitions.length, 3);

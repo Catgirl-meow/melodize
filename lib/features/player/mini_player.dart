@@ -83,7 +83,7 @@ class _ClassicMiniPlayer extends ConsumerWidget {
           child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                RepaintBoundary(child: _MiniPlayerProgress()),
+                const RepaintBoundary(child: _MiniPlayerProgress()),
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -122,7 +122,7 @@ class _ClassicMiniPlayer extends ConsumerWidget {
                             ],
                           ),
                         ),
-                        RepaintBoundary(child: _MiniPlayerControls()),
+                        const RepaintBoundary(child: _MiniPlayerControls()),
                       ],
                     ),
                   ),

@@ -1,5 +1,7 @@
 import 'dart:math';
 
+// ignore_for_file: avoid_print
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:melodize/core/audio/playback_core.dart';
 import 'package:melodize/core/audio/smart_shuffle_engine.dart';
@@ -314,7 +316,6 @@ void main() {
       final songs = List.generate(2000, (i) => _song(i));
       final cache = _buildRealCache(2000);
       final policy = TransitionPolicy(
-        crossfadeSeconds: 8,
         djTransitionsEnabled: true,
         analysis: cache,
       );
@@ -340,7 +341,6 @@ void main() {
       final songs = List.generate(5000, (i) => _song(i));
       final cache = _buildRealCache(5000);
       final policy = TransitionPolicy(
-        crossfadeSeconds: 6,
         djTransitionsEnabled: true,
         analysis: cache,
       );
@@ -354,7 +354,6 @@ void main() {
       final songs = List.generate(10000, (i) => _song(i));
       final cache = _buildRealCache(10000);
       final policy = TransitionPolicy(
-        crossfadeSeconds: 8,
         djTransitionsEnabled: true,
         analysis: cache,
       );

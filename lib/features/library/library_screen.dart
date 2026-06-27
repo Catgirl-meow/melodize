@@ -435,15 +435,17 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
                   (_, i) {
                     final album = albums[i];
                     return RepaintBoundary(
-                      child: InkWell(
+                      child: Material(
+                        color: Colors.transparent,
                         borderRadius: BorderRadius.circular(12),
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => AlbumDetailScreen(album: album),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () => Navigator.of(context, rootNavigator: true).push(
+                            MaterialPageRoute(
+                              builder: (_) => AlbumDetailScreen(album: album),
+                            ),
                           ),
-                        ),
-                        child: Column(
+                          child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Expanded(
@@ -489,6 +491,7 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
                           ],
                         ),
                       ),
+                    ),
                     );
                   },
                   childCount: albums.length,

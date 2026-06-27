@@ -159,7 +159,7 @@ class ArtistDetailScreen extends ConsumerWidget {
           if (topSongsAsync.isLoading)
             const SliverToBoxAdapter(child: SizedBox.shrink()),
           if (!topSongsAsync.isLoading && topSongs.isNotEmpty) ...[
-            SliverToBoxAdapter(child: _SectionHeader('Top songs')),
+            const SliverToBoxAdapter(child: _SectionHeader('Top songs')),
             SliverList(
               delegate: SliverChildBuilderDelegate(
                 (_, i) => SongTile(
@@ -243,7 +243,7 @@ class ArtistDetailScreen extends ConsumerWidget {
 
           // ── All Songs ────────────────────────────────────────────────────
           allSongsAsync.when(
-            loading: () => SliverToBoxAdapter(
+            loading: () => const SliverToBoxAdapter(
               child: _SectionHeader('Songs', trailing: '…'),
             ),
             error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
