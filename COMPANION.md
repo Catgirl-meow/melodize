@@ -109,6 +109,13 @@ and deemix download are routed through the proxy.
 Only Deezer traffic is proxied — Navidrome, yt-dlp, and other requests go
 direct.
 
+> **PySocks required:** deemix uses Python's `requests` library internally,
+> which needs `PySocks` for SOCKS5 proxy support. Install it:
+> ```bash
+> pip3 install PySocks
+> ```
+> HTTP proxies (`http://`, `https://`) do not require PySocks.
+
 > **Restart required** after changing this setting:
 > ```bash
 > systemctl restart melodize-companion
