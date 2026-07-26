@@ -64,7 +64,9 @@ mixin DownloadPollingMixin<T extends ConsumerStatefulWidget>
       if (s == 'error') {
         if (mounted) {
           final err = (status['error'] as String?) ?? 'unknown error';
-          showStyledSnack(context, 'Download failed: $err',
+          // Friendly error messages for common failure modes.
+          final msg = _friendlyDownloadError(err);
+          showStyledSnack(context, msg,
               isError: true, bottomOffset: snackBottomOffset);
         }
         return;
@@ -85,4 +87,26 @@ mixin DownloadPollingMixin<T extends ConsumerStatefulWidget>
       () => _poll(companion, jobId, attempts + 1),
     );
   }
+}
+
+/// Map raw companion error strings to user-friendly messages.
+String _friendlyDownloadError(String err) {
+  final lower = err.toLowerCase();
+  if (lower.contains('session expired') ||
+      lower.contains('update your arl')) {
+    return 'Deezer session expired — update ARL in Settings';
+  }
+  if (lower.contains('arl not configured')) {
+    return 'Deezer ARL required — add it in Settings';
+  }
+  if (lower.contains('not installed')) {
+    return 'Download tool not installed on companion server';
+  }
+  if (lower.contains('timed out')) {
+    return 'Download timed out — try again or check the server';
+  }
+  if (lower.contains('drm')) {
+    return 'Track is DRM-protected and cannot be downloaded';
+  }
+  return 'Download failed: $err';
 }

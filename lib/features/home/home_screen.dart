@@ -122,9 +122,12 @@ class HomeScreen extends ConsumerWidget {
               ),
             ),
 
-            // Deezer ARL expiry banner
+            // Deezer ARL status banner — only show when we *confirmed*
+            // the ARL is rejected (not when we simply can't reach Deezer).
             if (arlStatus == DeezerArlStatus.invalid)
-              const SliverToBoxAdapter(child: _DeezerExpiredBanner()),
+              const SliverToBoxAdapter(child: _DeezerExpiredBanner())
+            else if (arlStatus == DeezerArlStatus.unreachable)
+              const SliverToBoxAdapter(child: _DeezerUnreachableBanner()),
 
             // Server status — specific message per failure mode.
             if (isOnline && reachability != ServerReachability.reachable)
@@ -660,6 +663,10 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
           isError: true);
       return;
     }
+    if (arlStatus == DeezerArlStatus.unreachable) {
+      showStyledSnack(context,
+          "Can't verify Deezer session — download will attempt anyway");
+    }
     final deezerTrackId = widget.song.id.substring('deezer:'.length);
     final url = 'https://www.deezer.com/track/$deezerTrackId';
     showStyledSnack(context, 'Sending to server (FLAC)…');
@@ -670,7 +677,7 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
       startDownloadPolling(companion, jobId);
     } catch (e) {
       if (!mounted) return;
-      showStyledSnack(context, 'Could not start download: $e', isError: true);
+      showStyledSnack(context, 'Download could not start — check companion connection', isError: true);
     }
   }
 
@@ -960,6 +967,39 @@ class _DeezerExpiredBanner extends StatelessWidget {
                     color: scheme.onErrorContainer),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DeezerUnreachableBanner extends StatelessWidget {
+  const _DeezerUnreachableBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Material(
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Icon(Icons.wifi_off_rounded,
+                  size: 20, color: scheme.onSurfaceVariant),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Can\'t reach Deezer to verify your session — server downloads may still work.',
+                  style: TextStyle(
+                      fontSize: 12, color: scheme.onSurfaceVariant),
+                ),
+              ),
+            ],
           ),
         ),
       ),

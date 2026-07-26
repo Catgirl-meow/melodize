@@ -636,6 +636,9 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
           isError: true);
       return;
     }
+    if (arlStatus == DeezerArlStatus.unreachable) {
+      _snack('Can\'t verify Deezer session — download will attempt anyway');
+    }
 
     _snack('Sending to server (FLAC)…');
 
@@ -645,7 +648,7 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
       startDownloadPolling(companion, jobId);
     } catch (e) {
       if (!mounted) return;
-      _snack('Could not start download: $e', isError: true);
+      _snack('Download could not start — check companion connection', isError: true);
     }
   }
 }

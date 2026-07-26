@@ -1094,12 +1094,14 @@ String _deezerSubtitle(
 ) {
   if (!hasArl) return 'Not connected • 30s previews only';
   if (isLoading) return 'Checking session…';
-  if (hasError) return 'Could not verify right now';
+  if (hasError) return 'Could not verify — check your connection';
   switch (status) {
     case DeezerArlStatus.valid:
       return 'Connected • FLAC downloads enabled';
     case DeezerArlStatus.invalid:
       return 'Session expired • update required';
+    case DeezerArlStatus.unreachable:
+      return 'Can\'t reach Deezer • ARL unverified';
     case DeezerArlStatus.notSet:
     case null:
       return 'Not connected • 30s previews only';
@@ -1123,13 +1125,15 @@ Widget? _deezerStatusIcon(
     );
   }
   if (hasError) {
-    return Icon(Icons.help_outline_rounded, color: scheme.onSurfaceVariant);
+    return Icon(Icons.wifi_off_rounded, color: scheme.onSurfaceVariant);
   }
   switch (status) {
     case DeezerArlStatus.valid:
       return Icon(Icons.check_circle_rounded, color: scheme.primary);
     case DeezerArlStatus.invalid:
       return Icon(Icons.error_rounded, color: scheme.error);
+    case DeezerArlStatus.unreachable:
+      return Icon(Icons.wifi_off_rounded, color: scheme.onSurfaceVariant);
     case DeezerArlStatus.notSet:
     case null:
       return null;

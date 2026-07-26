@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:dio/dio.dart' show DioException;
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart'
@@ -314,15 +315,18 @@ final companionAnalysisSyncProvider =
   );
 });
 
-/// Three-state readable status for the user's Deezer ARL cookie.
+/// Four-state readable status for the user's Deezer ARL cookie.
 ///
-/// `notSet` — user never pasted an ARL. No banner, no red chip; the app is
-///            just in "previews only" mode.
-/// `valid`  — Deezer's gw-light endpoint returned a non-zero USER_ID.
-/// `invalid`— ARL set but Deezer rejected it (expired, malformed, etc.)
-///            → surface an actionable banner / red tile so the user knows
-///            *before* they hit a mystery "download failed" on the server.
-enum DeezerArlStatus { notSet, valid, invalid }
+/// `notSet`      — user never pasted an ARL. No banner, no red chip; the app
+///                 is just in "previews only" mode.
+/// `valid`       — Deezer's gw-light endpoint returned a non-zero USER_ID.
+/// `invalid`     — ARL set but Deezer rejected it (expired, malformed, etc.)
+///                 → surface an actionable banner / red tile so the user knows
+///                 *before* they hit a mystery "download failed" on the server.
+/// `unreachable` — Network error (timeout, DNS, TLS) reaching Deezer.
+///                 Don't blame the ARL — show a non-alarming info banner
+///                 instead of a red "session expired" alert.
+enum DeezerArlStatus { notSet, valid, invalid, unreachable }
 
 /// Validates the configured Deezer ARL by calling Deezer's gw-light endpoint
 /// directly — no companion round-trip needed. Re-runs automatically whenever
@@ -332,8 +336,14 @@ final deezerArlStatusProvider = FutureProvider<DeezerArlStatus>((ref) async {
     preferencesNotifierProvider.select((p) => p.deezerArl),
   );
   if (arl.isEmpty) return DeezerArlStatus.notSet;
-  final ok = await DeezerClient.validateArl(arl);
-  return ok ? DeezerArlStatus.valid : DeezerArlStatus.invalid;
+  try {
+    final ok = await DeezerClient.validateArl(arl);
+    return ok ? DeezerArlStatus.valid : DeezerArlStatus.invalid;
+  } on DioException {
+    return DeezerArlStatus.unreachable;
+  } catch (_) {
+    return DeezerArlStatus.unreachable;
+  }
 });
 
 Future<void> deleteSongFromServer(WidgetRef ref, Song song) async {
@@ -631,10 +641,9 @@ final recommendationsProvider =
     for (final t in list) {
       byDeezerId.putIfAbsent(t.deezerId, () => t);
     }
-  }
-  if (byDeezerId.isEmpty) {
+  }    if (byDeezerId.isEmpty) {
     return const RecsError(
-        "Couldn't fetch recommendations right now — check your connection and retry.");
+        'Could not reach Deezer — check your internet connection and retry.');
   }
 
   final discoveries = byDeezerId.values
@@ -663,11 +672,9 @@ final recommendationsProvider =
       }
     }
     if (!anyLeft) break;
-  }
-
-  if (capped.isEmpty) {
+  }    if (capped.isEmpty) {
     return const RecsError(
-        'All recommendations matched tracks you already have — try refreshing.');
+        'All discoveries matched your library — try refreshing for new suggestions.');
   }
 
   // Warm cover-art disk cache. CachedNetworkImageProvider writes through

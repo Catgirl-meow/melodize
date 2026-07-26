@@ -93,36 +93,38 @@ class DeezerClient {
     }
   }
 
-  // Validate an ARL cookie against Deezer's gw-light endpoint. Returns true
-  // only on a confirmed-valid response; errors return false.
+  // Validate an ARL cookie against Deezer's gw-light endpoint.
+  //
+  // Returns `true` only on a confirmed-valid response (non-zero USER_ID).
+  // Returns `false` when Deezer explicitly rejects the ARL (USER_ID == 0).
+  // Throws on network errors (timeout, DNS, TLS) so callers can distinguish
+  // "can't reach Deezer" from "ARL is expired".
   static Future<bool> validateArl(String arl) async {
     if (arl.isEmpty) return false;
-    try {
-      final dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 8),
-        receiveTimeout: const Duration(seconds: 8),
-      ));
-      final resp = await dio.post<Map<String, dynamic>>(
-        'https://www.deezer.com/ajax/gw-light.php',
-        queryParameters: {
-          'method': 'deezer.getUserData',
-          'api_version': '1.0',
-          'api_token': '',
-          'input': '3',
-        },
-        options: Options(
-          headers: {'Cookie': 'arl=$arl'},
-          responseType: ResponseType.json,
-        ),
-      );
-      final results = resp.data?['results'] as Map<String, dynamic>?;
-      final user = results?['USER'] as Map<String, dynamic>?;
-      final userId = user?['USER_ID'];
-      // Anonymous (invalid ARL) responses come back with USER_ID == 0.
-      return userId is int && userId != 0;
-    } catch (_) {
-      return false;
-    }
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 8),
+      receiveTimeout: const Duration(seconds: 8),
+    ));
+    // Let DioExceptions propagate — callers need to know whether the
+    // failure is network (unknown) or Deezer-response (confirmed invalid).
+    final resp = await dio.post<Map<String, dynamic>>(
+      'https://www.deezer.com/ajax/gw-light.php',
+      queryParameters: {
+        'method': 'deezer.getUserData',
+        'api_version': '1.0',
+        'api_token': '',
+        'input': '3',
+      },
+      options: Options(
+        headers: {'Cookie': 'arl=$arl'},
+        responseType: ResponseType.json,
+      ),
+    );
+    final results = resp.data?['results'] as Map<String, dynamic>?;
+    final user = results?['USER'] as Map<String, dynamic>?;
+    final userId = user?['USER_ID'];
+    // Anonymous (invalid ARL) responses come back with USER_ID == 0.
+    return userId is int && userId != 0;
   }
 
   // Deezer catalog search.

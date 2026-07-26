@@ -108,7 +108,33 @@ class _MainShellState extends ConsumerState<MainShell>
         duration: const Duration(milliseconds: 350),
       );
 
-  void _invalidateServerProviders() {
+  /// Map raw local-download error strings to user-friendly messages.
+String _friendlyLocalDownloadError(String err) {
+  final lower = err.toLowerCase();
+  if (lower.contains('timeout') || lower.contains('timed out')) {
+    return 'Download timed out — check your connection and try again';
+  }
+  if (lower.contains('connection refused') ||
+      lower.contains('connection error') ||
+      lower.contains('socket')) {
+    return 'Cannot reach server — check your connection';
+  }
+  if (lower.contains('401') || lower.contains('unauthorized')) {
+    return 'Server rejected the request — check credentials in Settings';
+  }
+  if (lower.contains('404') || lower.contains('not found')) {
+    return 'Song not found on server — it may have been removed';
+  }
+  if (lower.contains('403') || lower.contains('forbidden')) {
+    return 'Access denied — check server permissions';
+  }
+  if (lower.contains('disk') || lower.contains('space') || lower.contains('storage')) {
+    return 'Not enough storage space on device';
+  }
+  return 'Download failed — $err';
+}
+
+void _invalidateServerProviders() {
     ref.invalidate(allSongsProvider);
     ref.invalidate(newestAlbumsProvider);
     ref.invalidate(randomSongsProvider);
@@ -256,8 +282,8 @@ class _MainShellState extends ConsumerState<MainShell>
           if (isError && (!wasError || errMsgChanged)) {
             final errMsg = entry.value.errorMessage;
             final msg = errMsg != null
-                ? 'Download failed: $errMsg'
-                : '"${entry.value.song.title}" failed to download';
+                ? _friendlyLocalDownloadError(errMsg)
+                : '"${entry.value.song.title}" failed to download — try again';
             _safeSnack(msg, isError: true, bottomOffset: snackBottom + 12);
           }
         }

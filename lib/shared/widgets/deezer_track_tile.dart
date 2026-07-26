@@ -54,7 +54,9 @@ class _DeezerTrackTileState extends ConsumerState<DeezerTrackTile>
       startDownloadPolling(companion, jobId);
     } catch (e) {
       if (!mounted) return;
-      showStyledSnack(context, 'Could not start download: $e', isError: true);
+      showStyledSnack(
+          context, 'Download could not start — check companion connection',
+          isError: true);
     }
   }
 

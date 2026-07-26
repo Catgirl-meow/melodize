@@ -130,9 +130,21 @@ def _run_download_inner(job_id: str, url: str, cfg: dict, deezer_arl: str = "") 
         env["DEEMIX_DATA_DIR"] = str(_DEEMIX_CONFIG_DIR)
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                timeout=600, env=env,
+                                stdin=subprocess.DEVNULL)
         if result.returncode != 0:
-            _update_job(job_id, status="error", error=result.stderr[-800:])
+            stderr = result.stderr[-800:]
+            # Detect ARL login failure — deemix exits after EOF on stdin
+            # when the stored ARL is invalid/expired.
+            if is_deezer and ('paste here your arl' in stderr.lower()
+                             or 'aborted' in stderr.lower()
+                             or 'eoferror' in stderr.lower()
+                             or 'login_via_arl' in stderr.lower()):
+                _update_job(job_id, status="error",
+                            error="Deezer session expired — update your ARL in Settings")
+            else:
+                _update_job(job_id, status="error", error=stderr)
             log.error(f"[job {job_id}] {err_label} failed: {result.stderr[-200:]}")
         else:
             _update_job(job_id, status="done")
