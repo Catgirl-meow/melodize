@@ -65,7 +65,8 @@ Create `/etc/melodize-companion/config.json`:
   "analysis_cache_path": "/var/lib/melodize-companion/analysis_cache.db",
   "mix_cache_dir":       "/var/lib/melodize-companion/mix_cache",
   "ytdlp_path":          "/usr/local/bin/yt-dlp",
-  "deemix_path":         "deemix"
+  "deemix_path":         "deemix",
+  "deezer_proxy":        ""
 }
 ```
 
@@ -82,6 +83,36 @@ Create `/etc/melodize-companion/config.json`:
 | `mix_cache_dir` | Directory for cached transition WAV files. Created automatically. |
 | `ytdlp_path` | Path to yt-dlp binary. Default searches `$PATH`. |
 | `deemix_path` | Path to deemix binary. Default searches `$PATH`. |
+| `deezer_proxy` | Optional SOCKS5/HTTP proxy URL for Deezer requests. Required if the server is in a country where Deezer is geo-blocked (e.g. Russia). Supports `socks5h://`, `socks5://`, `http://`, `https://`. See [Deezer geo-restrictions](#deezer-geo-restrictions) below. |
+
+### Deezer geo-restrictions
+
+If your server is in a country where Deezer is blocked (e.g. Russia), Deezer
+API requests will fail even with a valid ARL. The companion validates the ARL
+before every download, and if Deezer returns an error or empty response, the
+download is rejected with a clear message.
+
+**Fix:** set `deezer_proxy` in your config to route Deezer traffic through a
+proxy in an unblocked country (e.g. a VPN, Clash, V2Ray, or Tailscale exit
+node):
+
+```json
+{
+  "deezer_proxy": "socks5h://192.168.1.100:7890"
+}
+```
+
+The `socks5h://` scheme sends DNS resolution through the proxy (prevents DNS
+leaks). For HTTP proxies use `http://` or `https://`. Both the ARL validation
+and deemix download are routed through the proxy.
+
+Only Deezer traffic is proxied — Navidrome, yt-dlp, and other requests go
+direct.
+
+> **Restart required** after changing this setting:
+> ```bash
+> systemctl restart melodize-companion
+> ```
 
 ### Finding your paths
 
@@ -533,6 +564,30 @@ This means yt-dlp was used for a Deezer URL. Ensure deemix is installed
 
 Set your ARL in **Settings → Deezer → Connect account** in the app, or add
 `"deezer_arl": "YOUR_ARL"` to the config file.
+
+### Download fails: "Deezer unreachable from server"
+
+The companion cannot reach Deezer's API. This usually means the server is in a
+country where Deezer is geo-blocked (e.g. Russia). Check the companion log for
+details:
+
+```bash
+journalctl -u melodize-companion -n 50 --no-pager | grep -i deezer
+```
+
+**Fix:** set `deezer_proxy` in your config to route Deezer traffic through a
+proxy in an unblocked country. See [Deezer geo-restrictions](#deezer-geo-restrictions)
+above.
+
+### Download fails: "Deezer session expired"
+
+The ARL is invalid or expired. Verify it in the app (Settings → Deezer) —the app validates from your phone's network; if the server is in a country where
+Deezer is blocked, the same ARL will fail server-side — see
+[Deezer geo-restrictions](#deezer-geo-restrictions).
+
+Update your ARL by logging into [deezer.com](https://www.deezer.com), copying
+the `arl` cookie from DevTools → Application → Cookies, and pasting it in
+Settings.
 
 ### Download job stuck, no error shown
 

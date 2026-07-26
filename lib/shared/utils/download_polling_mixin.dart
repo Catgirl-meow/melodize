@@ -92,9 +92,16 @@ mixin DownloadPollingMixin<T extends ConsumerStatefulWidget>
 /// Map raw companion error strings to user-friendly messages.
 String _friendlyDownloadError(String err) {
   final lower = err.toLowerCase();
+  if (lower.contains('unreachable from server') ||
+      lower.contains('server network or proxy')) {
+    return 'Deezer unreachable from server — check server network or VPN';
+  }
   if (lower.contains('session expired') ||
       lower.contains('update your arl')) {
     return 'Deezer session expired — update ARL in Settings';
+  }
+  if (lower.contains('could not authenticate despite valid')) {
+    return 'Deezer download error — deemix failed despite valid ARL';
   }
   if (lower.contains('arl not configured')) {
     return 'Deezer ARL required — add it in Settings';
