@@ -115,5 +115,16 @@ String _friendlyDownloadError(String err) {
   if (lower.contains('drm')) {
     return 'Track is DRM-protected and cannot be downloaded';
   }
+  if (lower.contains('cannot download at the desired quality') ||
+      lower.contains('subscription may have ended')) {
+    return 'Deezer subscription issue — cannot download at this quality. Check your Deezer plan.';
+  }
+  if (lower.contains('not available in your region') ||
+      lower.contains('has been removed')) {
+    return 'Track is not available in your region or has been removed from Deezer';
+  }
+  if (lower.contains('no file was created')) {
+    return 'Download failed — no file was produced. The track may be unavailable.';
+  }
   return 'Download failed: $err';
 }

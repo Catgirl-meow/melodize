@@ -214,6 +214,20 @@ def _run_download_inner(job_id: str, url: str, cfg: dict, deezer_arl: str = "") 
         if proxy:
             env["ALL_PROXY"] = proxy
 
+    # Snapshot files before download so we can detect silent failures
+    # (deemix sometimes exits 0 but produces no output file).
+    def _get_files(directory: str) -> set:
+        files = set()
+        try:
+            for root, _, fnames in os.walk(directory):
+                for f in fnames:
+                    files.add(os.path.join(root, f))
+        except OSError:
+            pass
+        return files
+
+    files_before = _get_files(music_dir)
+
     try:
         result = subprocess.run(cmd, capture_output=True, text=True,
                                 timeout=600, env=env,
@@ -236,8 +250,32 @@ def _run_download_inner(job_id: str, url: str, cfg: dict, deezer_arl: str = "") 
                 _update_job(job_id, status="error", error=stderr)
             log.error(f"[job {job_id}] {err_label} failed: {result.stderr[-200:]}")
         else:
-            _update_job(job_id, status="done")
-            log.info(f"[job {job_id}] download complete")
+            # deemix/yt-dlp exited 0 — but verify that a file was actually
+            # created.  deemix can print "All done!" and exit 0 even when it
+            # couldn't stream the track (e.g. subscription ended).
+            files_after = _get_files(music_dir)
+            new_files = files_after - files_before
+            combined_output = (result.stderr + "\n" + result.stdout).lower()
+
+            if not new_files:
+                if ('can\'t stream' in combined_output or 'can not stream' in combined_output
+                        or 'cannot stream' in combined_output):
+                    err_msg = ("Deezer account cannot download at the desired quality — "
+                               "your subscription may have ended. "
+                               "Update your Deezer subscription or try a lower quality.")
+                elif 'not available' in combined_output or 'unavailable' in combined_output:
+                    err_msg = "Track is not available in your region or has been removed"
+                elif 'drm' in combined_output and 'protected' in combined_output:
+                    err_msg = "Track is DRM-protected and cannot be downloaded"
+                else:
+                    err_msg = ("Download tool reported success but no file was created — "
+                               "the track may be unavailable or your Deezer subscription may have ended")
+                _update_job(job_id, status="error", error=err_msg)
+                log.error(f"[job {job_id}] false success: {err_msg}"
+                          f"  (stderr tail: {result.stderr[-300:]})")
+            else:
+                _update_job(job_id, status="done")
+                log.info(f"[job {job_id}] download complete — {len(new_files)} new file(s)")
     except subprocess.TimeoutExpired:
         _update_job(job_id, status="error", error="download timed out after 600s")
     except FileNotFoundError:
