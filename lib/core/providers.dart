@@ -346,6 +346,23 @@ final deezerArlStatusProvider = FutureProvider<DeezerArlStatus>((ref) async {
   }
 });
 
+/// Rich Deezer account status — checks ARL validity AND subscription tier.
+/// Used in the Deezer settings screen to warn about expired plans.
+final deezerAccountStatusProvider =
+    FutureProvider<DeezerAccountStatus>((ref) async {
+  final arl = ref.watch(
+    preferencesNotifierProvider.select((p) => p.deezerArl),
+  );
+  if (arl.isEmpty) return const DeezerAccountStatus();
+  try {
+    return await DeezerClient.checkAccountStatus(arl);
+  } on DioException {
+    return const DeezerAccountStatus();
+  } catch (_) {
+    return const DeezerAccountStatus();
+  }
+});
+
 Future<void> deleteSongFromServer(WidgetRef ref, Song song) async {
   final companion = ref.read(companionClientProvider);
   if (companion == null) throw Exception('Companion not configured');

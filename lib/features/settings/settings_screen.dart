@@ -311,6 +311,9 @@ class _DeezerSettingsScreen extends ConsumerWidget {
     final prefs = ref.watch(preferencesNotifierProvider);
     final statusAsync =
         prefs.hasDeezerArl ? ref.watch(deezerArlStatusProvider) : null;
+    final accountAsync =
+        prefs.hasDeezerArl ? ref.watch(deezerAccountStatusProvider) : null;
+    final scheme = Theme.of(context).colorScheme;
 
     return _SettingsPageScaffold(
       title: 'Deezer',
@@ -320,10 +323,42 @@ class _DeezerSettingsScreen extends ConsumerWidget {
           child: Text(
             'Connect a Deezer session if you want the companion to fetch full FLAC releases. Without it, Melodize stays in preview-only mode.',
             style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              color: scheme.onSurfaceVariant,
             ),
           ),
         ),
+        // --- Subscription status banner ---
+        if (prefs.hasDeezerArl && accountAsync != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: accountAsync.when(
+              data: (account) {
+                if (!account.arlValid) return const SizedBox.shrink();
+                if (account.canDownload) {
+                  return _DeezerInfoCard(
+                    icon: Icons.verified_rounded,
+                    iconColor: scheme.primary,
+                    backgroundColor: scheme.primaryContainer,
+                    textColor: scheme.onPrimaryContainer,
+                    title: account.offerLabel,
+                    subtitle: 'Downloads are available',
+                  );
+                }
+                return _DeezerInfoCard(
+                  icon: Icons.warning_amber_rounded,
+                  iconColor: scheme.error,
+                  backgroundColor: scheme.errorContainer,
+                  textColor: scheme.onErrorContainer,
+                  title: 'Subscription required',
+                  subtitle: account.offerLabel == 'Free / No subscription'
+                      ? 'Your Deezer account has no active subscription. Renew your Deezer plan to enable FLAC downloads.'
+                      : '${account.offerLabel} — cannot download. Renew your Deezer plan to enable FLAC downloads.',
+                );
+              },
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
+          ),
         const _SectionHeader('Account'),
         GroupedSection(
           children: [
@@ -838,6 +873,75 @@ class _CompanionOverviewTile extends ConsumerWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _DeezerInfoCard extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final Color backgroundColor;
+  final Color textColor;
+  final String title;
+  final String subtitle;
+
+  const _DeezerInfoCard({
+    required this.icon,
+    required this.iconColor,
+    required this.backgroundColor,
+    required this.textColor,
+    required this.title,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      color: backgroundColor,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: iconColor, size: 24),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: textColor,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: textColor.withValues(alpha: 0.8),
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              icon: Icon(Icons.refresh_rounded, color: iconColor, size: 20),
+              tooltip: 'Re-check subscription',
+              onPressed: () {
+                final ref = ProviderScope.containerOf(context);
+                ref.invalidate(deezerAccountStatusProvider);
+                ref.invalidate(deezerArlStatusProvider);
+              },
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

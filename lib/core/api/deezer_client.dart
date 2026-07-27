@@ -2,6 +2,42 @@ import 'package:dio/dio.dart';
 import '../models/recommended_track.dart';
 import '../utils/title_normalize.dart';
 
+/// Rich result from [DeezerClient.checkAccountStatus].
+class DeezerAccountStatus {
+  final bool arlValid;
+  final String userName;
+  final int offerId;
+  final bool hasPaidOffer;
+  final bool isFreemiumCountry;
+
+  const DeezerAccountStatus({
+    this.arlValid = false,
+    this.userName = '',
+    this.offerId = 0,
+    this.hasPaidOffer = false,
+    this.isFreemiumCountry = false,
+  });
+
+  /// Whether the account has an active paid subscription that can download.
+  bool get canDownload => arlValid && (hasPaidOffer || isFreemiumCountry);
+
+  /// Human-readable subscription tier description.
+  String get offerLabel {
+    if (!arlValid) return 'Not connected';
+    if (hasPaidOffer) {
+      switch (offerId) {
+        case 1: return 'Deezer Premium';
+        case 2: return 'Deezer Premium Family';
+        case 4: return 'Deezer HiFi';
+        case 5: return 'Deezer HiFi Family';
+        default: return 'Deezer Premium';
+      }
+    }
+    if (isFreemiumCountry) return 'Deezer Free (region)';
+    return 'Free / No subscription';
+  }
+}
+
 // Free Deezer API wrapper (no API key required).
 class DeezerClient {
   static const _base = 'https://api.deezer.com';
@@ -125,6 +161,58 @@ class DeezerClient {
     final userId = user?['USER_ID'];
     // Anonymous (invalid ARL) responses come back with USER_ID == 0.
     return userId is int && userId != 0;
+  }
+
+  /// Rich Deezer account check — returns [DeezerAccountStatus] with
+  /// subscription tier and streaming capability info.
+  ///
+  /// Unlike [validateArl] (which only checks ARL validity), this also
+  /// inspects the account's offer/subscription fields so the app can
+  /// warn when downloads will fail due to an expired plan.
+  static Future<DeezerAccountStatus> checkAccountStatus(String arl) async {
+    if (arl.isEmpty) return const DeezerAccountStatus();
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 8),
+      receiveTimeout: const Duration(seconds: 8),
+    ));
+    final resp = await dio.post<Map<String, dynamic>>(
+      'https://www.deezer.com/ajax/gw-light.php',
+      queryParameters: {
+        'method': 'deezer.getUserData',
+        'api_version': '1.0',
+        'api_token': '',
+        'input': '3',
+      },
+      options: Options(
+        headers: {'Cookie': 'arl=$arl'},
+        responseType: ResponseType.json,
+      ),
+    );
+    final results = resp.data?['results'] as Map<String, dynamic>?;
+    final user = results?['USER'] as Map<String, dynamic>?;
+    if (user == null) return const DeezerAccountStatus();
+
+    final userId = user['USER_ID'];
+    final arlValid = userId is int && userId != 0;
+    if (!arlValid) return const DeezerAccountStatus();
+
+    // OFFER_ID: 0 or absent usually means free / expired subscription.
+    // Values 1–4 map to different paid tiers (Premium, HiFi, etc.).
+    final offerId = user['OFFER_ID'];
+    final hasPaidOffer = offerId is int && offerId > 0;
+
+    // Country-level freemium flag — some regions allow free streaming.
+    final isFreemiumCountry = user['IS_FREEMIUM_COUNTRY'] == true;
+
+    final userName = (user['NAME'] as String?)?.trim() ?? '';
+
+    return DeezerAccountStatus(
+      arlValid: true,
+      userName: userName,
+      offerId: offerId is int ? offerId : 0,
+      hasPaidOffer: hasPaidOffer,
+      isFreemiumCountry: isFreemiumCountry,
+    );
   }
 
   // Deezer catalog search.
