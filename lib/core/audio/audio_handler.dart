@@ -289,7 +289,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         _lastHistoryIndex = null;
         return;
       }
-      if (_shuffleOrder.isNotEmpty) {
+      if (_shuffleOrder.isNotEmpty && !_isTransitionFading) {
           // Only correct on natural auto-advance (index + 1).
         final isAutoAdvance = prevPhysical != null && index == prevPhysical + 1;
         if (isAutoAdvance) {
@@ -480,8 +480,9 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         songs: plannedSongs,
         currentIndex: _shufflePos.clamp(0, plannedSongs.length - 1),
         mode: _queue.mode,
-        upcomingTransitions: _transitionPolicy.planUpcoming(
-            plannedSongs, _shufflePos),
+        upcomingTransitions: _queue.mode == PlaybackMode.smartShuffle
+            ? _transitionPolicy.planUpcoming(plannedSongs, _shufflePos)
+            : const [],
       );
     }
     // Shuffle is active but the virtual order is empty (e.g. after a rapid
@@ -954,6 +955,23 @@ class MelodizeAudioHandler extends BaseAudioHandler {
             return indices[i];
           }).where((i) => i >= 0).toList();
           _shufflePos = _shuffleOrder.indexOf(currentIdx);
+          if (_shufflePos < 0 && _loadQueueSongs.isNotEmpty) {
+            // Fallback: find by song ID in case the physical index shifted.
+            final currentSong = currentIdx < _loadQueueSongs.length
+                ? _loadQueueSongs[currentIdx]
+                : null;
+            if (currentSong != null) {
+              for (int vp = 0; vp < _shuffleOrder.length; vp++) {
+                final physIdx = _shuffleOrder[vp];
+                if (physIdx >= 0 &&
+                    physIdx < _loadQueueSongs.length &&
+                    _loadQueueSongs[physIdx].id == currentSong.id) {
+                  _shufflePos = vp;
+                  break;
+                }
+              }
+            }
+          }
           if (_shufflePos < 0) _shufflePos = 0;
           _physicalToVirtual = {
             for (int vp = 0; vp < _shuffleOrder.length; vp++)
@@ -1013,6 +1031,23 @@ class MelodizeAudioHandler extends BaseAudioHandler {
             return indices[i];
           }).where((i) => i >= 0).toList();
           _shufflePos = _shuffleOrder.indexOf(currentIdx);
+          if (_shufflePos < 0 && _loadQueueSongs.isNotEmpty) {
+            // Fallback: find by song ID in case the physical index shifted.
+            final currentSong = currentIdx < _loadQueueSongs.length
+                ? _loadQueueSongs[currentIdx]
+                : null;
+            if (currentSong != null) {
+              for (int vp = 0; vp < _shuffleOrder.length; vp++) {
+                final physIdx = _shuffleOrder[vp];
+                if (physIdx >= 0 &&
+                    physIdx < _loadQueueSongs.length &&
+                    _loadQueueSongs[physIdx].id == currentSong.id) {
+                  _shufflePos = vp;
+                  break;
+                }
+              }
+            }
+          }
           if (_shufflePos < 0) _shufflePos = 0;
           _physicalToVirtual = {
             for (int vp = 0; vp < _shuffleOrder.length; vp++)
@@ -1031,6 +1066,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   /// Recalculates the virtual order — the current song keeps playing;
   /// skipToNext will navigate to the first song in the new order.
   Future<void> toggleShuffle() async {
+    await _cancelCrossfade();
     switch (_shuffleMode) {
       case ShuffleMode.off:
         _shuffleMode = ShuffleMode.shuffle;
@@ -1050,6 +1086,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   /// Directly set the shuffle mode (used by playlist "Shuffle" button, etc.).
   /// Also recalculates the virtual order.
   void applyShuffleMode(ShuffleMode mode) {
+    _cancelCrossfade();
     _shuffleMode = mode;
     _shuffleModeCtrl.add(mode);
     _shuffleHistory.clear();
@@ -1184,12 +1221,56 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         return;
       }
 
-      // Crossfade is too fragile with virtual shuffle orders — the main
-      // player's physical auto-advance rarely matches the virtual next
-      // song. Rely on simple gapless playback in shuffle modes.
-      if (_shuffleMode != ShuffleMode.off) return;
+      // Normal shuffle: just shuffle — no crossfade or DJ features.
+      if (_shuffleMode == ShuffleMode.shuffle) return;
 
       final from = _loadQueueSongs[index];
+
+      // ── Smart shuffle (DJ mode): crossfade using virtual order ──
+      if (_shuffleMode == ShuffleMode.smartShuffle) {
+        if (_shuffleOrder.isEmpty) return;
+        final vp = _physicalToVirtual[index];
+        if (vp == null || vp >= _shuffleOrder.length - 1) return;
+        final nextPhysical = _shuffleOrder[vp + 1];
+
+        // Anti-loop: don't crossfade to the same song.
+        if (nextPhysical == index) { return; }
+        if (nextPhysical < 0 ||
+            nextPhysical >= _loadQueueSongs.length) { return; }
+        final to = _loadQueueSongs[nextPhysical];
+        if (from.id == to.id) { return; }
+        if (!_canPlayOffline(to)) { return; }
+
+        final actualDuration = player.duration?.inSeconds;
+        final transition = _transitionPolicy.planPair(
+          from, to,
+          actualDurationSeconds: actualDuration,
+        );
+
+        // DJ mode: force crossfade even for gapless transitions.
+        if (transition.kind == TransitionKind.gapless ||
+            transition.duration == Duration.zero) {
+          final dur = actualDuration ?? from.duration ?? 0;
+          if (dur < 10) { return; } // Too short for any crossfade
+          final forcedTransition = PlannedTransition(
+            from: from,
+            to: to,
+            kind: TransitionKind.volumeCrossfade,
+            duration: const Duration(seconds: 3),
+            fromStart: Duration(seconds: max(0, dur - 4)),
+            toStart: Duration.zero,
+            reason: 'DJ mode forced crossfade',
+          );
+          if (position < forcedTransition.fromStart) return;
+          _startCrossfadeFadeOut(forcedTransition, nextPhysical);
+          return;
+        }
+        if (position < transition.fromStart) return;
+        _startCrossfadeFadeOut(transition, nextPhysical);
+        return;
+      }
+
+      // ── Normal mode: crossfade using physical auto-advance ──
       final nextIdx = _resolveNextPhysicalIndex(index);
       if (nextIdx == null) return;
       if (nextIdx < 0 || nextIdx >= _loadQueueSongs.length) return;
@@ -1242,16 +1323,75 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         }
         if (t >= 1.0) {
           timer.cancel();
-          // Volume is now 0. Start a safety timer: if the player never
-          // auto-advances (stuck track, network stall), restore volume.
-          _crossfadeTimeout = Timer(const Duration(seconds: 5), () {
-            if (_crossfadeActive) {
-              _cancelCrossfade();
-            }
-          });
+          if (_shuffleMode == ShuffleMode.smartShuffle &&
+              _crossfadeNextIndex != null) {
+            // DJ mode: explicitly seek to the next virtual song
+            // instead of relying on physical auto-advance.
+            _performVirtualSeekForCrossfade(_crossfadeNextIndex!);
+          } else {
+            // Normal mode: wait for auto-advance.
+            _crossfadeTimeout = Timer(const Duration(seconds: 5), () {
+              if (_crossfadeActive) {
+                _cancelCrossfade();
+              }
+            });
+          }
         }
       },
     );
+  }
+
+  /// DJ mode: explicitly seek to the next virtual song after crossfade
+  /// fade-out completes. Handles the case where physical auto-advance
+  /// would go to the wrong song in virtual shuffle orders.
+  void _performVirtualSeekForCrossfade(int targetPhysicalIndex) {
+    // Verify target is still valid.
+    if (targetPhysicalIndex < 0 ||
+        targetPhysicalIndex >= _playlistSource.length ||
+        targetPhysicalIndex >= _loadQueueSongs.length) {
+      _cancelCrossfade();
+      return;
+    }
+
+    // Anti-loop: verify target differs from current.
+    final currentIdx = player.currentIndex;
+    if (currentIdx == null || targetPhysicalIndex == currentIdx) {
+      _cancelCrossfade();
+      return;
+    }
+
+    // Anti-loop: verify different song by ID.
+    if (currentIdx >= 0 &&
+        currentIdx < _loadQueueSongs.length &&
+        targetPhysicalIndex < _loadQueueSongs.length &&
+        _loadQueueSongs[currentIdx].id ==
+            _loadQueueSongs[targetPhysicalIndex].id) {
+      _cancelCrossfade();
+      return;
+    }
+
+    // Safety timeout: if seek never completes, restore volume.
+    _crossfadeTimeout = Timer(const Duration(seconds: 8), () {
+      if (_crossfadeActive) {
+        debugPrint('Crossfade virtual seek timeout — restoring volume');
+        _cancelCrossfade();
+      }
+    });
+
+    _seekingVirtual = true;
+    player.seek(Duration.zero, index: targetPhysicalIndex).then((_) {
+      _seekingVirtual = false;
+    }).catchError((e) {
+      debugPrint('Crossfade virtual seek error: $e');
+      _seekingVirtual = false;
+      _cancelCrossfade();
+    });
+
+    // Update virtual position immediately so the UI reflects the change.
+    final vp = _physicalToVirtual[targetPhysicalIndex];
+    if (vp != null) _shufflePos = vp;
+    _queue.setCurrentIndex(targetPhysicalIndex);
+    _emitQueueSnapshot(immediate: true);
   }
 
   void _startCrossfadeFadeIn() {

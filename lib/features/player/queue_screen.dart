@@ -111,7 +111,9 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                                 song: nowPlaying,
                                 scheme: scheme,
                                 textTheme: textTheme,
-                                nextTransition: transitionMap[currentIndex + 1],
+                                nextTransition: mode == PlaybackMode.smartShuffle
+                                    ? transitionMap[currentIndex + 1]
+                                    : null,
                               ),
                             ),
                           ),
@@ -170,6 +172,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 16),
                                   sliver: SliverReorderableList(
+                                    key: ValueKey('normal_queue_${upNext.length}_$baseIndex'),
                                     itemCount: upNext.length,
                                     itemBuilder: (context, index) {
                                       final song = upNext[index];
