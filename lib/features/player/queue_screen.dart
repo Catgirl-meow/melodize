@@ -130,13 +130,13 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Icon(
-                                        Icons.drag_handle_rounded,
+                                        Icons.swipe_left_rounded,
                                         size: 14,
                                         color: scheme.onSurfaceVariant,
                                       ),
                                       const SizedBox(width: 4),
                                       Text(
-                                        'Hold to reorder',
+                                        'Swipe to remove',
                                         style: textTheme.labelSmall?.copyWith(
                                           color: scheme.onSurfaceVariant,
                                         ),
@@ -171,58 +171,43 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                               ?                              SliverPadding(
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 16),
-                                  sliver: SliverReorderableList(
-                                    key: ValueKey('normal_queue_${upNext.length}_$baseIndex'),
-                                    itemCount: upNext.length,
-                                    itemBuilder: (context, index) {
-                                      final song = upNext[index];
-                                      return RepaintBoundary(
-                                        child: _UpNextItem(
-                                          key: ValueKey(
-                                              'upnext_${baseIndex + index}'),
-                                          song: song,
-                                          queueIndex: baseIndex + index,
-                                          number: index + 1,
-                                          scheme: scheme,
-                                          textTheme: textTheme,
-                                          mode: PlaybackMode.normal,
-                                          transition:
-                                              transitionMap[baseIndex + index],
-                                          onTap: () => handler
-                                              ?.skipToIndex(baseIndex + index),
-                                          onRemove: () => handler
-                                              ?.removeFromQueue(baseIndex + index),
-                                          dragHandle: true,
-                                        ),
-                                      );
-                                    },
-                                    onReorderItem: (oldIndex, newIndex) {
-                                      if (newIndex > oldIndex) newIndex--;
-                                      handler?.reorderQueue(
-                                        baseIndex + oldIndex,
-                                        baseIndex + newIndex,
-                                      );
-                                    },
-                                    proxyDecorator:
-                                        (child, index, animation) {
-                                      return Material(
-                                        type: MaterialType.transparency,
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            color: scheme
-                                                .surfaceContainerHighest,
-                                            borderRadius:
-                                                BorderRadius.circular(12),
-                                            border: Border.all(
-                                              color: scheme.outlineVariant
-                                                  .withValues(alpha: 0.5),
-                                              width: 1,
+                                  sliver: SliverList(
+                                    delegate: SliverChildBuilderDelegate(
+                                      (context, index) {
+                                        final song = upNext[index];
+                                        return RepaintBoundary(
+                                          child: Dismissible(
+                                            key: ValueKey(
+                                                'upnext_${baseIndex + index}'),
+                                            direction: DismissDirection.endToStart,
+                                            onDismissed: (_) => handler
+                                                ?.removeFromQueue(baseIndex + index),
+                                            background: Container(
+                                              alignment: Alignment.centerRight,
+                                              padding: const EdgeInsets.only(right: 20),
+                                              color: scheme.error,
+                                              child: Icon(Icons.delete_rounded,
+                                                  color: scheme.onError),
+                                            ),
+                                            child: _UpNextItem(
+                                              song: song,
+                                              queueIndex: baseIndex + index,
+                                              number: index + 1,
+                                              scheme: scheme,
+                                              textTheme: textTheme,
+                                              mode: PlaybackMode.normal,
+                                              transition:
+                                                  transitionMap[baseIndex + index],
+                                              onTap: () => handler
+                                                  ?.skipToIndex(baseIndex + index),
+                                              onRemove: () => handler
+                                                  ?.removeFromQueue(baseIndex + index),
                                             ),
                                           ),
-                                          child: child,
-                                        ),
-                                      );
-                                    },
+                                        );
+                                      },
+                                      childCount: upNext.length,
+                                    ),
                                   ),
                                 )
                               : SliverPadding(
