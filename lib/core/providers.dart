@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:dio/dio.dart' show DioException;
+import 'package:dio/dio.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart'
@@ -1133,6 +1133,9 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
           _db.cacheLyrics(song.id, result.plain, result.synced);
         }
       }).catchError((_) {}));
+      // Pre-cache cover art for offline use. Fire-and-forget: a cover-art
+      // failure must not fail the download.
+      unawaited(_cacheCoverArt(song, savePath).catchError((_) {}));
       await _db.upsertDownload(DownloadQueueCompanion.insert(
         songId: song.id,
         songTitle: song.title,
@@ -1163,6 +1166,34 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
     return s == 'downloading' || s == 'queued';
   }
 
+  /// Download and persist the cover-art image alongside the audio file so it
+  /// is available offline.  Writes a `.cover.jpg` sibling file.
+  Future<void> _cacheCoverArt(Song song, String audioPath) async {
+    // Resolve the cover art URL — prefer Subsonic, fall back to external.
+    final coverArtId = song.coverArt;
+    String? url;
+    if (coverArtId != null && coverArtId.isNotEmpty) {
+      url = _ref.read(coverArtUrlProvider(coverArtId));
+    }
+    url ??= song.externalCoverUrl;
+    if (url == null || url.isEmpty) return;
+
+    final coverPath = '${p.withoutExtension(audioPath)}.cover.jpg';
+    final file = File(coverPath);
+    if (file.existsSync()) return; // already cached
+
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 15),
+      responseType: ResponseType.bytes,
+    ));
+    final resp = await dio.get<List<int>>(url);
+    final bytes = resp.data;
+    if (bytes != null && bytes.isNotEmpty) {
+      await file.writeAsBytes(bytes);
+    }
+  }
+
   Future<void> removeDownload(String songId) async {
     // Cancel if queued.
     _queue.removeWhere((t) => t.song.id == songId);
@@ -1175,6 +1206,9 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
       if (row?.localPath != null) {
         final file = File(row!.localPath!);
         if (await file.exists()) await file.delete();
+        // Also remove the cached cover-art sibling file.
+        final coverFile = File('${p.withoutExtension(row.localPath!)}.cover.jpg');
+        if (await coverFile.exists()) await coverFile.delete();
       }
     } catch (_) {}
     final updated = Map<String, DownloadItem>.from(state);

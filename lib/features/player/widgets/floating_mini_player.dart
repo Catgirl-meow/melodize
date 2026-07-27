@@ -89,6 +89,7 @@ class FloatingMiniPlayer extends ConsumerWidget {
                             builder: (_, r, __) => CoverArtImage(
                               coverArtId: song.coverArt,
                               externalUrl: song.externalCoverUrl,
+                              localPath: song.localPath,
                               size: 40,
                               borderRadius: r,
                             ),

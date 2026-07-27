@@ -1,12 +1,27 @@
+import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 import '../../core/providers.dart';
+
+/// Returns the local cover-art file path derived from an audio file path.
+/// Convention: same directory and base name, with `.cover.jpg` suffix.
+/// E.g. `/music/song.flac` → `/music/song.cover.jpg`
+String? localCoverArtPath(String? audioPath) {
+  if (audioPath == null || audioPath.isEmpty) return null;
+  final dir = p.dirname(audioPath);
+  final base = p.basenameWithoutExtension(audioPath);
+  return p.join(dir, '$base.cover.jpg');
+}
 
 class CoverArtImage extends ConsumerWidget {
   final String? coverArtId;
   /// Direct HTTPS URL used when [coverArtId] is absent (e.g. external tracks).
   final String? externalUrl;
+  /// Path to the local audio file — used to derive the cached cover art path
+  /// for offline display of downloaded songs.
+  final String? localPath;
   final double size;
   final double borderRadius;
   final BoxFit fit;
@@ -15,6 +30,7 @@ class CoverArtImage extends ConsumerWidget {
     super.key,
     required this.coverArtId,
     this.externalUrl,
+    this.localPath,
     required this.size,
     this.borderRadius = 8,
     this.fit = BoxFit.cover,
@@ -43,17 +59,33 @@ class CoverArtImage extends ConsumerWidget {
         fit: fit,
         memCacheWidth: cacheSize,
         memCacheHeight: cacheSize,
-        errorWidget: (_, __, ___) => _placeholder(scheme),
-        placeholder: (_, __) => _placeholder(scheme),
+        errorWidget: (_, __, ___) => _localOrPlaceholder(scheme),
+        placeholder: (_, __) => _localOrPlaceholder(scheme),
       );
     } else {
-      child = _placeholder(scheme);
+      child = _localOrPlaceholder(scheme);
     }
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
       child: child,
     );
+  }
+
+  /// Try to load a locally-cached cover art file (saved alongside downloaded
+  /// audio). Falls back to the music-note placeholder.
+  Widget _localOrPlaceholder(ColorScheme scheme) {
+    final local = localCoverArtPath(localPath);
+    if (local != null && File(local).existsSync()) {
+      return Image.file(
+        File(local),
+        width: size,
+        height: size,
+        fit: fit,
+        errorBuilder: (_, __, ___) => _placeholder(scheme),
+      );
+    }
+    return _placeholder(scheme);
   }
 
   Widget _placeholder(ColorScheme scheme) => Container(

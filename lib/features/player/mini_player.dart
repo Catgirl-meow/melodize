@@ -96,6 +96,7 @@ class _ClassicMiniPlayer extends ConsumerWidget {
                           builder: (_, r, __) => CoverArtImage(
                             coverArtId: song.coverArt,
                             externalUrl: song.externalCoverUrl,
+                            localPath: song.localPath,
                             size: 44,
                             borderRadius: r,
                           ),

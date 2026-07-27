@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import '../../core/models/song.dart';
+import '../../core/models/lyrics_result.dart';
 import '../../core/providers.dart';
 import '../../core/audio/shuffle_mode.dart';
 import '../../shared/utils/download_polling_mixin.dart';
@@ -491,6 +492,7 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
                   CoverArtImage(
                     coverArtId: song.coverArt,
                     externalUrl: song.externalCoverUrl,
+                    localPath: song.localPath,
                     size: 44,
                     borderRadius: 8,
                   ),
@@ -683,7 +685,7 @@ class _PlayerPage extends StatelessWidget {
         children: [
           const Spacer(flex: 1),
           RepaintBoundary(
-            child: _AlbumArt(coverUrl: coverUrl, artSize: artSize),
+            child: _AlbumArt(coverUrl: coverUrl, artSize: artSize, localPath: song.localPath),
           ),
           const Spacer(flex: 2),
           _SongInfoRow(song: song, fgAccent: fgAccent),
@@ -715,7 +717,8 @@ class _PlayerPage extends StatelessWidget {
 class _AlbumArt extends ConsumerWidget {
   final String coverUrl;
   final double artSize;
-  const _AlbumArt({required this.coverUrl, required this.artSize});
+  final String? localPath;
+  const _AlbumArt({required this.coverUrl, required this.artSize, this.localPath});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -747,11 +750,21 @@ class _AlbumArt extends ConsumerWidget {
             ? CachedNetworkImage(
                 imageUrl: coverUrl,
                 fit: BoxFit.cover,
-                errorWidget: (_, __, ___) => _placeholder(scheme),
+                errorWidget: (_, __, ___) => _localOrPlaceholder(scheme),
               )
-            : _placeholder(scheme),
+            : _localOrPlaceholder(scheme),
       ),
     );
+  }
+
+  Widget _localOrPlaceholder(ColorScheme scheme) {
+    final local = localCoverArtPath(localPath);
+    if (local != null && File(local).existsSync()) {
+      return Image.file(File(local), fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _placeholder(scheme),
+      );
+    }
+    return _placeholder(scheme);
   }
 
   Widget _placeholder(ColorScheme scheme) {
@@ -1185,7 +1198,14 @@ class _LyricsPage extends ConsumerStatefulWidget {
 class _LyricsPageState extends ConsumerState<_LyricsPage> {
   final _scrollCtrl = ScrollController();
   int _currentLine = 0;
-  List<dynamic> _syncedLines = [];
+  List<LyricLine> _syncedLines = [];
+  // When true the user has manually scrolled — suppress auto-scroll so it
+  // doesn't fight with their reading position.  Resets after a short idle
+  // or when the song changes significantly.
+  bool _userScrolled = false;
+  Timer? _userScrollResetTimer;
+  // Track the previous song so we can reset state on song change.
+  String _prevSongId = '';
 
   void _onPosition(Duration position) {
     if (_syncedLines.isEmpty) return;
@@ -1201,6 +1221,10 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
     }
     if (current == _currentLine) return;
     setState(() => _currentLine = current);
+
+    // Auto-follow: skip if the user has manually scrolled recently.
+    if (_userScrolled) return;
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollCtrl.hasClients) return;
       const itemH = 48.0;
@@ -1215,9 +1239,20 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
     });
   }
 
+  /// Called when the user manually scrolls the lyrics list.
+  void _onUserScroll() {
+    if (!_userScrolled) setState(() => _userScrolled = true);
+    _userScrollResetTimer?.cancel();
+    // Re-enable auto-follow after 4 seconds of no manual scrolling.
+    _userScrollResetTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _userScrolled = false);
+    });
+  }
+
   @override
   void dispose() {
     _scrollCtrl.dispose();
+    _userScrollResetTimer?.cancel();
     super.dispose();
   }
 
@@ -1235,6 +1270,15 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
       duration: widget.song.duration ?? 0,
     );
     final lyricsAsync = ref.watch(lyricsProvider(query));
+
+    // Reset state when the song changes.
+    if (widget.song.id != _prevSongId) {
+      _prevSongId = widget.song.id;
+      _currentLine = 0;
+      _syncedLines = [];
+      _userScrolled = false;
+      _userScrollResetTimer?.cancel();
+    }
 
     // Listen, don't watch — position updates 10×/sec; only rebuild on line change.
     ref.listen(positionStreamProvider,
@@ -1267,15 +1311,58 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
           final lines = result.syncedLines;
           _syncedLines = lines;
 
-          return ListView.builder(
-            controller: _scrollCtrl,
-            padding:
-                const EdgeInsets.symmetric(horizontal: 24, vertical: 60),
-            itemCount: lines.length,
-            itemBuilder: (_, i) => _LyricLine(
-              key: ValueKey(i),
-              text: lines[i].text,
-              isActive: i == _currentLine,
+          return NotificationListener<ScrollNotification>(
+            onNotification: (notification) {
+              // Only react to user-initiated scrolls (drag or fling).
+              if (notification is ScrollUpdateNotification &&
+                  notification.dragDetails != null) {
+                _onUserScroll();
+              } else if (notification is UserScrollNotification) {
+                _onUserScroll();
+              }
+              return false;
+            },
+            child: Stack(
+              children: [
+                ListView.builder(
+                  controller: _scrollCtrl,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 60),
+                  itemCount: lines.length,
+                  itemBuilder: (_, i) => _LyricLine(
+                    key: ValueKey(i),
+                    text: lines[i].text,
+                    isActive: i == _currentLine,
+                  ),
+                ),
+                // "Follow lyrics" button — reappears when user scrolls away.
+                if (_userScrolled)
+                  Positioned(
+                    bottom: 16,
+                    right: 16,
+                    child: FloatingActionButton.small(
+                      backgroundColor: scheme.primaryContainer,
+                      foregroundColor: scheme.onPrimaryContainer,
+                      onPressed: () {
+                        _userScrollResetTimer?.cancel();
+                        setState(() => _userScrolled = false);
+                        // Immediately scroll to current line.
+                        if (_syncedLines.isNotEmpty && _scrollCtrl.hasClients) {
+                          const itemH = 48.0;
+                          final target = (_currentLine * itemH -
+                                  MediaQuery.of(context).size.height * 0.35)
+                              .clamp(0.0, _scrollCtrl.position.maxScrollExtent);
+                          _scrollCtrl.animateTo(
+                            target,
+                            duration: const Duration(milliseconds: 450),
+                            curve: Curves.easeOutCubic,
+                          );
+                        }
+                      },
+                      child: const Icon(Icons.lyrics_rounded),
+                    ),
+                  ),
+              ],
             ),
           );
         }

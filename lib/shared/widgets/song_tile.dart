@@ -34,7 +34,7 @@ class SongTile extends ConsumerWidget {
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-      leading: CoverArtImage(coverArtId: song.coverArt, size: 48),
+      leading: CoverArtImage(coverArtId: song.coverArt, localPath: song.localPath, size: 48),
       title: Text(
         song.title,
         maxLines: 1,
@@ -129,6 +129,7 @@ class _MoreButton extends ConsumerWidget {
                 children: [
                   CoverArtImage(
                     coverArtId: song.coverArt,
+                    localPath: song.localPath,
                     size: 44,
                     borderRadius: 8,
                   ),
