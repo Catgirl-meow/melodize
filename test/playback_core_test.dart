@@ -515,6 +515,46 @@ void main() {
       expect(snapshot.songs.map((s) => s.id), ['a', 'b']);
       expect(snapshot.mode, PlaybackMode.smartShuffle);
     });
+
+    test('normal and regular shuffle snapshots never expose transitions', () {
+      final songs = [song('a'), song('b')];
+      final transition = PlannedTransition(
+        from: songs[0],
+        to: songs[1],
+        kind: TransitionKind.djBlend,
+        duration: const Duration(seconds: 4),
+        fromStart: const Duration(seconds: 176),
+        toStart: Duration.zero,
+        reason: 'test',
+      );
+
+      for (final mode in [PlaybackMode.normal, PlaybackMode.shuffle]) {
+        final queue = PlaybackQueue()..load(songs, mode: mode);
+        final snapshot = queue.snapshot(upcomingTransitions: [transition]);
+        expect(snapshot.mode, mode);
+        expect(snapshot.songs.map((s) => s.id), ['a', 'b']);
+        expect(snapshot.upcomingTransitions, isEmpty,
+            reason: '$mode must remain strictly gapless');
+      }
+
+      final djQueue = PlaybackQueue()
+        ..load(songs, mode: PlaybackMode.smartShuffle);
+      expect(
+        djQueue.snapshot(upcomingTransitions: [transition]).upcomingTransitions,
+        hasLength(1),
+      );
+    });
+
+    test('queue snapshot keeps the current index and displayed order', () {
+      final queue = PlaybackQueue()
+        ..load([song('a'), song('b'), song('c')],
+            startIndex: 1, mode: PlaybackMode.shuffle);
+
+      final snapshot = queue.snapshot();
+      expect(snapshot.songs.map((s) => s.id), ['a', 'b', 'c']);
+      expect(snapshot.currentIndex, 1);
+      expect(snapshot.songs[snapshot.currentIndex].id, 'b');
+    });
   });
 
   group('SmartShuffleEngine scoring', () {

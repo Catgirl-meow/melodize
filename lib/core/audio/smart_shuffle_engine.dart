@@ -105,10 +105,10 @@ BpmCache buildBpmCache(
   for (final song in songs) {
     final real = knownBpm?[song.id];
     if (real != null && real > 0) {
-      bpm[song.id] = real.clamp(40, 200);
+      bpm[song.id] = real.clamp(40, 200).toInt();
       isEstimated[song.id] = false;
     } else if (song.bpm != null && song.bpm! > 0) {
-      bpm[song.id] = song.bpm!.clamp(40, 200);
+      bpm[song.id] = song.bpm!.clamp(40, 200).toInt();
       isEstimated[song.id] = false;
     } else {
       final estimated = estimateBpm(song.genre);
@@ -500,7 +500,7 @@ double _djScore(Song a, Song b, BpmCache cache, int tier, int totalSongs) {
 
   // Safety: corrupted companion data may produce NaN / Infinity.
   if (score.isNaN || score.isInfinite) return 0.0;
-  return score.clamp(0.0, 1.0);
+  return score.clamp(0.0, 1.0).toDouble();
 }
 
 // ---------------------------------------------------------------------------
@@ -550,7 +550,7 @@ List<Song> orderSongs(List<Song> songs, int anchorIndex, BpmCache cache,
   // Input validation
   if (songs.isEmpty) return [];
   if (songs.length <= 1) return List.from(songs);
-  final idx = anchorIndex.clamp(0, songs.length - 1);
+  final idx = anchorIndex.clamp(0, songs.length - 1).toInt();
 
   // Detect data quality and auto-select tier if not explicitly set
   final tier = _detectDjTier(songs, cache, djTier);
@@ -703,9 +703,6 @@ List<Song> buildDjArc(
   // upcoming songs are placed. Distribute songs evenly across tiers so the
   // energy curve is perceptible across the entire set (not just first 5 songs).
   final result = <Song>[];
-  // Use object identity (Set<Song>) instead of Set<String> so duplicate
-  // song IDs in the queue don't cause an infinite loop or data loss.
-  final visited = <Song>{};
   Song current = anchor;
   var songCount = upcoming.length;
   final songsPerTierStep = max(1, songCount ~/ arcSequence.length);
@@ -716,33 +713,29 @@ List<Song> buildDjArc(
 
       var placedThisStep = 0;
       while (placedThisStep < songsPerTierStep && songCount > 0) {
-        // Collect candidates in the target tier (±1 if exhausted).
+        // Collect only a bounded candidate sample for large playlists. The
+        // previous implementation rebuilt a list of every remaining song on
+        // every iteration, turning a nominally linear planner into O(n²)
+        // work (and making Android stutter on large queues). Buckets remove
+        // selected songs below, so no visited set or full scan is needed.
+        final maxCandidates = totalSongs > 500 ? 50 : totalSongs;
         List<Song> candidates = const [];
         for (int spread = 0; spread <= 2; spread++) {
-          candidates = _candidatesInTier(
-              tierBuckets, targetTier, spread, visited);
+          candidates = _sampleCandidatesInTier(
+            tierBuckets,
+            targetTier,
+            spread,
+            maxCandidates,
+            rng,
+          );
           if (candidates.isNotEmpty) break;
         }
 
         if (candidates.isEmpty) break;
 
         // Pick best-scoring candidate from current song. For large playlists,
-        // avoid O(n log n) sorts on thousands of candidates by using reservoir
-        // sampling to pick a random subset, then sorting only that subset.
-        final maxCandidates = totalSongs > 500
-            ? min(50, candidates.length)
-            : candidates.length;
-        if (maxCandidates < candidates.length) {
-          // Reservoir sample: O(n) with one RNG call per extra element.
-          final sample = candidates.sublist(0, maxCandidates);
-          for (int i = maxCandidates; i < candidates.length; i++) {
-            final j = rng.nextInt(i + 1);
-            if (j < maxCandidates) {
-              sample[j] = candidates[i];
-            }
-          }
-          candidates = sample;
-
+        // only sort and score the bounded sample rather than the whole queue.
+        if (totalSongs > 500) {
           final currBpm = cache.bpmFor(current);
           if (currBpm != null) {
             candidates.sort((a, b) {
@@ -769,8 +762,7 @@ List<Song> buildDjArc(
         // by score.  This keeps DJ quality high while varying the order
         // across sessions — without it the same anchor produces the same arc.
         final scored = <({Song song, double score})>[];
-        for (int i = 0; i < maxCandidates; i++) {
-          final c = candidates[i];
+        for (final c in candidates) {
           final s = _djScore(current, c, cache, tier, totalSongs);
           scored.add((song: c, score: s));
         }
@@ -805,7 +797,6 @@ List<Song> buildDjArc(
         }
 
         result.add(best);
-        visited.add(best);
         // Remove best from its actual bucket (may differ from targetTier due to spread).
         for (final bucket in tierBuckets) {
           if (bucket.remove(best)) break;
@@ -848,20 +839,54 @@ List<Song> _buildAndPolishDjArc(
     if (!seq.contains(t)) seq.add(t);
   }
   return seq;
-}  // Unvisited songs from target tier, widening by [spread].
-  List<Song> _candidatesInTier(
+}  // Sample songs from the target tier, widening by [spread]. Selected songs are
+// removed from their buckets by the caller, so this never needs to scan the
+// remaining queue to build a visited set. For large buckets, choose distinct
+// random offsets with O(sampleSize) work.
+List<Song> _sampleCandidatesInTier(
   List<List<Song>> buckets,
   int targetTier,
   int spread,
-  Set<Song> visited,
+  int maxCandidates,
+  Random rng,
 ) {
-  final result = <Song>[];
+  final eligible = <List<Song>>[];
+  var total = 0;
   for (int t = targetTier - spread;
       t <= targetTier + spread;
       t++) {
     if (t < 0 || t >= _kEnergyTiers) continue;
-    for (final s in buckets[t]) {
-      if (!visited.contains(s)) result.add(s);
+    final bucket = buckets[t];
+    if (bucket.isNotEmpty) {
+      eligible.add(bucket);
+      total += bucket.length;
+    }
+  }
+  if (total == 0) return const [];
+
+  final count = min(maxCandidates, total);
+  if (count == total) {
+    final result = <Song>[];
+    for (final bucket in eligible) {
+      result.addAll(bucket);
+    }
+    return result;
+  }
+
+  final offsets = <int>{};
+  while (offsets.length < count) {
+    offsets.add(rng.nextInt(total));
+  }
+
+  final result = <Song>[];
+  for (final offset in offsets) {
+    var cursor = offset;
+    for (final bucket in eligible) {
+      if (cursor < bucket.length) {
+        result.add(bucket[cursor]);
+        break;
+      }
+      cursor -= bucket.length;
     }
   }
   return result;
@@ -978,11 +1003,12 @@ extension _Interleave on List<Song> {
 // Fallback: random shuffle with artist separation.
 
 List<Song> _randomWithArtistSep(List<Song> songs, int anchorIndex, int seed) {
-  final anchor = songs[anchorIndex.clamp(0, songs.length - 1)];
-  // Use object identity so duplicate song instances are preserved.
-  final rest = songs.where((s) => s != anchor).toList();
+  final idx = anchorIndex.clamp(0, songs.length - 1).toInt();
+  // Remove exactly one queue entry by index. Filtering by object identity can
+  // drop multiple occurrences when the same Song instance is queued twice.
+  final heardAndCurrent = songs.sublist(0, idx + 1);
+  final rest = songs.sublist(idx + 1);
   rest.shuffle(Random(seed));
-  final result = [anchor, ...rest];
-  result._interleaveArtists();
-  return result;
+  rest._interleaveArtists();
+  return [...heardAndCurrent, ...rest];
 }

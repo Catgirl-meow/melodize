@@ -375,10 +375,14 @@ def generate_transition(
         return None
 
     try:
-        # Load tails/heads — skip trailing silence in song A's tail
+        # Load tails/heads — skip trailing silence in song A's tail. Load a
+        # little extra B audio because tempo stretching changes the number of
+        # samples consumed by the bridge.
         tail_a, sr_a = _load_tail(song_a_path, mix_duration, sample_rate,
                                   tail_silence=tail_silence_a)
-        head_b, sr_b = _load_head(song_b_path, mix_duration, sample_rate)
+        stretch_factor = bpm_a / bpm_b
+        head_duration = mix_duration * max(1.0, stretch_factor) + 0.5
+        head_b, sr_b = _load_head(song_b_path, head_duration, sample_rate)
 
         if tail_a is None or head_b is None or len(tail_a) == 0 or len(head_b) == 0:
             log.warning("Empty audio segment for mix")
@@ -388,14 +392,16 @@ def generate_transition(
         sr = max(sr_a, sr_b)
 
         # Time-stretch head B to match BPM of A
-        stretch_factor = bpm_a / bpm_b
         if abs(stretch_factor - 1.0) > 0.01:
             head_b = pyrb.time_stretch(head_b, sr, stretch_factor)
 
-        # Match lengths by trimming or padding
-        min_len = min(len(tail_a), len(head_b))
-        tail_a = tail_a[:min_len]
-        head_b = head_b[:min_len]
+        # Match lengths exactly. Padding the shorter side avoids returning a
+        # truncated bridge for short tracks and keeps the WAV duration stable.
+        target_len = min(len(tail_a), len(head_b))
+        if target_len <= 0:
+            return None
+        tail_a = _fit_segment(tail_a, target_len)
+        head_b = _fit_segment(head_b, target_len)
 
         # Equal-power crossfade envelope
         fade = np.linspace(0, 1, min_len)
@@ -452,6 +458,13 @@ def _load_tail(file_path: str, duration: float, sr: int = 44100,
     except Exception as e:
         log.warning("Failed to load tail of %s: %s", file_path, e)
         return None, sr
+
+
+def _fit_segment(signal: np.ndarray, length: int) -> np.ndarray:
+    """Return exactly [length] mono samples without changing its content."""
+    if len(signal) >= length:
+        return signal[:length]
+    return np.pad(signal, (0, length - len(signal)))
 
 
 def _load_head(file_path: str, duration: float, sr: int = 44100):

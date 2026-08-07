@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:path_provider/path_provider.dart';
 import '../models/song.dart';
 import '../api/subsonic_client.dart';
+import '../api/companion_audio_api.dart';
 import '../linux/linux_mpris.dart';
 import 'playback_core.dart';
 import 'shuffle_mode.dart';
@@ -48,6 +51,24 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     ),
   );
 
+  /// Separate deck for companion-rendered transitions. It is deliberately
+  /// not part of [_playlistSource]: transition WAVs are implementation
+  /// details, not queue entries, so song indices and media metadata remain
+  /// one-to-one on Android and Linux.
+  final AudioPlayer _transitionPlayer = AudioPlayer(
+    audioLoadConfiguration: const AudioLoadConfiguration(
+      androidLoadControl: AndroidLoadControl(
+        bufferForPlaybackDuration: Duration(milliseconds: 250),
+        bufferForPlaybackAfterRebufferDuration: Duration(seconds: 1),
+        minBufferDuration: Duration(seconds: 10),
+        maxBufferDuration: Duration(seconds: 30),
+      ),
+      darwinLoadControl: DarwinLoadControl(
+        preferredForwardBufferDuration: Duration(seconds: 10),
+      ),
+    ),
+  );
+
   // Replaced on every loadQueue call to avoid an expensive clear() round-trip.
   ConcatenatingAudioSource _playlistSource = ConcatenatingAudioSource(
     children: [],
@@ -57,9 +78,9 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   SubsonicConfig? _config;
   String _streamQuality = 'lossless';
   StreamSubscription<Duration>? _crossfadeSub;
-  // Single-player crossfade: no second deck, just a volume ramp on the
-  // main player. Eliminates double-playback, handoff races, and seek
-  // desyncs across platforms.
+  // Volume-ramp fallback remains available whenever the companion cannot
+  // prepare a rendered transition. The second deck is used only for a fully
+  // loaded, validated transition asset.
   Timer? _crossfadeTimer;
   bool _isTransitionFading = false;
   bool _crossfadeActive = false;
@@ -74,11 +95,36 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   bool _nowPlayingReported = false;
   bool _scrobbled = false;
   LinuxMprisService? _mpris;
+  bool _disposed = false;
 
   /// Safety timeout: if a crossfade fade-out completes but the player
   /// never auto-advances (e.g. network stall), restore volume after a
   /// few seconds so the user isn't stuck muted.
   Timer? _crossfadeTimeout;
+  Timer? _renderedTransitionTimeout;
+  Future<void> _volumeWrite = Future<void>.value();
+  Future<void> _transitionDeckOperation = Future<void>.value();
+
+  // Companion-rendered transition state. A key binds a prepared asset to one
+  // exact song pair and duration so stale async responses can never be played
+  // for a different queue generation.
+  CompanionAudioApi? _companionAudioApi;
+  String? _preparedTransitionKey;
+  String? _preparingTransitionKey;
+  bool _renderedTransitionActive = false;
+  int? _renderedTransitionNextIndex;
+  String? _renderedTransitionFromId;
+  String? _renderedTransitionToId;
+  int _renderedTransitionGeneration = 0;
+  Duration? _renderedTransitionDuration;
+  Duration? _renderedMixDuration;
+  Duration? _preparedTransitionDuration;
+  String? _preparedTransitionPath;
+  bool _renderedPausedMainPlayer = false;
+  int _renderedQueueGeneration = -1;
+  int _transitionPlayerGeneration = 0;
+  int? _activeTransitionPlayerGeneration;
+  StreamSubscription<ProcessingState>? _transitionStateSub;
 
   // Playback history for skipToPrevious in shuffle mode.
   final _shuffleHistory = <int>[]; // original-sequence indices (fallback)
@@ -124,7 +170,37 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   Timer? _recalcDebounceTimer;
   int? _shuffleSeed;
-  bool _snapshotRecalculating = false;
+  int _crossfadeGeneration = 0;
+  int _recalcGeneration = 0;
+
+  // Building the fallback BPM/genre cache is linear in queue size. Keep it
+  // across shuffle recalculations so toggling modes or a queue snapshot does
+  // not repeatedly redo the same work on Android's main isolate.
+  BpmCache? _queueBpmCache;
+  int _queueBpmCacheSignature = 0;
+  BpmCache? _queueBpmCacheCompanion;
+
+  /// Supplies the companion client used only to prepare rendered DJ mixes.
+  /// Analysis and ordinary playback remain usable when this is null.
+  void setCompanionAudioApi(CompanionAudioApi? api) {
+    if (identical(_companionAudioApi, api)) return;
+    _companionAudioApi = api;
+    _renderedTransitionGeneration++;
+    _preparedTransitionKey = null;
+    _preparingTransitionKey = null;
+    // If the companion changes while a rendered handoff is in flight, restore
+    // the main deck before allowing any stale operation to continue.
+    unawaited(_cancelCrossfade(resumeRendered: true));
+  }
+
+  Future<void> _queueTransitionDeck(Future<void> Function() operation) {
+    final next = _transitionDeckOperation.then<void>(
+      (_) => operation(),
+      onError: (_, __) => operation(),
+    );
+    _transitionDeckOperation = next;
+    return next;
+  }
 
   void setCompanionAnalysis(BpmCache? cache) {
     // Guard: only recalculate if the analysis data actually changed.
@@ -134,12 +210,22 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       return;
     }
     _companionBpmCache = cache;
+    _queueBpmCache = null;
+    _queueBpmCacheSignature = 0;
+    _queueBpmCacheCompanion = null;
     // Invalidate transition-plan cache so transition pills update.
     _cachedNormalSnapshot = null;
     _cachedShuffleOrder = null;
     _cachedPlannedSongs = null;
     // Re-plan when real data arrives mid-session.
     if (_shuffleMode == ShuffleMode.smartShuffle) {
+      // Fresh analysis can invalidate both the planned pair and a prepared
+      // rendered asset. Cancel it before the new order is exposed.
+      if (_renderedTransitionActive ||
+          _preparedTransitionKey != null ||
+          _preparingTransitionKey != null) {
+        unawaited(_cancelCrossfade(resumeRendered: true));
+      }
       _recalculateShuffleOrder();
     } else {
       _emitQueueSnapshot(immediate: true);
@@ -209,11 +295,49 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     return true;
   }
 
+  BpmCache _cacheForSongs(List<Song> songs) {
+    final signature = Object.hashAll(songs.map((song) => Object.hash(
+          song.id,
+          song.genre,
+          song.bpm,
+          song.albumId,
+          song.track,
+        )));
+    if (_queueBpmCache != null &&
+        _queueBpmCacheSignature == signature &&
+        identical(_queueBpmCacheCompanion, _companionBpmCache)) {
+      return _queueBpmCache!;
+    }
+
+    final companion = _companionBpmCache;
+    final cache = buildBpmCache(
+      songs,
+      knownBpm: companion?.bpm,
+      knownKeys: companion?.key,
+      knownEnergy: companion?.energy,
+      knownSpectralCentroid: companion?.spectralCentroid,
+      knownTailSilence: companion?.tailSilence,
+      knownPhrasePositions: companion?.phrasePositions,
+      knownFirstBeatOffset: companion?.firstBeatOffset,
+      knownVocalSections: companion?.vocalSections,
+    );
+    _queueBpmCache = cache;
+    _queueBpmCacheSignature = signature;
+    _queueBpmCacheCompanion = companion;
+    return cache;
+  }
+
   // Restore persisted shuffle mode on startup.
   void restoreShuffleMode(ShuffleMode mode) {
     _shuffleMode = mode;
     _queue.setMode(_playbackModeFor(mode));
     _shuffleModeCtrl.add(mode);
+    _invalidateSnapshotCaches();
+    if (mode == ShuffleMode.off) {
+      _shuffleOrder = [];
+      _shufflePos = 0;
+      _physicalToVirtual = {};
+    }
 
     _ensureShuffleSeed();
     _recalculateShuffleOrder();
@@ -244,7 +368,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     player.playbackEventStream.listen((event) {
       if (event.processingState == ProcessingState.idle &&
           _isTransitionFading) {
-        _cancelCrossfade();
+        unawaited(_cancelCrossfade(resumeRendered: true));
       }
     });
 
@@ -283,10 +407,10 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       }
 
       _queue.setCurrentIndex(index);
-      _emitQueueSnapshot();
       if (_shuffleMode == ShuffleMode.off) {
         _shuffleHistory.clear();
         _lastHistoryIndex = null;
+        _emitQueueSnapshot();
         return;
       }
       if (_shuffleOrder.isNotEmpty && !_isTransitionFading) {
@@ -305,8 +429,12 @@ class MelodizeAudioHandler extends BaseAudioHandler {
               Future.microtask(() {
                 player
                     .seek(Duration.zero, index: expectedPhysical)
-                    .then((_) => _seekingVirtual = false)
-                    .catchError((_) => _seekingVirtual = false);
+                    .then<void>((_) {
+                      _seekingVirtual = false;
+                    })
+                    .catchError((Object _) {
+                      _seekingVirtual = false;
+                    });
               });
               return;
             }
@@ -314,12 +442,14 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         }
         final vp = _physicalToVirtual[index];
         if (vp != null) _shufflePos = vp;
+        _emitQueueSnapshot();
       } else {
         if (_lastHistoryIndex != null && _lastHistoryIndex != index) {
           _shuffleHistory.add(_lastHistoryIndex!);
           if (_shuffleHistory.length > 100) _shuffleHistory.removeAt(0);
         }
         _lastHistoryIndex = index;
+        _emitQueueSnapshot();
       }
     });
 
@@ -435,10 +565,19 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         analysis: _companionBpmCache,
       );
 
+  void _invalidateSnapshotCaches() {
+    _cachedShuffleOrder = null;
+    _cachedShuffleSource = null;
+    _cachedPlannedSongs = null;
+    _cachedNormalSnapshot = null;
+    _cachedNormalQueueLength = -1;
+    _cachedNormalCurrentIndex = -1;
+  }
+
   // Cached snapshot to avoid repeated List allocations.
   List<Song>? _cachedPlannedSongs;
   List<int>? _cachedShuffleOrder;
-  int _cachedShuffleHash = 0;
+  List<int>? _cachedShuffleSource;
 
   // Normal-mode snapshot cache.
   PlaybackQueueSnapshot? _cachedNormalSnapshot;
@@ -450,25 +589,19 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   PlaybackQueueSnapshot _snapshot() {
     if (_shuffleOrder.isNotEmpty &&
         _shufflePos < _shuffleOrder.length) {
-      // Content-hash check for mutations that keep length but permute.
-      // Mix in _playlistSource.length so replacing the queue with another
-      // queue of the same length still invalidates the cache.
-      var hash = _playlistSource.length;
-      for (int i = 0; i < _shuffleOrder.length; i++) {
-        hash = hash * 31 + _shuffleOrder[i];
-      }
+      // The order is replaced (rather than mutated) whenever its contents
+      // change. Identity is therefore a constant-time cache validity check.
       if (_cachedShuffleOrder == null ||
-          _cachedShuffleHash != hash ||
-          !_listEquals(_cachedShuffleOrder!, _shuffleOrder)) {
+          !identical(_cachedShuffleSource, _shuffleOrder)) {
         _cachedShuffleOrder = List.of(_shuffleOrder);
-        _cachedShuffleHash = hash;
+        _cachedShuffleSource = _shuffleOrder;
+        // [_loadQueueSongs] is the authoritative physical queue order and is
+        // updated before snapshots are emitted. Reading it here avoids a
+        // transient wrong/placeholder queue while just_audio is still
+        // attaching a newly loaded ConcatenatingAudioSource.
         _cachedPlannedSongs = _shuffleOrder.map((i) {
-          if (i >= 0 && i < _playlistSource.length) {
-            final child = _playlistSource[i];
-            if (child is IndexedAudioSource) {
-              final tag = child.tag;
-              if (tag is Song) return tag;
-            }
+          if (i >= 0 && i < _loadQueueSongs.length) {
+            return _loadQueueSongs[i];
           }
           // Safety: index out of bounds — return a placeholder so the UI
           // doesn't crash; the next recalculation will fix the mapping.
@@ -478,29 +611,22 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       final plannedSongs = _cachedPlannedSongs!;
       return PlaybackQueueSnapshot(
         songs: plannedSongs,
-        currentIndex: _shufflePos.clamp(0, plannedSongs.length - 1),
+        currentIndex:
+            _shufflePos.clamp(0, plannedSongs.length - 1).toInt(),
         mode: _queue.mode,
         upcomingTransitions: _queue.mode == PlaybackMode.smartShuffle
             ? _transitionPolicy.planUpcoming(plannedSongs, _shufflePos)
             : const [],
       );
     }
-    // Shuffle is active but the virtual order is empty (e.g. after a rapid
-    // queue mutation or a code path that cleared it). Rebuild immediately
-    // rather than showing the stale fallback.
-    if (_shuffleMode != ShuffleMode.off && _loadQueueSongs.length >= 2 &&
-        !_snapshotRecalculating) {
-      _snapshotRecalculating = true;
-      _recalculateShuffleOrderImpl();
-      _snapshotRecalculating = false;
-      if (_shuffleOrder.isNotEmpty) {
-        return _snapshot();
-      }
-    }
-
+    // Shuffle planning is intentionally deferred. Do not rebuild here: this
+    // method is called from player streams and queue widgets, so doing smart
+    // planning synchronously would put the Android UI/audio isolate back under
+    // load and could recurse through snapshot emission. The scheduled
+    // recalculation will replace this temporary physical-order snapshot.
     _cachedShuffleOrder = null;
+    _cachedShuffleSource = null;
     _cachedPlannedSongs = null;
-    _cachedShuffleHash = 0;
 
     // Cache normal-mode snapshots so the queue screen doesn't rebuild
     // on every position tick when nothing changed.
@@ -520,20 +646,16 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _cachedNormalMode = qMode;
     _cachedNormalCompanionHash = companionHash;
     _cachedNormalSnapshot = _queue.snapshot(
-      upcomingTransitions: _transitionPolicy.planUpcoming(
-        _queue.songs,
-        _queue.currentIndex,
-      ),
+      // Regular playback and regular shuffle are strictly gapless. Only DJ
+      // shuffle exposes transition planning to the queue UI.
+      upcomingTransitions: qMode == PlaybackMode.smartShuffle
+          ? _transitionPolicy.planUpcoming(
+              _queue.songs,
+              _queue.currentIndex,
+            )
+          : const [],
     );
     return _cachedNormalSnapshot!;
-  }
-
-  static bool _listEquals<T>(List<T> a, List<T> b) {
-    if (a.length != b.length) return false;
-    for (int i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
   }
 
   // Emit a queue snapshot. [immediate] skips the 500 ms debounce.
@@ -552,27 +674,17 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   Future<void> loadQueue(List<Song> songs, {int startIndex = 0}) async {
     if (_config == null || songs.isEmpty || _loading) return;
+    _recalcGeneration++;
+    _recalcDebounceTimer?.cancel();
     _loading = true;
-    await _cancelCrossfade();
+    _recalcDebounceTimer = null;
+    await _cancelCrossfade(resumeRendered: true);
     _shuffleHistory.clear();
     _lastHistoryIndex = null;
-    final idx = startIndex.clamp(0, songs.length - 1);
-    final cache = buildBpmCache(songs,
-        knownBpm: _companionBpmCache?.bpm,
-        knownKeys: _companionBpmCache?.key,
-        knownEnergy: _companionBpmCache?.energy,
-        knownSpectralCentroid: _companionBpmCache?.spectralCentroid,
-        knownTailSilence: _companionBpmCache?.tailSilence,
-        knownPhrasePositions: _companionBpmCache?.phrasePositions,
-        knownFirstBeatOffset: _companionBpmCache?.firstBeatOffset,
-        knownVocalSections: _companionBpmCache?.vocalSections);
-    songs = _planner.plan(
-      songs: songs,
-      currentIndex: idx,
-      mode: _playbackModeFor(_shuffleMode),
-      cache: cache,
-      seed: DateTime.now().microsecondsSinceEpoch,
-    );
+    final idx = startIndex.clamp(0, songs.length - 1).toInt();
+    // Keep the physical source in the caller's order. Shuffle and DJ order
+    // are virtual playback orders layered over this stable source, so
+    // switching back to normal playback can show the original queue again.
     _queue.load(
       songs,
       startIndex: idx,
@@ -582,48 +694,23 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _loadQueueSongs = List.from(songs);
     _lastKnownPhysicalIndex = null;
     // Invalidate any stale snapshot cache from a previous queue.
-    _cachedShuffleOrder = null;
-    _cachedPlannedSongs = null;
-    _cachedShuffleHash = 0;
-    _cachedNormalSnapshot = null;
-    _cachedNormalQueueLength = -1;
-    _cachedNormalCurrentIndex = -1;
-    if (_shuffleMode != ShuffleMode.off && songs.length > 1) {
-      _shuffleOrder = List.generate(songs.length, (i) => i);
-      _shufflePos = idx.clamp(0, _shuffleOrder.length - 1);
-      _shuffleSeed = DateTime.now().microsecondsSinceEpoch;
-      _physicalToVirtual = {
-        for (int vp = 0; vp < _shuffleOrder.length; vp++)
-          _shuffleOrder[vp]: vp,
-      };
-    } else {
-      _shuffleOrder = [];
-      _shufflePos = 0;
-      _physicalToVirtual = {};
+    _invalidateSnapshotCaches();
+    // The source is installed below before a virtual order is calculated.
+    // Until then, expose the stable physical queue rather than a guessed
+    // shuffle mapping.
+    _shuffleOrder = [];
+    _shufflePos = 0;
+    _physicalToVirtual = {};
+    if (_shuffleMode != ShuffleMode.off) {
+      _ensureShuffleSeed();
     }
-    _emitQueueSnapshot(immediate: true);
+    // Do not emit while [_playlistSource] still points at the previous queue:
+    // a shuffle snapshot could be built against the wrong physical indices.
 
-    if (Platform.isLinux) {
-      // Load the full queue upfront on Linux to avoid playlist-move bugs
-      // in just_audio_media_kit / libmpv.
-      _playlistSource = ConcatenatingAudioSource(
-        children: songs.map(_songToSource).toList(),
-        useLazyPreparation: true,
-      );
-      try {
-        await player.setAudioSource(_playlistSource,
-            initialIndex: idx, preload: false);
-        await player.play();
-      } catch (e) {
-        debugPrint('loadQueue error: $e');
-        _loading = false;
-        return;
-      }
-      _loading = false;
-      return;
-    }
-
-    // Mobile: build full queue upfront with preload:false for minimal latency.
+    // Build the source upfront on both platforms. Linux needs the full source
+    // because media_kit/libmpv does not reliably support playlist moves;
+    // Android benefits from lazy preparation and preload:false so the first
+    // track can start without preparing the entire queue.
     _playlistSource = ConcatenatingAudioSource(
       children: songs.map(_songToSource).toList(),
       useLazyPreparation: true,
@@ -631,38 +718,75 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     try {
       await player.setAudioSource(_playlistSource,
           initialIndex: idx, preload: false);
+      // Start playback before smart-shuffle planning. Planning can be
+      // relatively expensive for large queues and must not delay Android's
+      // first audio frame. The debounced recalculation runs on a later event
+      // turn after the player has been handed back to the platform.
       player.play().catchError((e) => debugPrint('loadQueue play: $e'));
+      _loading = false;
+      _recalculateShuffleOrder();
     } catch (e) {
       debugPrint('loadQueue error: $e');
-    } finally {
       _loading = false;
     }
   }
 
   Future<void> playNext(Song song) async {
-    await _cancelCrossfade();
+    await _cancelCrossfade(resumeRendered: true);
     if (_config == null) return;
+    _recalcGeneration++;
     final idx =
-        ((player.currentIndex ?? 0) + 1).clamp(0, _playlistSource.length);
+        ((player.currentIndex ?? 0) + 1).clamp(0, _playlistSource.length).toInt();
+    final hadVirtualOrder = _shuffleOrder.isNotEmpty;
     _queue.playNext(song);
     _loadQueueSongs = List.from(_queue.songs);
-    _cachedNormalSnapshot = null;
+    _invalidateSnapshotCaches();
     await _playlistSource.insert(idx, _songToSource(song));
-    _recalculateShuffleOrder();
+    if (hadVirtualOrder) {
+      _insertIntoVirtualOrder(idx, _shufflePos + 1);
+      _emitQueueSnapshot(immediate: true);
+    } else {
+      _emitQueueSnapshot(immediate: true);
+    }
   }
 
   Future<void> addToQueue(Song song) async {
-    await _cancelCrossfade();
+    await _cancelCrossfade(resumeRendered: true);
     if (_config == null) return;
+    _recalcGeneration++;
+    final hadVirtualOrder = _shuffleOrder.isNotEmpty;
+    final physicalIndex = _playlistSource.length;
     _queue.add(song);
     _loadQueueSongs = List.from(_queue.songs);
-    _cachedNormalSnapshot = null;
+    _invalidateSnapshotCaches();
     await _playlistSource.add(_songToSource(song));
-    _recalculateShuffleOrder();
+    if (hadVirtualOrder) {
+      _insertIntoVirtualOrder(physicalIndex, _shuffleOrder.length);
+      _emitQueueSnapshot(immediate: true);
+    } else {
+      _emitQueueSnapshot(immediate: true);
+    }
+  }
+
+  void _insertIntoVirtualOrder(int physicalIndex, int virtualIndex) {
+    final shifted = _shuffleOrder
+        .map((index) => index >= physicalIndex ? index + 1 : index)
+        .toList();
+    final insertAt = virtualIndex.clamp(0, shifted.length).toInt();
+    shifted.insert(insertAt, physicalIndex);
+    _shuffleOrder = shifted;
+    _physicalToVirtual = {
+      for (int vp = 0; vp < _shuffleOrder.length; vp++)
+        _shuffleOrder[vp]: vp,
+    };
+    _shufflePos =
+        _shufflePos.clamp(0, _shuffleOrder.length - 1).toInt();
+    _invalidateSnapshotCaches();
   }
 
   Future<void> removeFromQueue(int index) async {
-    await _cancelCrossfade();
+    await _cancelCrossfade(resumeRendered: true);
+    _recalcGeneration++;
     final physicalIndex = (_shuffleOrder.isNotEmpty &&
             index >= 0 &&
             index < _shuffleOrder.length)
@@ -675,7 +799,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     }
     _queue.removeAt(physicalIndex);
     _loadQueueSongs = List.from(_queue.songs);
-    _cachedNormalSnapshot = null;
+    _invalidateSnapshotCaches();
     await _playlistSource.removeAt(physicalIndex);
     // Adjust virtual order in place so skip/next stay valid immediately.
     if (_shuffleOrder.isNotEmpty) {
@@ -687,39 +811,78 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       if (removedVp != null && removedVp < _shufflePos) {
         _shufflePos--;
       }
-      _shufflePos = _shufflePos.clamp(0, max(0, _shuffleOrder.length - 1));
+      _shufflePos = _shufflePos
+          .clamp(0, max(0, _shuffleOrder.length - 1))
+          .toInt();
       _physicalToVirtual = {
         for (int vp = 0; vp < _shuffleOrder.length; vp++)
           _shuffleOrder[vp]: vp,
       };
       _emitQueueSnapshot(immediate: true);
     }
-    _recalculateShuffleOrder();
+    // The virtual order was patched in place above. Replanning here would
+    // unexpectedly reshuffle every remaining song after a single removal.
+    if (_shuffleOrder.isEmpty && _shuffleMode == ShuffleMode.off) {
+      _emitQueueSnapshot(immediate: true);
+    }
   }
 
   Future<void> removeSongById(String songId) async {
-    await _cancelCrossfade();
-    _queue.removeById(songId);
-    _loadQueueSongs = List.from(_queue.songs);
-    _cachedNormalSnapshot = null;
-    for (int i = _playlistSource.length - 1; i >= 0; i--) {
+    await _cancelCrossfade(resumeRendered: true);
+    _recalcGeneration++;
+    final removedPhysical = <int>{};
+    for (int i = 0; i < _playlistSource.length; i++) {
       final child = _playlistSource[i];
       final tag = child is IndexedAudioSource ? child.tag : null;
-      if (tag is Song && tag.id == songId) {
-        await _playlistSource.removeAt(i);
-      }
+      if (tag is Song && tag.id == songId) removedPhysical.add(i);
     }
-    // Rebuild immediately so the virtual order is never stale.
-    _recalculateShuffleOrderImpl();
+    final hadVirtualOrder = _shuffleOrder.isNotEmpty;
+    _queue.removeById(songId);
+    _loadQueueSongs = List.from(_queue.songs);
+    _invalidateSnapshotCaches();
+    for (final i in removedPhysical.toList()..sort((a, b) => b.compareTo(a))) {
+      await _playlistSource.removeAt(i);
+    }
+    if (hadVirtualOrder) {
+      _removePhysicalIndicesFromVirtualOrder(removedPhysical);
+      _emitQueueSnapshot(immediate: true);
+    } else {
+      _emitQueueSnapshot(immediate: true);
+    }
+  }
+
+  void _removePhysicalIndicesFromVirtualOrder(Set<int> removed) {
+    if (removed.isEmpty) return;
+    final oldPos = _shufflePos;
+    final nextOrder = <int>[];
+    for (final oldIndex in _shuffleOrder) {
+      if (removed.contains(oldIndex)) continue;
+      final shift = removed.where((index) => index < oldIndex).length;
+      nextOrder.add(oldIndex - shift);
+    }
+    final removedBefore = removed.where((index) {
+      final vp = _physicalToVirtual[index];
+      return vp != null && vp < oldPos;
+    }).length;
+    _shuffleOrder = nextOrder;
+    _shufflePos = (oldPos - removedBefore)
+        .clamp(0, max(0, _shuffleOrder.length - 1))
+        .toInt();
+    _physicalToVirtual = {
+      for (int vp = 0; vp < _shuffleOrder.length; vp++)
+        _shuffleOrder[vp]: vp,
+    };
+    _invalidateSnapshotCaches();
   }
 
   Future<void> reorderQueue(int oldIndex, int newIndex) async {
-    await _cancelCrossfade();
+    await _cancelCrossfade(resumeRendered: true);
+    _recalcGeneration++;
     // When shuffle is active, reorder the virtual playback order
     // instead of the physical source (which never changes mid-shuffle).
     if (_shuffleOrder.isNotEmpty) {
-      final oldVp = oldIndex.clamp(0, _shuffleOrder.length - 1);
-      final newVp = newIndex.clamp(0, _shuffleOrder.length - 1);
+      final oldVp = oldIndex.clamp(0, _shuffleOrder.length - 1).toInt();
+      final newVp = newIndex.clamp(0, _shuffleOrder.length - 1).toInt();
       if (oldVp == newVp) return;
       final moved = _shuffleOrder.removeAt(oldVp);
       _shuffleOrder.insert(newVp, moved);
@@ -736,12 +899,15 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         for (int vp = 0; vp < _shuffleOrder.length; vp++)
           _shuffleOrder[vp]: vp,
       };
+      _cachedShuffleOrder = null;
+      _cachedShuffleSource = null;
+      _cachedPlannedSongs = null;
       _emitQueueSnapshot(immediate: true);
       return;
     }
     _queue.reorder(oldIndex, newIndex);
     _loadQueueSongs = List.from(_queue.songs);
-    _cachedNormalSnapshot = null;
+    _invalidateSnapshotCaches();
     if (oldIndex >= 0 &&
         oldIndex < _playlistSource.length &&
         newIndex >= 0 &&
@@ -872,14 +1038,21 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         _shufflePos = index;
         physicalIndex = _shuffleOrder[_shufflePos];
       } else {
-        // Target is outside the virtual order — user broke out, clear it.
+        // Target is outside the virtual order — fall back to normal physical
+        // indexing and clear every virtual mapping so the queue display and
+        // media-session index cannot retain stale shuffle state.
+        _recalcGeneration++;
         _shuffleOrder = [];
         _shufflePos = 0;
+        _physicalToVirtual = {};
+        _shuffleMode = ShuffleMode.off;
+        _queue.setMode(PlaybackMode.normal);
+        _invalidateSnapshotCaches();
       }
     }
     // Clamp to valid player bounds so seek doesn't throw on a stale index.
     final maxIndex = _playlistSource.length > 0 ? _playlistSource.length - 1 : 0;
-    physicalIndex = physicalIndex.clamp(0, maxIndex);
+    physicalIndex = physicalIndex.clamp(0, maxIndex).toInt();
     await player.seek(Duration.zero, index: physicalIndex);
     _queue.setCurrentIndex(physicalIndex);
     _emitQueueSnapshot(immediate: true);
@@ -891,8 +1064,9 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   /// recalculation instead of blocking the UI thread 5 times with O(N²) work.
   void _recalculateShuffleOrder() {
     _recalcDebounceTimer?.cancel();
+    final generation = ++_recalcGeneration;
     _recalcDebounceTimer = Timer(const Duration(milliseconds: 150), () {
-      _recalculateShuffleOrderImpl();
+      unawaited(_recalculateShuffleOrderImpl(generation));
     });
   }
 
@@ -903,7 +1077,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   /// the list is non-empty [skipToNext] and [skipToPrevious] follow it.
   ///
   /// Called on mid-playback toggle — no source rebuild, instant (~O(n)).
-  void _recalculateShuffleOrderImpl() {
+  Future<void> _recalculateShuffleOrderImpl(int generation) async {
+    if (generation != _recalcGeneration || _queueSnapshotCtrl.isClosed) return;
     final loaded = _playlistSource.length;
     if (loaded < 2 || _loadQueueSongs.length < 2) {
       _shuffleOrder = [];
@@ -920,6 +1095,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       case ShuffleMode.off:
         _shuffleOrder = [];
         _shufflePos = 0;
+        _physicalToVirtual = {};
+        _invalidateSnapshotCaches();
         break;
 
       case ShuffleMode.shuffle:
@@ -989,23 +1166,29 @@ class MelodizeAudioHandler extends BaseAudioHandler {
             break;
           }
           final currentIdx = (player.currentIndex ?? _queue.currentIndex)
-              .clamp(0, _loadQueueSongs.length - 1);
-          final cache = buildBpmCache(_loadQueueSongs,
-              knownBpm: _companionBpmCache?.bpm,
-              knownKeys: _companionBpmCache?.key,
-              knownEnergy: _companionBpmCache?.energy,
-              knownSpectralCentroid: _companionBpmCache?.spectralCentroid,
-              knownTailSilence: _companionBpmCache?.tailSilence,
-              knownPhrasePositions: _companionBpmCache?.phrasePositions,
-              knownFirstBeatOffset: _companionBpmCache?.firstBeatOffset,
-              knownVocalSections: _companionBpmCache?.vocalSections);
-          final ordered = _planner.plan(
-            songs: _loadQueueSongs,
-            currentIndex: currentIdx.clamp(0, _loadQueueSongs.length - 1),
-            mode: PlaybackMode.smartShuffle,
-            cache: cache,
-            seed: _shuffleSeed ?? DateTime.now().microsecondsSinceEpoch,
-          );
+              .clamp(0, _loadQueueSongs.length - 1)
+              .toInt();
+          // Run cache construction and the expensive DJ planner away from
+          // Flutter's UI/audio isolate. Copy the inputs first because queue
+          // mutations may replace the authoritative list while the worker is
+          // running.
+          final songsForPlanning = List<Song>.of(_loadQueueSongs);
+          final planningSeed =
+              _shuffleSeed ?? DateTime.now().microsecondsSinceEpoch;
+          final orderedIds = await Isolate.run(() => _planSongsInIsolate(
+                songData: songsForPlanning.map(_songToIsolateData).toList(
+                  growable: false,
+                ),
+                currentIndex: currentIdx
+                    .clamp(0, songsForPlanning.length - 1)
+                    .toInt(),
+                cacheData: _cacheToIsolateData(_companionBpmCache),
+                seed: planningSeed,
+              ));
+          if (generation != _recalcGeneration ||
+              _queueSnapshotCtrl.isClosed) {
+            return;
+          }
 
           // Build virtual order: map each ordered song to its physical index
           // in the actual player source so navigation always targets the
@@ -1022,12 +1205,12 @@ class MelodizeAudioHandler extends BaseAudioHandler {
             }
           }
           final nextIndex = <String, int>{};
-          _shuffleOrder = ordered.map((s) {
-            final indices = physIndicesById[s.id];
+          _shuffleOrder = orderedIds.map((id) {
+            final indices = physIndicesById[id];
             if (indices == null) return -1;
-            final i = nextIndex.putIfAbsent(s.id, () => 0);
+            final i = nextIndex.putIfAbsent(id, () => 0);
             if (i >= indices.length) return -1;
-            nextIndex[s.id] = i + 1;
+            nextIndex[id] = i + 1;
             return indices[i];
           }).where((i) => i >= 0).toList();
           _shufflePos = _shuffleOrder.indexOf(currentIdx);
@@ -1059,6 +1242,118 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _emitQueueSnapshot(immediate: true);
   }
 
+  static List<String> _planSongsInIsolate({
+    required List<Map<String, Object?>> songData,
+    required int currentIndex,
+    required Map<String, Object?> cacheData,
+    required int seed,
+  }) {
+    final songs = songData.map(_songFromIsolateData).toList(growable: false);
+    final companion = _cacheFromIsolateData(cacheData);
+    // Rebuild the complete cache in the worker so song-owned BPM values and
+    // genre estimates are retained alongside companion analysis. Passing only
+    // the companion cache would silently drop those fallbacks.
+    final cache = buildBpmCache(
+      songs,
+      knownBpm: companion.bpm,
+      knownKeys: companion.key,
+      knownEnergy: companion.energy,
+      knownSpectralCentroid: companion.spectralCentroid,
+      knownTailSilence: companion.tailSilence,
+      knownPhrasePositions: companion.phrasePositions,
+      knownFirstBeatOffset: companion.firstBeatOffset,
+      knownVocalSections: companion.vocalSections,
+    );
+    final ordered = PlaybackPlanner().plan(
+      songs: songs,
+      currentIndex: currentIndex,
+      mode: PlaybackMode.smartShuffle,
+      cache: cache,
+      seed: seed,
+    );
+    return ordered.map((song) => song.id).toList(growable: false);
+  }
+
+  static Map<String, Object?> _songToIsolateData(Song song) => {
+        'id': song.id,
+        'title': song.title,
+        'artist': song.artist,
+        'album': song.album,
+        'albumId': song.albumId,
+        'duration': song.duration,
+        'genre': song.genre,
+        'track': song.track,
+        'bpm': song.bpm,
+      };
+
+  static Song _songFromIsolateData(Map<String, Object?> data) => Song(
+        id: data['id']! as String,
+        title: data['title']! as String,
+        artist: data['artist']! as String,
+        album: data['album']! as String,
+        albumId: data['albumId'] as String?,
+        duration: data['duration'] as int?,
+        genre: data['genre'] as String?,
+        track: data['track'] as int?,
+        bpm: data['bpm'] as int?,
+      );
+
+  static Map<String, Object?> _cacheToIsolateData(BpmCache? cache) => {
+        'bpm': cache?.bpm ?? const <String, int>{},
+        'key': cache?.key ?? const <String, String>{},
+        'isEstimated': cache?.isEstimated ?? const <String, bool>{},
+        'tailSilence': cache?.tailSilence ?? const <String, double>{},
+        'energy': cache?.energy ?? const <String, double>{},
+        'spectralCentroid':
+            cache?.spectralCentroid ?? const <String, double>{},
+        'phrasePositions':
+            cache?.phrasePositions ?? const <String, List<double>>{},
+        'firstBeatOffset':
+            cache?.firstBeatOffset ?? const <String, double>{},
+        'vocalSections': (cache?.vocalSections ??
+                const <String, List<VocalSection>>{})
+            .map(
+          (id, sections) => MapEntry(
+            id,
+            sections
+                .map((section) => {
+                      'start': section.start,
+                      'end': section.end,
+                    })
+                .toList(growable: false),
+          ),
+        ),
+      };
+
+  static BpmCache _cacheFromIsolateData(Map<String, Object?> data) {
+    final rawSections = data['vocalSections'] as Map;
+    return BpmCache(
+      bpm: Map<String, int>.from(data['bpm'] as Map),
+      key: Map<String, String>.from(data['key'] as Map),
+      isEstimated: Map<String, bool>.from(data['isEstimated'] as Map),
+      tailSilence: Map<String, double>.from(data['tailSilence'] as Map),
+      energy: Map<String, double>.from(data['energy'] as Map),
+      spectralCentroid:
+          Map<String, double>.from(data['spectralCentroid'] as Map),
+      phrasePositions: (data['phrasePositions'] as Map).map(
+        (key, value) => MapEntry(key as String, List<double>.from(value as List)),
+      ),
+      firstBeatOffset:
+          Map<String, double>.from(data['firstBeatOffset'] as Map),
+      vocalSections: rawSections.map(
+        (key, value) => MapEntry(
+          key as String,
+          (value as List)
+              .map((section) => VocalSection(
+                    start: (section as Map)['start'] as double,
+                    end: section['end'] as double,
+                  ))
+              .toList(growable: false),
+        ),
+      ),
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // 3-state shuffle: Off → Shuffle → Smart Shuffle → Off
 
@@ -1066,7 +1361,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   /// Recalculates the virtual order — the current song keeps playing;
   /// skipToNext will navigate to the first song in the new order.
   Future<void> toggleShuffle() async {
-    await _cancelCrossfade();
+    await _cancelCrossfade(resumeRendered: true);
     switch (_shuffleMode) {
       case ShuffleMode.off:
         _shuffleMode = ShuffleMode.shuffle;
@@ -1078,6 +1373,17 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _shuffleModeCtrl.add(_shuffleMode);
     _shuffleHistory.clear();
     _lastHistoryIndex = null;
+    _invalidateSnapshotCaches();
+    if (_shuffleMode == ShuffleMode.off) {
+      _shuffleOrder = [];
+      _shufflePos = 0;
+      _physicalToVirtual = {};
+      _queue.setMode(PlaybackMode.normal);
+      _queue.setCurrentIndex(player.currentIndex ?? _queue.currentIndex);
+      _emitQueueSnapshot(immediate: true);
+    } else {
+      _queue.setMode(_playbackModeFor(_shuffleMode));
+    }
 
     _ensureShuffleSeed();
     _recalculateShuffleOrder();
@@ -1085,23 +1391,40 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   /// Directly set the shuffle mode (used by playlist "Shuffle" button, etc.).
   /// Also recalculates the virtual order.
-  void applyShuffleMode(ShuffleMode mode) {
-    _cancelCrossfade();
+  Future<void> applyShuffleMode(ShuffleMode mode) async {
+    // Mode changes must wait for volume restoration before recalculating the
+    // virtual order; otherwise an in-flight fade can mute the new track.
+    await _cancelCrossfade(resumeRendered: true);
     _shuffleMode = mode;
     _shuffleModeCtrl.add(mode);
     _shuffleHistory.clear();
     _lastHistoryIndex = null;
+    _invalidateSnapshotCaches();
+    if (mode == ShuffleMode.off) {
+      _shuffleOrder = [];
+      _shufflePos = 0;
+      _physicalToVirtual = {};
+      _queue.setMode(PlaybackMode.normal);
+      _queue.setCurrentIndex(player.currentIndex ?? _queue.currentIndex);
+      _emitQueueSnapshot(immediate: true);
+    } else {
+      _queue.setMode(_playbackModeFor(mode));
+    }
 
     _ensureShuffleSeed();
     _recalculateShuffleOrder();
   }
 
   Future<void> resetPlaybackModes() async {
+    _recalcGeneration++;
+    await _cancelCrossfade(resumeRendered: true);
     _shuffleMode = ShuffleMode.off;
     _queue.setMode(PlaybackMode.normal);
     _shuffleModeCtrl.add(ShuffleMode.off);
     _shuffleOrder = [];
     _shufflePos = 0;
+    _physicalToVirtual = {};
+    _invalidateSnapshotCaches();
     _shuffleHistory.clear();
     _lastHistoryIndex = null;
     await player.setLoopMode(LoopMode.off);
@@ -1197,14 +1520,410 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     return false;
   }
 
-  // Single-player crossfade: volume ramp on the main player only.
-  // No second deck, no handoff races, no double playback.
+  /// Prepare a rendered companion mix for the exact upcoming pair. Preparation
+  /// is intentionally best-effort and never blocks the position stream.
+  Future<void> _abortRenderedTransition({bool resume = false}) async {
+    final shouldResume = resume && _renderedPausedMainPlayer;
+    _renderedTransitionGeneration++;
+    _activeTransitionPlayerGeneration = null;
+    _renderedTransitionTimeout?.cancel();
+    _renderedTransitionTimeout = null;
+    _renderedTransitionActive = false;
+    _renderedTransitionNextIndex = null;
+    _renderedTransitionFromId = null;
+    _renderedTransitionToId = null;
+    _renderedTransitionDuration = null;
+    _renderedMixDuration = null;
+    _preparedTransitionDuration = null;
+    _renderedPausedMainPlayer = false;
+    _renderedQueueGeneration = -1;
+    _isTransitionFading = false;
+    _preparedTransitionKey = null;
+    _preparingTransitionKey = null;
+    final path = _preparedTransitionPath;
+    _preparedTransitionPath = null;
+    await _queueTransitionDeck(() => _transitionPlayer.stop());
+    if (path != null) {
+      try {
+        await File(path).delete();
+      } catch (_) {}
+    }
+    await _writeCrossfadeVolume(_userVolume);
+    if (shouldResume && !_disposed) {
+      try {
+        await player.play();
+      } catch (e) {
+        debugPrint('Rendered transition recovery play failed: $e');
+      }
+    }
+  }
+
+  Future<void> _prepareRenderedTransition(
+    PlannedTransition transition,
+  ) async {
+    final api = _companionAudioApi;
+    String? installedPath;
+    if (api == null || transition.kind != TransitionKind.djBlend) return;
+    final duration = transition.duration.inMilliseconds / 1000.0;
+    final key = '${transition.from.id}|${transition.to.id}|${transition.duration.inMilliseconds}';
+    if (_preparedTransitionKey == key || _preparingTransitionKey == key) return;
+
+    _preparingTransitionKey = key;
+    final generation = _renderedTransitionGeneration;
+    () async {
+      try {
+        final response = await api.requestTransition(
+          songAId: transition.from.id,
+          songBId: transition.to.id,
+          mixDuration: duration,
+        );
+        if (generation != _renderedTransitionGeneration ||
+            _companionAudioApi != api) return;
+
+        Map<String, dynamic>? result = response;
+        final initialStatus = result?['status']?.toString().toLowerCase();
+        final jobId = result?['job_id']?.toString() ??
+            result?['jobId']?.toString();
+        if (jobId != null &&
+            jobId.isNotEmpty &&
+            initialStatus != 'done' &&
+            initialStatus != 'ok') {
+          // A mix is normally ready well before the next track. Bound polling
+          // so a dead companion can never hold playback or a Dart timer open.
+          for (var attempt = 0; attempt < 20; attempt++) {
+            await Future<void>.delayed(const Duration(seconds: 1));
+            result = await api.pollTransition(jobId);
+            final status = result?['status']?.toString().toLowerCase();
+            if (status == 'done' ||
+                status == 'ok' ||
+                status == 'fallback' ||
+                status == 'error') {
+              break;
+            }
+          }
+        }
+
+        final status = result?['status']?.toString().toLowerCase();
+        final rawUrl = result?['url']?.toString();
+        if (generation != _renderedTransitionGeneration ||
+            status == 'fallback' ||
+            status == 'error' ||
+            rawUrl == null ||
+            rawUrl.isEmpty) {
+          return;
+        }
+
+        // Fetch through Dio rather than the native player. This preserves the
+        // companion API key and self-signed-certificate behavior on both
+        // Android and Linux, then lets just_audio play a local WAV file.
+        final bytes = await api.downloadTransition(rawUrl);
+        if (bytes == null || bytes.length < 12 ||
+            String.fromCharCodes(bytes.take(4)) != 'RIFF' ||
+            String.fromCharCodes(bytes.skip(8).take(4)) != 'WAVE' ||
+            bytes.length > 25 * 1024 * 1024) {
+          return;
+        }
+        if (generation != _renderedTransitionGeneration ||
+            _companionAudioApi != api) return;
+        final tempDir = await getTemporaryDirectory();
+        final safeName = 'melodize_transition_${key.hashCode.abs()}.wav';
+        final path = '${tempDir.path}/$safeName';
+        installedPath = path;
+        await File(path).writeAsBytes(bytes, flush: true);
+        if (generation != _renderedTransitionGeneration ||
+            _companionAudioApi != api) {
+          try { await File(path).delete(); } catch (_) {}
+          return;
+        }
+        final oldPath = _preparedTransitionPath;
+        _preparedTransitionPath = path;
+        if (oldPath != null && oldPath != path) {
+          try { await File(oldPath).delete(); } catch (_) {}
+        }
+        var sourceLoaded = false;
+        await _queueTransitionDeck(() async {
+          // Cancellation may have queued a stop while the download was in
+          // flight. Do not install an asset that belongs to an old pair.
+          if (generation != _renderedTransitionGeneration ||
+              _companionAudioApi != api) {
+            return;
+          }
+          await _transitionPlayer.setAudioSource(
+            AudioSource.file(path),
+            preload: true,
+          );
+          sourceLoaded = true;
+        });
+        if (!sourceLoaded ||
+            generation != _renderedTransitionGeneration ||
+            _companionAudioApi != api) {
+          try { await File(path).delete(); } catch (_) {}
+          if (_preparedTransitionPath == path) _preparedTransitionPath = null;
+          return;
+        }
+        final renderedDuration = _transitionPlayer.duration;
+        if (renderedDuration == null ||
+            renderedDuration < const Duration(seconds: 1) ||
+            renderedDuration.inMilliseconds >
+                transition.duration.inMilliseconds + 500) {
+          try { await File(path).delete(); } catch (_) {}
+          if (_preparedTransitionPath == path) _preparedTransitionPath = null;
+          return;
+        }
+        _preparedTransitionDuration = renderedDuration;
+        if (generation == _renderedTransitionGeneration &&
+            _companionAudioApi == api) {
+          _preparedTransitionKey = key;
+        } else {
+          try { await File(path).delete(); } catch (_) {}
+          if (_preparedTransitionPath == path) _preparedTransitionPath = null;
+        }
+      } catch (e) {
+        // The live volume crossfade is the deliberate, safe fallback. Remove
+        // an asset that was installed before native source loading failed.
+        if (installedPath != null) {
+          try {
+            await File(installedPath!).delete();
+          } catch (_) {}
+          if (_preparedTransitionPath == installedPath) {
+            _preparedTransitionPath = null;
+          }
+        }
+        debugPrint('Rendered transition preparation failed: $e');
+      } finally {
+        if (_preparingTransitionKey == key) {
+          _preparingTransitionKey = null;
+        }
+      }
+    }();
+  }
+
+  Future<void> _startRenderedTransition(
+    PlannedTransition transition,
+    int nextPhysical,
+  ) async {
+    if (_shuffleMode != ShuffleMode.smartShuffle ||
+        _preparedTransitionKey == null ||
+        _companionAudioApi == null) {
+      _startCrossfadeFadeOut(transition, nextPhysical);
+      return;
+    }
+
+    final key = '${transition.from.id}|${transition.to.id}|${transition.duration.inMilliseconds}';
+    if (_preparedTransitionKey != key) {
+      _startCrossfadeFadeOut(transition, nextPhysical);
+      return;
+    }
+
+    // The companion renderer currently creates the bridge from the final
+    // [duration] seconds of A (after known tail silence). Only use it when the
+    // live player is at that exact boundary; otherwise its first samples would
+    // duplicate or skip audio and the safe volume ramp is preferable.
+    final actualMs = player.duration?.inMilliseconds;
+    final renderedMs = _preparedTransitionDuration?.inMilliseconds;
+    final tailMs = ((_companionBpmCache?.tailSilenceFor(transition.from) ?? 0)
+            .clamp(0.0, (actualMs ?? 0) / 2) * 1000)
+        .round();
+    final expectedStartMs = (actualMs ?? 0) -
+        tailMs -
+        (renderedMs ?? transition.duration.inMilliseconds);
+    if (actualMs == null ||
+        expectedStartMs < 0 ||
+        renderedMs == null ||
+        (player.position.inMilliseconds - expectedStartMs).abs() > 500) {
+      _startCrossfadeFadeOut(transition, nextPhysical);
+      return;
+    }
+
+    final generation = ++_renderedTransitionGeneration;
+    _renderedTransitionActive = true;
+    _renderedTransitionNextIndex = nextPhysical;
+    _renderedTransitionFromId = transition.from.id;
+    _renderedTransitionToId = transition.to.id;
+    _renderedTransitionDuration = transition.duration;
+    _renderedMixDuration = null;
+    _renderedPausedMainPlayer = player.playing;
+    _renderedQueueGeneration = _recalcGeneration;
+    _isTransitionFading = true;
+
+    try {
+      // Pause the main deck before the current song can naturally advance.
+      // The rendered WAV contains the outgoing tail and incoming head.
+      await _writeCrossfadeVolume(
+        0,
+        generation: _crossfadeGeneration,
+      );
+      if (generation != _renderedTransitionGeneration ||
+          _shuffleMode != ShuffleMode.smartShuffle) {
+        await _abortRenderedTransition(resume: true);
+        return;
+      }
+      await player.pause();
+      if (generation != _renderedTransitionGeneration ||
+          _shuffleMode != ShuffleMode.smartShuffle) {
+        await _abortRenderedTransition(resume: true);
+        return;
+      }
+      await _queueTransitionDeck(() async {
+        _transitionPlayerGeneration++;
+        _activeTransitionPlayerGeneration = _transitionPlayerGeneration;
+        await _transitionPlayer.setVolume(_userVolume);
+        await _transitionPlayer.seek(Duration.zero);
+        await _transitionPlayer.play();
+      });
+      if (generation != _renderedTransitionGeneration ||
+          _shuffleMode != ShuffleMode.smartShuffle) {
+        await _abortRenderedTransition(resume: true);
+        return;
+      }
+      _renderedMixDuration = _transitionPlayer.duration;
+      _preparedTransitionKey = null;
+      _renderedTransitionTimeout?.cancel();
+      _renderedTransitionTimeout = Timer(
+        transition.duration + const Duration(seconds: 8),
+        () => unawaited(_finishRenderedTransition(generation)),
+      );
+    } catch (e) {
+      debugPrint('Rendered transition start failed: $e');
+      await _abortRenderedTransition(resume: true);
+      // Do not fail playback because the companion deck could not start.
+    }
+  }
+
+  Future<void> _finishRenderedTransition(int generation) async {
+    if (!_renderedTransitionActive ||
+        generation != _renderedTransitionGeneration ||
+        _queueSnapshotCtrl.isClosed) {
+      return;
+    }
+    final nextIndex = _renderedTransitionNextIndex;
+    final duration = _renderedTransitionDuration;
+    final mixDuration = _renderedMixDuration ?? duration;
+    final fromId = _renderedTransitionFromId;
+    final toId = _renderedTransitionToId;
+    final preparedPath = _preparedTransitionPath;
+    final pausedMainPlayer = _renderedPausedMainPlayer;
+    final queueGeneration = _renderedQueueGeneration;
+    final currentPhysical = player.currentIndex;
+    _renderedTransitionTimeout?.cancel();
+    _renderedTransitionTimeout = null;
+    _renderedTransitionActive = false;
+    _renderedTransitionNextIndex = null;
+    _renderedTransitionFromId = null;
+    _renderedTransitionToId = null;
+    _renderedTransitionDuration = null;
+    _renderedMixDuration = null;
+    _renderedPausedMainPlayer = false;
+    _renderedQueueGeneration = -1;
+    _preparedTransitionKey = null;
+    _preparedTransitionPath = null;
+    _isTransitionFading = false;
+    if (nextIndex == null || duration == null ||
+        nextIndex < 0 || nextIndex >= _playlistSource.length ||
+        nextIndex >= _loadQueueSongs.length) {
+      await _queueTransitionDeck(() => _transitionPlayer.stop());
+      if (preparedPath != null) {
+        try { await File(preparedPath).delete(); } catch (_) {}
+      }
+      await _writeCrossfadeVolume(_userVolume);
+      if (pausedMainPlayer && !_disposed) await player.play();
+      return;
+    }
+
+    final from = currentSong;
+    final to = _loadQueueSongs[nextIndex];
+    final currentVirtual = currentPhysical == null
+        ? null
+        : _physicalToVirtual[currentPhysical];
+    final targetVirtual = _physicalToVirtual[nextIndex];
+    final mappingStillMatches = currentVirtual != null &&
+        queueGeneration == _recalcGeneration &&
+        currentVirtual == _shufflePos &&
+        targetVirtual != null &&
+        currentVirtual + 1 == targetVirtual &&
+        targetVirtual >= 0 &&
+        targetVirtual < _shuffleOrder.length &&
+        _shuffleOrder[targetVirtual] == nextIndex;
+    if (from == null ||
+        from.id != fromId ||
+        to.id != toId ||
+        !mappingStillMatches ||
+        _shuffleMode != ShuffleMode.smartShuffle) {
+      await _queueTransitionDeck(() => _transitionPlayer.stop());
+      if (preparedPath != null) {
+        try { await File(preparedPath).delete(); } catch (_) {}
+      }
+      await _writeCrossfadeVolume(_userVolume);
+      if (pausedMainPlayer && !_disposed) await player.play();
+      return;
+    }
+    final bpmA = _companionBpmCache?.bpmFor(from);
+    final bpmB = _companionBpmCache?.bpmFor(to);
+    final rate = bpmA != null && bpmB != null && bpmA > 0 && bpmB > 0
+        ? bpmA / bpmB
+        : 1.0;
+    final sourceOffset = Duration(
+      microseconds: (mixDuration!.inMicroseconds * rate).round(),
+    );
+    final destinationDuration = to.duration == null
+        ? null
+        : Duration(seconds: to.duration!);
+    if (destinationDuration != null &&
+        sourceOffset >= destinationDuration - const Duration(milliseconds: 250)) {
+      await _queueTransitionDeck(() => _transitionPlayer.stop());
+      if (preparedPath != null) {
+        try { await File(preparedPath).delete(); } catch (_) {}
+      }
+      await _writeCrossfadeVolume(_userVolume);
+      if (pausedMainPlayer && !_disposed) await player.play();
+      return;
+    }
+
+    try {
+      _seekingVirtual = true;
+      await player.seek(sourceOffset, index: nextIndex);
+      _queue.setCurrentIndex(nextIndex);
+      final vp = _physicalToVirtual[nextIndex];
+      if (vp != null) _shufflePos = vp;
+      await _queueTransitionDeck(() => _transitionPlayer.stop());
+      if (preparedPath != null) {
+        try { await File(preparedPath).delete(); } catch (_) {}
+      }
+      await _writeCrossfadeVolume(_userVolume);
+      await player.play();
+      _seekingVirtual = false;
+      _emitQueueSnapshot(immediate: true);
+    } catch (e) {
+      _seekingVirtual = false;
+      debugPrint('Rendered transition handoff failed: $e');
+      await _queueTransitionDeck(() => _transitionPlayer.stop());
+      if (preparedPath != null) {
+        try { await File(preparedPath).delete(); } catch (_) {}
+      }
+      await _writeCrossfadeVolume(_userVolume);
+      if (pausedMainPlayer && !_disposed) await player.play();
+      // A failed handoff leaves the player in a known audible state. The
+      // normal skip path remains available to the user.
+    }
+  }
 
   void _initCrossfade() {
+    _transitionStateSub = _transitionPlayer.processingStateStream.listen((state) {
+      final playerGeneration = _activeTransitionPlayerGeneration;
+      if (state == ProcessingState.completed &&
+          _renderedTransitionActive &&
+          playerGeneration != null &&
+          playerGeneration == _transitionPlayerGeneration &&
+          _renderedQueueGeneration == _recalcGeneration) {
+        final generation = _renderedTransitionGeneration;
+        unawaited(_finishRenderedTransition(generation));
+      }
+    });
+
     // Keep _userVolume in sync with external controllers (system UI, MPRIS).
     player.volumeStream.listen((vol) {
       if (!_isTransitionFading) {
-        _userVolume = vol.clamp(0.0, 1.0);
+        _userVolume = vol.clamp(0.0, 1.0).toDouble();
       }
     });
 
@@ -1221,8 +1940,10 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         return;
       }
 
-      // Normal shuffle: just shuffle — no crossfade or DJ features.
-      if (_shuffleMode == ShuffleMode.shuffle) return;
+      // Normal playback and regular shuffle are always gapless. Smart/DJ
+      // shuffle is the only mode that may inspect transition metadata or
+      // modify volume.
+      if (_shuffleMode != ShuffleMode.smartShuffle) return;
 
       final from = _loadQueueSongs[index];
 
@@ -1265,77 +1986,115 @@ class MelodizeAudioHandler extends BaseAudioHandler {
           _startCrossfadeFadeOut(forcedTransition, nextPhysical);
           return;
         }
+        // Request the rendered bridge while there is still time to prepare it.
+        // If it is not ready at the boundary, the normal fail-safe volume ramp
+        // below is used instead.
+        final prepareLead = const Duration(seconds: 15);
+        if (position >= transition.fromStart - prepareLead &&
+            position < transition.fromStart) {
+          unawaited(_prepareRenderedTransition(transition));
+          return;
+        }
         if (position < transition.fromStart) return;
-        _startCrossfadeFadeOut(transition, nextPhysical);
+        if (transition.kind == TransitionKind.djBlend &&
+            _preparedTransitionKey != null) {
+          unawaited(_startRenderedTransition(transition, nextPhysical));
+        } else {
+          _startCrossfadeFadeOut(transition, nextPhysical);
+        }
         return;
       }
-
-      // ── Normal mode: crossfade using physical auto-advance ──
-      final nextIdx = _resolveNextPhysicalIndex(index);
-      if (nextIdx == null) return;
-      if (nextIdx < 0 || nextIdx >= _loadQueueSongs.length) return;
-      final to = _loadQueueSongs[nextIdx];
-
-      if (from.id.isEmpty || to.id.isEmpty) return;
-      if (!_canPlayOffline(to)) return;
-
-      final actualDuration = player.duration?.inSeconds;
-      final transition = _transitionPolicy.planPair(
-        from,
-        to,
-        actualDurationSeconds: actualDuration,
-      );
-      if (transition.kind == TransitionKind.gapless ||
-          transition.duration == Duration.zero ||
-          position < transition.fromStart) {
-        return;
-      }
-
-      _startCrossfadeFadeOut(transition, nextIdx);
     });
   }
 
+  void _resetCrossfadeState() {
+    _crossfadeGeneration++;
+    _renderedTransitionGeneration++;
+    _activeTransitionPlayerGeneration = null;
+    _renderedTransitionTimeout?.cancel();
+    _renderedTransitionTimeout = null;
+    _crossfadeTimer?.cancel();
+    _crossfadeTimer = null;
+    _crossfadeTimeout?.cancel();
+    _crossfadeTimeout = null;
+    _crossfadeActive = false;
+    _crossfadeNextIndex = null;
+    _renderedTransitionActive = false;
+    _renderedTransitionNextIndex = null;
+    _renderedTransitionFromId = null;
+    _renderedTransitionToId = null;
+    _renderedTransitionDuration = null;
+    _renderedMixDuration = null;
+    _preparedTransitionDuration = null;
+    _renderedPausedMainPlayer = false;
+    _preparedTransitionKey = null;
+    final stalePreparedPath = _preparedTransitionPath;
+    _preparedTransitionPath = null;
+    if (stalePreparedPath != null) {
+      unawaited(() async {
+        try {
+          await File(stalePreparedPath).delete();
+        } catch (_) {}
+      }());
+    }
+
+    _preparingTransitionKey = null;
+    _isTransitionFading = false;
+    unawaited(_queueTransitionDeck(() => _transitionPlayer.stop()));
+  }
+
   void _startCrossfadeFadeOut(PlannedTransition transition, int nextIdx) {
-    _cancelCrossfade();
+    // Defensive guard: only DJ shuffle may ever start a transition.
+    if (_shuffleMode != ShuffleMode.smartShuffle) return;
+    // Reset synchronously. Awaiting volume restoration here lets an older
+    // cancellation finish after this fade starts and overwrite its volume.
+    _resetCrossfadeState();
     _crossfadeActive = true;
     _crossfadeNextIndex = nextIdx;
 
-    final totalMs = transition.duration.inMilliseconds.clamp(100, 30000);
+    final totalMs =
+        transition.duration.inMilliseconds.clamp(100, 30000).toInt();
     final startVol = _userVolume;
     final startTime = DateTime.now();
 
     _isTransitionFading = true;
 
+    final fadeGeneration = _crossfadeGeneration;
     _crossfadeTimer = Timer.periodic(
       const Duration(milliseconds: 100),
       (timer) {
-        if (_queueSnapshotCtrl.isClosed) {
+        if (fadeGeneration != _crossfadeGeneration ||
+            _queueSnapshotCtrl.isClosed) {
           timer.cancel();
           return;
         }
         final elapsed = DateTime.now().difference(startTime).inMilliseconds;
         final t = (elapsed / totalMs).clamp(0.0, 1.0);
-        final vol = (startVol * (1.0 - t)).clamp(0.0, 1.0);
-        try {
-          player.setVolume(vol);
-        } catch (e) {
-          debugPrint('Crossfade fade-out error: $e');
-        }
+        final vol = (startVol * (1.0 - t)).clamp(0.0, 1.0).toDouble();
+        final write = _writeCrossfadeVolume(vol, generation: fadeGeneration);
         if (t >= 1.0) {
           timer.cancel();
-          if (_shuffleMode == ShuffleMode.smartShuffle &&
-              _crossfadeNextIndex != null) {
-            // DJ mode: explicitly seek to the next virtual song
-            // instead of relying on physical auto-advance.
-            _performVirtualSeekForCrossfade(_crossfadeNextIndex!);
-          } else {
-            // Normal mode: wait for auto-advance.
-            _crossfadeTimeout = Timer(const Duration(seconds: 5), () {
-              if (_crossfadeActive) {
-                _cancelCrossfade();
-              }
-            });
-          }
+          // Do not seek or arm the timeout until the final fade-out write has
+          // reached the platform player.
+          unawaited(write.then((_) {
+            if (fadeGeneration != _crossfadeGeneration ||
+                !_crossfadeActive) {
+              return;
+            }
+            if (_shuffleMode == ShuffleMode.smartShuffle &&
+                _crossfadeNextIndex != null) {
+              // DJ mode: explicitly seek to the next virtual song
+              // instead of relying on physical auto-advance.
+              _performVirtualSeekForCrossfade(_crossfadeNextIndex!);
+            } else {
+              // Normal mode: wait for auto-advance.
+              _crossfadeTimeout = Timer(const Duration(seconds: 5), () {
+                if (_crossfadeActive) {
+                  _cancelCrossfade();
+                }
+              });
+            }
+          }));
         }
       },
     );
@@ -1381,10 +2140,10 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _seekingVirtual = true;
     player.seek(Duration.zero, index: targetPhysicalIndex).then((_) {
       _seekingVirtual = false;
-    }).catchError((e) {
+    }).catchError((Object e) {
       debugPrint('Crossfade virtual seek error: $e');
       _seekingVirtual = false;
-      _cancelCrossfade();
+      unawaited(_cancelCrossfade());
     });
 
     // Update virtual position immediately so the UI reflects the change.
@@ -1394,11 +2153,22 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _emitQueueSnapshot(immediate: true);
   }
 
-  void _startCrossfadeFadeIn() {
+  Future<void> _startCrossfadeFadeIn() async {
+    // Defensive guard: regular playback and regular shuffle are gapless.
+    if (_shuffleMode != ShuffleMode.smartShuffle) return;
+    // A natural advance can arrive before fade-out's final timer tick. Stop
+    // that timer, let queued volume writes drain, then start from the actual
+    // player volume instead of jumping over a pending platform write.
+    _crossfadeTimer?.cancel();
+    _crossfadeTimer = null;
     _crossfadeTimeout?.cancel();
     _crossfadeTimeout = null;
     _crossfadeActive = false;
     _crossfadeNextIndex = null;
+    _isTransitionFading = false;
+
+    await _volumeWrite;
+    if (_queueSnapshotCtrl.isClosed) return;
 
     // If the player isn't ready yet (buffering on Android/network),
     // wait before starting the fade-in so we don't ramp volume while
@@ -1438,21 +2208,20 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
     _isTransitionFading = true;
 
+    final fadeGeneration = _crossfadeGeneration;
     _crossfadeTimer = Timer.periodic(
       const Duration(milliseconds: 100),
       (timer) {
-        if (_queueSnapshotCtrl.isClosed) {
+        if (fadeGeneration != _crossfadeGeneration ||
+            _queueSnapshotCtrl.isClosed) {
           timer.cancel();
           return;
         }
         final elapsed = DateTime.now().difference(startTime).inMilliseconds;
         final t = (elapsed / totalMs).clamp(0.0, 1.0);
-        final vol = (startVol + (targetVol - startVol) * t).clamp(0.0, 1.0);
-        try {
-          player.setVolume(vol);
-        } catch (e) {
-          debugPrint('Crossfade fade-in error: $e');
-        }
+        final vol =
+            (startVol + (targetVol - startVol) * t).clamp(0.0, 1.0).toDouble();
+        unawaited(_writeCrossfadeVolume(vol, generation: fadeGeneration));
         if (t >= 1.0) {
           timer.cancel();
           _isTransitionFading = false;
@@ -1461,18 +2230,38 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     );
   }
 
-  Future<void> _cancelCrossfade() async {
-    _crossfadeTimer?.cancel();
-    _crossfadeTimer = null;
-    _crossfadeTimeout?.cancel();
-    _crossfadeTimeout = null;
-    _crossfadeActive = false;
-    _crossfadeNextIndex = null;
-    _isTransitionFading = false;
-    try {
-      await player.setVolume(_userVolume);
-    } catch (e) {
-      debugPrint('Crossfade cancel restore volume error: $e');
+  Future<void> _writeCrossfadeVolume(double volume, {int? generation}) {
+    final operation = _volumeWrite.then<void>((_) async {
+      // Queue volume operations so an older platform-channel write cannot
+      // overtake a newer fade. Re-check the generation when this operation
+      // reaches the front of the queue.
+      if (generation != null && generation != _crossfadeGeneration) return;
+      try {
+        await player.setVolume(volume);
+      } catch (e) {
+        debugPrint('Crossfade volume error: $e');
+      }
+    });
+    _volumeWrite = operation;
+    return operation;
+  }
+
+  Future<void> _cancelCrossfade({bool resumeRendered = false}) async {
+    final shouldResumeRendered = resumeRendered &&
+        _renderedTransitionActive &&
+        _renderedPausedMainPlayer;
+    _resetCrossfadeState();
+    final generation = _crossfadeGeneration;
+    await _writeCrossfadeVolume(_userVolume, generation: generation);
+    await _transitionDeckOperation;
+    final path = _preparedTransitionPath;
+    _preparedTransitionPath = null;
+    _preparedTransitionDuration = null;
+    if (path != null) {
+      try { await File(path).delete(); } catch (_) {}
+    }
+    if (shouldResumeRendered && !_disposed) {
+      try { await player.play(); } catch (_) {}
     }
   }
 
@@ -1498,15 +2287,33 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   // Linux MPRIS (playerctl / media keys)
 
   Future<void> setupMpris() async {
-    if (!Platform.isLinux) return;
-    _mpris = LinuxMprisService(
+    if (!Platform.isLinux || _disposed) return;
+    await _mpris?.dispose();
+    if (_disposed) return;
+    final service = LinuxMprisService(
       player: player,
       getCurrentSong: () => currentSong,
+      play: play,
+      pause: pause,
+      stop: stop,
+      seek: seek,
+      setVolume: _setExternalVolume,
       skipToPrevious: skipToPrevious,
+      skipToNext: skipToNext,
       getShuffleMode: () => _shuffleMode,
       shuffleModeStream: _shuffleModeCtrl.stream,
     );
-    await _mpris!.start();
+    _mpris = service;
+    await service.start();
+    if (_disposed) {
+      await service.dispose();
+      if (identical(_mpris, service)) _mpris = null;
+    }
+  }
+
+  Future<void> _setExternalVolume(double volume) async {
+    _userVolume = volume.clamp(0.0, 1.0).toDouble();
+    await _cancelCrossfade();
   }
 
   // Linux media key handling via HardwareKeyboard.
@@ -1538,7 +2345,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   }
 
   void _adjustVolume(double delta) {
-    final vol = (player.volume + delta).clamp(0.0, 1.0);
+    final vol = (player.volume + delta).clamp(0.0, 1.0).toDouble();
     _userVolume = vol;
     player.setVolume(vol);
   }
@@ -1613,31 +2420,37 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   // ---------------------------------------------------------------------------
 
-  void dispose() {
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
     if (Platform.isLinux) {
       HardwareKeyboard.instance.removeHandler(_handleMediaKey);
-      _mpris?.dispose();
+      await _mpris?.dispose();
+      _mpris = null;
     }
     _shuffleModeCtrl.close();
     _queueSnapshotCtrl.close();
     _shuffleOrder = [];
     _shufflePos = 0;
     _physicalToVirtual = {};
-    _cachedShuffleOrder = null;
-    _cachedPlannedSongs = null;
-    _cachedShuffleHash = 0;
-    _cachedNormalSnapshot = null;
-    _cachedNormalQueueLength = -1;
-    _cachedNormalCurrentIndex = -1;
+    _invalidateSnapshotCaches();
     _loadQueueSongs = const [];
+    _queueBpmCache = null;
+    _queueBpmCacheSignature = 0;
+    _queueBpmCacheCompanion = null;
+    await _transitionStateSub?.cancel();
     _crossfadeSub?.cancel();
     _crossfadeTimer?.cancel();
     _crossfadeTimeout?.cancel();
+    _renderedTransitionTimeout?.cancel();
+    _renderedTransitionTimeout = null;
     _recalcDebounceTimer?.cancel();
-    // No transition deck to dispose (single-player crossfade).
+    _recalcGeneration++;
+    await _cancelCrossfade(resumeRendered: false);
+    await _transitionPlayer.dispose();
     _sleepTimer?.cancel();
     _historyController.close();
-    player.dispose();
+    await player.dispose();
   }
 }  // Two-phase audio init: createAudioHandler() before runApp (sync),
   // connectAudioService() after runApp (async). Prevents black-screen on

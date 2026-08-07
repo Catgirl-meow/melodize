@@ -635,7 +635,20 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(400, {"error": "song_a_id and song_b_id are required"})
             return
 
-        mix_duration = float(body.get("mix_duration", 10))
+        try:
+            mix_duration = float(body.get("mix_duration", 10))
+        except (TypeError, ValueError):
+            self._send(400, {"error": "mix_duration must be a number"})
+            return
+        if not 2.0 <= mix_duration <= 30.0:
+            self._send(400, {"error": "mix_duration must be between 2 and 30 seconds"})
+            return
+
+        # Use an opaque, URL-safe cache key. Navidrome IDs may contain
+        # characters that the transition route intentionally rejects.
+        mix_key = hashlib.sha256(
+            f"{song_a_id}\\0{song_b_id}\\0{mix_duration:.3f}".encode("utf-8")
+        ).hexdigest()[:32]
 
         # Check cache first
         mix_dir = pathlib.Path(
@@ -643,7 +656,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                                 "/var/lib/melodize-companion/mix_cache")
         )
         mix_dir.mkdir(parents=True, exist_ok=True)
-        mix_filename = f"{song_a_id}__{song_b_id}.wav"
+        mix_filename = f"{mix_key}.wav"
         mix_path = mix_dir / mix_filename
 
         if mix_path.is_file():

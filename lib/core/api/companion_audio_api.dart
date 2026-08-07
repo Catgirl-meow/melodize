@@ -24,6 +24,18 @@ class CompanionAudioApi {
 
   String get serverUrl => _resolvedBaseUrl;
 
+  /// Resolve a companion API path returned by a job into an absolute URL.
+  /// The companion may return either a relative path or an absolute URL.
+  String resolveUrl(String path) {
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return path;
+    }
+    return '$_resolvedBaseUrl${path.startsWith('/') ? path : '/$path'}';
+  }
+
+  /// Headers required when just_audio fetches a rendered transition directly.
+  Map<String, String> get requestHeaders => {'X-API-Key': apiKey};
+
   // Batch analysis
 
   Future<Map<String, dynamic>?> startAnalysis({List<String>? songIds}) async {
@@ -92,6 +104,25 @@ class CompanionAudioApi {
     try {
       final resp = await _dio.get('/api/audio/mix-transition/$jobId');
       return resp.data as Map<String, dynamic>?;
+    } on DioException {
+      return null;
+    }
+  }
+
+  /// Download a rendered transition using the same authenticated Dio client
+  /// as the API calls. This is important for self-signed companion HTTPS,
+  /// which native audio backends do not inherit from Dio.
+  Future<List<int>?> downloadTransition(String path) async {
+    try {
+      final resp = await _dio.get<List<int>>(
+        resolveUrl(path),
+        options: Options(
+          responseType: ResponseType.bytes,
+          validateStatus: (status) => status != null && status >= 200 && status < 300,
+        ),
+      );
+      final data = resp.data;
+      return data == null ? null : List<int>.unmodifiable(data);
     } on DioException {
       return null;
     }

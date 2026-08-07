@@ -15,34 +15,57 @@ import '../audio/shuffle_mode.dart';
 class LinuxMprisService {
   final AudioPlayer player;
   final Song? Function() getCurrentSong;
+  final Future<void> Function() play;
+  final Future<void> Function() pause;
+  final Future<void> Function() stop;
+  final Future<void> Function(Duration position) seek;
+  final Future<void> Function(double volume) setVolume;
   final Future<void> Function() skipToPrevious;
+  final Future<void> Function() skipToNext;
   final ShuffleMode Function() getShuffleMode;
   final Stream<ShuffleMode> shuffleModeStream;
 
   DBusClient? _client;
   _MprisObject? _obj;
+  bool _disposed = false;
+  bool _starting = false;
   final _subs = <StreamSubscription<dynamic>>[];
 
   LinuxMprisService({
     required this.player,
     required this.getCurrentSong,
+    required this.play,
+    required this.pause,
+    required this.stop,
+    required this.seek,
+    required this.setVolume,
     required this.skipToPrevious,
+    required this.skipToNext,
     required this.getShuffleMode,
     required this.shuffleModeStream,
   });
 
   Future<void> start() async {
-    if (!Platform.isLinux) return;
+    if (!Platform.isLinux || _disposed || _starting) return;
+    _starting = true;
     try {
       _client = DBusClient.session();
       _obj = _MprisObject(
         player: player,
         getCurrentSong: getCurrentSong,
+        play: play,
+        pause: pause,
+        stop: stop,
+        seek: seek,
+        setVolume: setVolume,
         skipToPrevious: skipToPrevious,
+        skipToNext: skipToNext,
         getShuffleMode: getShuffleMode,
       );
       await _client!.registerObject(_obj!);
+      if (_disposed) return;
       final reply = await _client!.requestName('org.mpris.MediaPlayer2.melodize');
+      if (_disposed) return;
       debugPrint('[MPRIS] registered: $reply');
 
       _subs.add(player.playerStateStream.listen((_) => _obj!._onPlayerState()));
@@ -50,12 +73,16 @@ class LinuxMprisService {
       _subs.add(shuffleModeStream.listen((_) => _obj!._onShuffle()));
     } catch (e, st) {
       debugPrint('[MPRIS] start failed: $e\n$st');
+      await dispose();
+    } finally {
+      _starting = false;
     }
   }
 
   Future<void> dispose() async {
+    _disposed = true;
     for (final s in _subs) {
-      s.cancel();
+      await s.cancel();
     }
     _subs.clear();
     await _client?.close();
@@ -68,13 +95,25 @@ class LinuxMprisService {
 class _MprisObject extends DBusObject {
   final AudioPlayer player;
   final Song? Function() getCurrentSong;
+  final Future<void> Function() play;
+  final Future<void> Function() pause;
+  final Future<void> Function() stop;
+  final Future<void> Function(Duration position) seek;
+  final Future<void> Function(double volume) setVolume;
   final Future<void> Function() skipToPrevious;
+  final Future<void> Function() skipToNext;
   final ShuffleMode Function() getShuffleMode;
 
   _MprisObject({
     required this.player,
     required this.getCurrentSong,
+    required this.play,
+    required this.pause,
+    required this.stop,
+    required this.seek,
+    required this.setVolume,
     required this.skipToPrevious,
+    required this.skipToNext,
     required this.getShuffleMode,
   }) : super(DBusObjectPath('/org/mpris/MediaPlayer2'));
 
@@ -93,28 +132,36 @@ class _MprisObject extends DBusObject {
 
     switch (call.name) {
       case 'Play':
-        await player.play();
+        await play();
+        break;
       case 'Pause':
-        await player.pause();
+        await pause();
+        break;
       case 'PlayPause':
-        player.playing ? await player.pause() : await player.play();
+        player.playing ? await pause() : await play();
+        break;
       case 'Stop':
-        await player.stop();
+        await stop();
+        break;
       case 'Next':
-        await player.seekToNext();
+        await skipToNext();
+        break;
       case 'Previous':
         await skipToPrevious();
+        break;
       case 'Seek':
         if (call.values.isNotEmpty) {
           final us = (call.values[0] as DBusInt64).value;
           final newPos = player.position + Duration(microseconds: us);
-          await player.seek(newPos.isNegative ? Duration.zero : newPos);
+          await seek(newPos.isNegative ? Duration.zero : newPos);
         }
+        break;
       case 'SetPosition':
         if (call.values.length >= 2) {
           final us = (call.values[1] as DBusInt64).value;
-          await player.seek(Duration(microseconds: us));
+          await seek(Duration(microseconds: us));
         }
+        break;
       case 'OpenUri':
         break; // not supported
       default:
@@ -226,7 +273,7 @@ class _MprisObject extends DBusObject {
   Future<DBusMethodResponse> setProperty(
       String interface, String name, DBusValue value) async {
     if (interface == 'org.mpris.MediaPlayer2.Player' && name == 'Volume') {
-      await player.setVolume((value as DBusDouble).value.clamp(0.0, 1.0));
+      await setVolume((value as DBusDouble).value.clamp(0.0, 1.0).toDouble());
       return DBusMethodSuccessResponse();
     }
     return DBusMethodErrorResponse.propertyReadOnly();

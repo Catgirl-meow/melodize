@@ -63,8 +63,18 @@ class _AppScrollBehavior extends ScrollBehavior {
   const _AppScrollBehavior();
 
   @override
-  ScrollPhysics getScrollPhysics(BuildContext context) =>
-      const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
+  ScrollPhysics getScrollPhysics(BuildContext context) {
+    // Android's clamping physics avoids the extra overscroll animation and
+    // matches native list behavior; retain the expressive bounce on Linux.
+    if (Platform.isLinux) {
+      return const BouncingScrollPhysics(
+        parent: AlwaysScrollableScrollPhysics(),
+      );
+    }
+    return const ClampingScrollPhysics(
+      parent: AlwaysScrollableScrollPhysics(),
+    );
+  }
 }
 
 class MelodizeApp extends ConsumerStatefulWidget {
@@ -74,12 +84,50 @@ class MelodizeApp extends ConsumerStatefulWidget {
   ConsumerState<MelodizeApp> createState() => _MelodizeAppState();
 }
 
-class _MelodizeAppState extends ConsumerState<MelodizeApp> {
+class _MelodizeAppState extends ConsumerState<MelodizeApp>
+    with WidgetsBindingObserver {
+  bool _handlerDisposed = false;
   ThemeData? _cachedLight;
   ThemeData? _cachedDark;
   ColorScheme? _lastLight;
   ColorScheme? _lastDark;
   Brightness? _lastBrightness;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Android audio_service owns the handler beyond the Activity lifecycle;
+    // never dispose it when the UI is detached or backgrounded. Linux has no
+    // equivalent background audio service, so release its player/MPRIS
+    // resources when the desktop app is actually detached.
+    if (Platform.isLinux &&
+        state == AppLifecycleState.detached &&
+        !_handlerDisposed) {
+      final handler = ref.read(audioHandlerNotifierProvider);
+      if (handler != null) {
+        _handlerDisposed = true;
+        unawaited(handler.dispose());
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    if (Platform.isLinux && !_handlerDisposed) {
+      final handler = ref.read(audioHandlerNotifierProvider);
+      if (handler != null) {
+        _handlerDisposed = true;
+        unawaited(handler.dispose());
+      }
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -146,6 +194,10 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
   void initState() {
     super.initState();
     final handler = ref.read(audioHandlerNotifierProvider);
+    // Provider listeners normally report changes only; seed the handler with
+    // the already-available client as well so a configured companion works on
+    // the first queue loaded after startup.
+    handler?.setCompanionAudioApi(ref.read(companionAudioApiProvider));
 
     // Restore persisted shuffle mode and crossfade on startup.
     Future.microtask(() {
@@ -228,10 +280,15 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
   Widget build(BuildContext context) {
     final configAsync = ref.watch(serverConfigProvider);
 
-    // Sync companion analysis data to audio handler for smart shuffle.
+    // Sync companion analysis and rendered-transition client independently.
+    // Either may be unavailable; playback must remain fully functional without
+    // the companion.
     ref.listen(companionAnalysisProvider, (_, next) {
       final h = ref.read(audioHandlerNotifierProvider);
       h?.setCompanionAnalysis(next.valueOrNull);
+    });
+    ref.listen(companionAudioApiProvider, (_, next) {
+      ref.read(audioHandlerNotifierProvider)?.setCompanionAudioApi(next);
     });
     ref.listen(companionAnalysisSyncProvider, (_, __) {});
 

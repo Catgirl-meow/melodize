@@ -87,7 +87,7 @@ class PlaylistDetailScreen extends ConsumerWidget {
                         final h =
                             ref.read(audioHandlerNotifierProvider);
                         if (h == null) return;
-                        h.applyShuffleMode(ShuffleMode.shuffle);
+                        await h.applyShuffleMode(ShuffleMode.shuffle);
                         await h.loadQueue(songs);
                         if (context.mounted) Navigator.pop(context);
                       },

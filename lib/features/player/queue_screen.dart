@@ -143,7 +143,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                                       ),
                                     ],
                                   )
-                                : mode != PlaybackMode.normal
+                                : mode == PlaybackMode.smartShuffle
                                     ? Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
@@ -154,7 +154,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                                           ),
                                           const SizedBox(width: 4),
                                           Text(
-                                            'Auto-ordered',
+                                            'DJ-ordered',
                                             style: textTheme.labelSmall
                                                 ?.copyWith(
                                               color: scheme.primary,

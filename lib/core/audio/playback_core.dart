@@ -54,8 +54,9 @@ class PlaybackQueue {
 
   List<Song> get songs => List.unmodifiable(_songs);
   int get length => _songs.length;
-  int get currentIndex =>
-      _songs.isEmpty ? 0 : _currentIndex.clamp(0, _songs.length - 1);
+  int get currentIndex => _songs.isEmpty
+      ? 0
+      : _currentIndex.clamp(0, _songs.length - 1).toInt();
   PlaybackMode get mode => _mode;
   Song? get currentSong => _songs.isEmpty ? null : _songs[currentIndex];
 
@@ -64,7 +65,9 @@ class PlaybackQueue {
     _songs
       ..clear()
       ..addAll(songs);
-    _currentIndex = _songs.isEmpty ? 0 : startIndex.clamp(0, _songs.length - 1);
+    _currentIndex = _songs.isEmpty
+        ? 0
+        : startIndex.clamp(0, _songs.length - 1).toInt();
     _mode = mode;
   }
 
@@ -76,7 +79,7 @@ class PlaybackQueue {
     if (_songs.isEmpty) {
       _currentIndex = 0;
     } else {
-      _currentIndex = index.clamp(0, _songs.length - 1);
+      _currentIndex = index.clamp(0, _songs.length - 1).toInt();
     }
   }
 
@@ -89,7 +92,7 @@ class PlaybackQueue {
 
   void playNext(Song song) {
     final idx = _songs.isEmpty ? 0 : currentIndex + 1;
-    _songs.insert(idx.clamp(0, _songs.length), song);
+    _songs.insert(idx.clamp(0, _songs.length).toInt(), song);
   }
 
   void add(Song song) {
@@ -132,26 +135,28 @@ class PlaybackQueue {
   // onReorder semantics).
   void reorder(int oldIndex, int newIndex) {
     if (oldIndex < 0 || oldIndex >= _songs.length) return;
-    final insertIndex = newIndex.clamp(0, _songs.length - 1);
+    final insertIndex = newIndex.clamp(0, _songs.length - 1).toInt();
     // Use the actual current index (not song ID) because duplicate IDs can
     // cause indexWhere to return the wrong position. The current song stays
     // at the same logical position unless it itself is being moved.
     final previousCurrent = _currentIndex;
     final song = _songs.removeAt(oldIndex);
-    _songs.insert(insertIndex.clamp(0, _songs.length), song);
+    _songs.insert(insertIndex.clamp(0, _songs.length).toInt(), song);
     // Adjust current index: if we moved the current song, it lands at insertIndex.
     if (oldIndex == previousCurrent) {
-      _currentIndex = insertIndex.clamp(0, _songs.length - 1);
+      _currentIndex = insertIndex.clamp(0, _songs.length - 1).toInt();
     } else if (oldIndex < previousCurrent && insertIndex >= previousCurrent) {
       // Removed before current, inserted after → current slides back one.
-      _currentIndex = (previousCurrent - 1).clamp(0, _songs.length - 1);
+      _currentIndex =
+          (previousCurrent - 1).clamp(0, _songs.length - 1).toInt();
     } else if (oldIndex < previousCurrent && insertIndex < previousCurrent) {
       // removeAt already decremented; inserting before current's new
       // position should restore it.
-      _currentIndex = previousCurrent.clamp(0, _songs.length - 1);
+      _currentIndex = previousCurrent.clamp(0, _songs.length - 1).toInt();
     } else if (oldIndex > previousCurrent && insertIndex <= previousCurrent) {
       // Removed after current, inserted before → current slides forward one.
-      _currentIndex = (previousCurrent + 1).clamp(0, _songs.length - 1);
+      _currentIndex =
+          (previousCurrent + 1).clamp(0, _songs.length - 1).toInt();
     }
     // Otherwise current is unaffected.
   }
@@ -163,7 +168,12 @@ class PlaybackQueue {
         songs: songs,
         currentIndex: currentIndex,
         mode: _mode,
-        upcomingTransitions: upcomingTransitions,
+        // Transition metadata is a DJ-shuffle-only feature. Keep this
+        // invariant in the model as well as in the audio handler so normal
+        // and regular shuffle queues can never expose smart transitions.
+        upcomingTransitions: _mode == PlaybackMode.smartShuffle
+            ? upcomingTransitions
+            : const [],
       );
 }
 
@@ -179,7 +189,7 @@ class PlaybackPlanner {
       return List.from(songs);
     }
 
-    final idx = currentIndex.clamp(0, songs.length - 1);
+    final idx = currentIndex.clamp(0, songs.length - 1).toInt();
     final heardAndCurrent = songs.sublist(0, idx + 1);
     final upcoming = songs.sublist(idx + 1);
     if (upcoming.length < 2) return List.from(songs);
@@ -220,7 +230,7 @@ class PlaybackPlanner {
     required int? seed,
   }) {
     if (songs.length < 2) return [];
-    final idx = currentIndex.clamp(0, songs.length - 1);
+    final idx = currentIndex.clamp(0, songs.length - 1).toInt();
     final ordered = orderSongs(
       songs,
       idx,
@@ -245,13 +255,13 @@ class TransitionPolicy {
   // listener only need a small lookahead.
   List<PlannedTransition> planUpcoming(List<Song> songs, int currentIndex) {
     if (songs.isEmpty || songs.length < 2) return const [];
-    final idx = currentIndex.clamp(0, songs.length - 1);
+    final idx = currentIndex.clamp(0, songs.length - 1).toInt();
     // Safety: if current index is at or past the end, no upcoming transitions.
     if (idx >= songs.length - 1) return const [];
     final transitions = <PlannedTransition>[];
     // Only plan up to 3 transitions ahead — enough for the UI preview and the
     // crossfade listener to peek at the next song, without O(n) allocation.
-    final limit = (idx + 3).clamp(0, songs.length - 1);
+    final limit = (idx + 3).clamp(0, songs.length - 1).toInt();
     for (int i = idx; i < limit; i++) {
       transitions.add(planPair(songs[i], songs[i + 1]));
     }
@@ -276,7 +286,7 @@ class TransitionPolicy {
     // back to duration minus tail silence.
     final rawTail = analysis?.tailSilenceFor(from) ?? 0.0;
     final maxTail = durationSeconds * 0.5;
-    final tailSilence = rawTail.clamp(0.0, maxTail);
+    final tailSilence = rawTail.clamp(0.0, maxTail).toDouble();
     final effectiveMs =
         max(0, (durationSeconds * 1000) - (tailSilence * 1000).round());
 
@@ -422,7 +432,7 @@ class TransitionPolicy {
 
     // Track length safety cap.
     if (duration != null && duration > 0) {
-      final maxFade = (duration * 0.35).clamp(2.0, 12.0);
+      final maxFade = (duration * 0.35).clamp(2.0, 12.0).toDouble();
       seconds = seconds.clamp(2.0, maxFade);
     }
 
@@ -431,7 +441,7 @@ class TransitionPolicy {
       seconds = seconds.clamp(2.0, 4.0);
     }
 
-    return seconds.round().clamp(2, 12);
+    return seconds.round().clamp(2, 12).toInt();
   }
 
   bool _canDjBlend(Song from, Song to) {
