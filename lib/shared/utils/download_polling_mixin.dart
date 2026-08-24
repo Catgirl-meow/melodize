@@ -29,7 +29,8 @@ mixin DownloadPollingMixin<T extends ConsumerStatefulWidget>
     _consecutiveErrors = 0;
     _connectionLostSnackShown = false;
     // Fast first tick for small files, then every 10 s.
-    _pollTimer = Timer(const Duration(seconds: 3), () => _poll(companion, jobId, ++attempts));
+    _pollTimer = Timer(
+        const Duration(seconds: 3), () => _poll(companion, jobId, ++attempts));
   }
 
   void _poll(CompanionClient companion, String jobId, int attempts) async {
@@ -46,17 +47,11 @@ mixin DownloadPollingMixin<T extends ConsumerStatefulWidget>
     try {
       final status = await companion.getDownloadStatus(jobId);
       _consecutiveErrors = 0;
-      final s = status['status'] as String?;
-      if (s == 'done') {
-        ref.read(subsonicClientProvider)?.startScan();
-          // Navidrome needs time to index; the immediate refresh always
-        // missed, so only the delayed one remains.
-        Future.delayed(const Duration(seconds: 12), () {
-          if (mounted) ref.invalidate(allSongsProvider);
-        });
+      final s = status['status']?.toString().toLowerCase();
+      if (s == 'done' || s == 'complete' || s == 'completed') {
+        await _refreshLibraryAfterDownload();
         if (mounted) {
-          showStyledSnack(
-              context, 'Added to Navidrome — refreshing library…',
+          showStyledSnack(context, 'Added to Navidrome — refreshing library…',
               bottomOffset: snackBottomOffset);
         }
         return;
@@ -76,8 +71,7 @@ mixin DownloadPollingMixin<T extends ConsumerStatefulWidget>
       _consecutiveErrors++;
       if (_consecutiveErrors >= 3 && !_connectionLostSnackShown && mounted) {
         _connectionLostSnackShown = true;
-        showStyledSnack(context,
-            'Lost connection to companion — still trying…',
+        showStyledSnack(context, 'Lost connection to companion — still trying…',
             isError: true, bottomOffset: snackBottomOffset);
       }
     }
@@ -86,6 +80,39 @@ mixin DownloadPollingMixin<T extends ConsumerStatefulWidget>
       const Duration(seconds: 10),
       () => _poll(companion, jobId, attempts + 1),
     );
+  }
+
+  /// Ask Navidrome to scan, then invalidate all library-shaped providers at
+  /// several points while the server indexes the new file. The scan endpoint
+  /// acknowledges the request before indexing is complete, so one delayed
+  /// invalidation is racy and can leave the UI permanently stale.
+  Future<void> _refreshLibraryAfterDownload() async {
+    try {
+      await ref.read(subsonicClientProvider)?.startScan();
+    } catch (_) {
+      // The next scheduled refresh can still observe a server-side scan.
+    }
+
+    const refreshDelays = <Duration>[
+      Duration.zero,
+      Duration(seconds: 3),
+      Duration(seconds: 10),
+      Duration(seconds: 20),
+    ];
+    for (final delay in refreshDelays) {
+      if (!mounted) return;
+      if (delay > Duration.zero) await Future<void>.delayed(delay);
+      if (!mounted) return;
+      ref.invalidate(allSongsProvider);
+      ref.invalidate(allAlbumsProvider);
+      ref.invalidate(allArtistsProvider);
+      ref.invalidate(newestAlbumsProvider);
+      ref.invalidate(albumSongsProvider);
+      ref.invalidate(artistAlbumsProvider);
+      ref.invalidate(artistAllSongsProvider);
+      ref.invalidate(playlistsProvider);
+      ref.invalidate(playlistSongsProvider);
+    }
   }
 }
 
@@ -96,8 +123,7 @@ String _friendlyDownloadError(String err) {
       lower.contains('server network or proxy')) {
     return 'Deezer unreachable from server — check server network or VPN';
   }
-  if (lower.contains('session expired') ||
-      lower.contains('update your arl')) {
+  if (lower.contains('session expired') || lower.contains('update your arl')) {
     return 'Deezer session expired — update ARL in Settings';
   }
   if (lower.contains('could not authenticate despite valid')) {

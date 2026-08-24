@@ -104,8 +104,8 @@ final companionAvailableProvider = StreamProvider<bool>((ref) async* {
   }
 });
 
-final canDeleteFromServerProvider = Provider<bool>((ref) =>
-    ref.watch(companionAvailableProvider).valueOrNull ?? false);
+final canDeleteFromServerProvider = Provider<bool>(
+    (ref) => ref.watch(companionAvailableProvider).valueOrNull ?? false);
 
 /// Companion audio analysis API client — built from the server prefs.
 final companionAudioApiProvider = Provider<CompanionAudioApi?>((ref) {
@@ -164,7 +164,8 @@ final companionAnalysisProvider = FutureProvider<BpmCache?>((ref) async {
     }
     final pp = r['phrase_positions'];
     if (pp is List && pp.isNotEmpty) {
-      phrasePositions[songId] = pp.whereType<num>().map((n) => n.toDouble()).toList();
+      phrasePositions[songId] =
+          pp.whereType<num>().map((n) => n.toDouble()).toList();
     }
     final fbo = r['first_beat_offset'];
     if (fbo is num && fbo >= 0) {
@@ -480,8 +481,9 @@ final allSongsProvider = StreamProvider<List<Song>>((ref) async* {
   final client = ref.watch(subsonicClientProvider);
   final deletedIds = ref.watch(_pendingDeleteIdsProvider);
 
-  List<Song> filter(List<Song> songs) =>
-      deletedIds.isEmpty ? songs : songs.where((s) => !deletedIds.contains(s.id)).toList();
+  List<Song> filter(List<Song> songs) => deletedIds.isEmpty
+      ? songs
+      : songs.where((s) => !deletedIds.contains(s.id)).toList();
 
   // Always emit cached songs immediately (with correct isDownloaded from DB)
   final cached = await db.getAllCachedSongs();
@@ -509,8 +511,9 @@ final allSongsProvider = StreamProvider<List<Song>>((ref) async* {
 
       // If the server no longer returns pending-delete songs, clear them from the set.
       if (deletedIds.isNotEmpty) {
-        ref.read(_pendingDeleteIdsProvider.notifier).update(
-            (s) => s.intersection(freshIds));
+        ref
+            .read(_pendingDeleteIdsProvider.notifier)
+            .update((s) => s.intersection(freshIds));
       }
       yield filter(updatedSongs);
     } catch (_) {
@@ -658,7 +661,8 @@ final recommendationsProvider =
     for (final t in list) {
       byDeezerId.putIfAbsent(t.deezerId, () => t);
     }
-  }    if (byDeezerId.isEmpty) {
+  }
+  if (byDeezerId.isEmpty) {
     return const RecsError(
         'Could not reach Deezer — check your internet connection and retry.');
   }
@@ -689,7 +693,8 @@ final recommendationsProvider =
       }
     }
     if (!anyLeft) break;
-  }    if (capped.isEmpty) {
+  }
+  if (capped.isEmpty) {
     return const RecsError(
         'All discoveries matched your library — try refreshing for new suggestions.');
   }
@@ -726,8 +731,10 @@ final recommendationsProvider =
 // Not autoDispose: search tab lives in IndexedStack and never unmounts.
 final deezerSearchProvider =
     FutureProvider<List<RecommendedTrack>>((ref) async {
-  final query = ref.watch(searchQueryProvider);
-  if (query.trim().length < 2) return [];
+  final query = ref.watch(searchQueryProvider).trim();
+  if (query.length < 2) return [];
+  // Let errors reach the UI so a Deezer/network failure is not presented as
+  // "no results". This request is also tied to the current query state.
   return ref.watch(deezerClientProvider).search(query);
 });
 
@@ -736,9 +743,8 @@ final deezerSearchProvider =
 // first (searchBestArtist), then fetches real top tracks (not the radio mix).
 // Tracks already in the library are filtered out so this section is discovery-
 // only; library tracks are already visible in Albums / Songs.
-final deezerArtistTracksProvider =
-    FutureProvider.autoDispose.family<List<RecommendedTrack>, String>(
-        (ref, artistName) async {
+final deezerArtistTracksProvider = FutureProvider.autoDispose
+    .family<List<RecommendedTrack>, String>((ref, artistName) async {
   if (artistName.trim().isEmpty) return [];
   final deezer = ref.watch(deezerClientProvider);
 
@@ -754,7 +760,9 @@ final deezerArtistTracksProvider =
     for (final s in library) keyFor(s.title, s.artist),
   };
 
-  return tracks.where((t) => !owned.contains(keyFor(t.title, t.artist))).toList();
+  return tracks
+      .where((t) => !owned.contains(keyFor(t.title, t.artist)))
+      .toList();
 });
 
 final downloadedSongsProvider = FutureProvider<List<Song>>((ref) async {
@@ -886,19 +894,16 @@ final playlistSongsProvider =
 final searchQueryProvider = StateProvider<String>((_) => '');
 
 final searchResultsProvider = FutureProvider<SearchResults>((ref) async {
-  final query = ref.watch(searchQueryProvider);
-  if (query.isEmpty) {
-    return const SearchResults(songs: [], albums: [], artists: []);
-  }
+  final query = ref.watch(searchQueryProvider).trim();
+  if (query.isEmpty) return SearchResults.empty();
+
   final client = ref.watch(subsonicClientProvider);
-  if (client == null) {
-    return const SearchResults(songs: [], albums: [], artists: []);
-  }
-  try {
-    return await client.search(query);
-  } catch (_) {
-    return const SearchResults(songs: [], albums: [], artists: []);
-  }
+  if (client == null) return SearchResults.empty();
+
+  // Keep failures visible to the screen instead of converting them to an
+  // indistinguishable empty result. Riverpod scopes this request to the
+  // current query, so a newer query cannot be replaced by an older response.
+  return client.search(query);
 });
 
 // --- Lyrics ---
@@ -1051,8 +1056,7 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
       if (song.isDownloaded) continue;
       final s = state[song.id]?.status;
       if (s == 'downloading' || s == 'queued' || s == 'done') continue;
-      final savePath =
-          '$baseDir/${song.id}.${song.suffix ?? 'mp3'}';
+      final savePath = '$baseDir/${song.id}.${song.suffix ?? 'mp3'}';
       additions[song.id] =
           DownloadItem(song: song, progress: 0, status: 'queued');
       _queue.add(_DownloadTask(
@@ -1123,12 +1127,14 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
       await _db.markDownloaded(song.id, savePath);
       // Pre-cache lyrics so they're available offline. Fire-and-forget:
       // a lyrics failure must not fail the download.
-      unawaited(LrcLibClient().getLyrics(
+      unawaited(LrcLibClient()
+          .getLyrics(
         artist: song.artist,
         title: song.title,
         album: song.album,
         duration: song.duration ?? 0,
-      ).then((result) {
+      )
+          .then((result) {
         if (result != null) {
           _db.cacheLyrics(song.id, result.plain, result.synced);
         }
@@ -1153,10 +1159,7 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
       if (!mounted) return;
       final updated = Map<String, DownloadItem>.from(state);
       updated[song.id] = DownloadItem(
-          song: song,
-          progress: 0,
-          status: 'error',
-          errorMessage: e.toString());
+          song: song, progress: 0, status: 'error', errorMessage: e.toString());
       state = updated;
     }
   }
@@ -1207,7 +1210,8 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
         final file = File(row!.localPath!);
         if (await file.exists()) await file.delete();
         // Also remove the cached cover-art sibling file.
-        final coverFile = File('${p.withoutExtension(row.localPath!)}.cover.jpg');
+        final coverFile =
+            File('${p.withoutExtension(row.localPath!)}.cover.jpg');
         if (await coverFile.exists()) await coverFile.delete();
       }
     } catch (_) {}
@@ -1246,10 +1250,10 @@ final dominantColorProvider =
     // Prefer intentionally-saturated swatches over the dominant (most-pixels)
     // color, which is often the album cover's background — off-white, black, or
     // a washed-out neutral that makes a poor accent.
-    final raw = palette.vibrantColor?.color
-        ?? palette.darkVibrantColor?.color
-        ?? palette.mutedColor?.color
-        ?? palette.dominantColor?.color;
+    final raw = palette.vibrantColor?.color ??
+        palette.darkVibrantColor?.color ??
+        palette.mutedColor?.color ??
+        palette.dominantColor?.color;
     if (raw == null) return null;
     return _processAccentColor(raw);
   } catch (_) {
@@ -1300,9 +1304,9 @@ Color? _cachedLastAccent;
 final currentAccentColorProvider = Provider<Color?>((ref) {
   final song = ref.watch(currentSongStreamProvider).valueOrNull;
   if (song == null) return null;
-  final coverUrl = ref.watch(coverArtUrlProvider(song.coverArt ?? ''))
-      ?? song.externalCoverUrl
-      ?? '';
+  final coverUrl = ref.watch(coverArtUrlProvider(song.coverArt ?? '')) ??
+      song.externalCoverUrl ??
+      '';
   if (coverUrl.isEmpty) return null;
   final color = ref.watch(dominantColorProvider(coverUrl)).valueOrNull;
   if (color != null) {

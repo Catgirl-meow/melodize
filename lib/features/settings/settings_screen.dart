@@ -334,14 +334,18 @@ class _DeezerSettingsScreen extends ConsumerWidget {
             child: accountAsync.when(
               data: (account) {
                 if (!account.arlValid) return const SizedBox.shrink();
-                if (account.canDownload) {
+                if (account.canDownload || !account.subscriptionStatusKnown) {
                   return _DeezerInfoCard(
-                    icon: Icons.verified_rounded,
+                    icon: account.canDownload
+                        ? Icons.verified_rounded
+                        : Icons.info_outline_rounded,
                     iconColor: scheme.primary,
                     backgroundColor: scheme.primaryContainer,
                     textColor: scheme.onPrimaryContainer,
                     title: account.offerLabel,
-                    subtitle: 'Downloads are available',
+                    subtitle: account.canDownload
+                        ? 'Downloads are available'
+                        : 'ARL verified — subscription details unavailable',
                   );
                 }
                 return _DeezerInfoCard(

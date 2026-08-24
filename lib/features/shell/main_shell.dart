@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,17 +11,12 @@ import '../settings/settings_screen.dart';
 import '../player/mini_player.dart';
 import '../player/now_playing_screen.dart';
 
-// Floating dock geometry
-const _kDockHeight = 52.0;
-const _kDockBottom = 8.0;      // gap between dock bottom and safe area edge
-const _kDockHorizontal = 20.0;
-
-const _kDockRadius = 16.0;     // dock corners — matches mini player playing state
-// Pill is 38 px tall (dock 52 − 2×7 vertical padding). Radius = height/2 so it
-// renders as a true stadium, not a smaller rounded rectangle. Decoupled from
-// the dock radius on purpose — same radius on nested shapes reads as "mini
-// dock inside dock" instead of a distinct selection indicator.
-const _kPillRadius = 19.0;
+// Android-first Material 3 navigation geometry, shared by Android and Linux.
+const _kDockHeight = 64.0;
+const _kDockBottom = 12.0;
+const _kDockHorizontal = 16.0;
+const _kDockRadius = 28.0;
+const _kPillRadius = 20.0;
 
 class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
@@ -109,32 +103,34 @@ class _MainShellState extends ConsumerState<MainShell>
       );
 
   /// Map raw local-download error strings to user-friendly messages.
-String _friendlyLocalDownloadError(String err) {
-  final lower = err.toLowerCase();
-  if (lower.contains('timeout') || lower.contains('timed out')) {
-    return 'Download timed out — check your connection and try again';
+  String _friendlyLocalDownloadError(String err) {
+    final lower = err.toLowerCase();
+    if (lower.contains('timeout') || lower.contains('timed out')) {
+      return 'Download timed out — check your connection and try again';
+    }
+    if (lower.contains('connection refused') ||
+        lower.contains('connection error') ||
+        lower.contains('socket')) {
+      return 'Cannot reach server — check your connection';
+    }
+    if (lower.contains('401') || lower.contains('unauthorized')) {
+      return 'Server rejected the request — check credentials in Settings';
+    }
+    if (lower.contains('404') || lower.contains('not found')) {
+      return 'Song not found on server — it may have been removed';
+    }
+    if (lower.contains('403') || lower.contains('forbidden')) {
+      return 'Access denied — check server permissions';
+    }
+    if (lower.contains('disk') ||
+        lower.contains('space') ||
+        lower.contains('storage')) {
+      return 'Not enough storage space on device';
+    }
+    return 'Download failed — $err';
   }
-  if (lower.contains('connection refused') ||
-      lower.contains('connection error') ||
-      lower.contains('socket')) {
-    return 'Cannot reach server — check your connection';
-  }
-  if (lower.contains('401') || lower.contains('unauthorized')) {
-    return 'Server rejected the request — check credentials in Settings';
-  }
-  if (lower.contains('404') || lower.contains('not found')) {
-    return 'Song not found on server — it may have been removed';
-  }
-  if (lower.contains('403') || lower.contains('forbidden')) {
-    return 'Access denied — check server permissions';
-  }
-  if (lower.contains('disk') || lower.contains('space') || lower.contains('storage')) {
-    return 'Not enough storage space on device';
-  }
-  return 'Download failed — $err';
-}
 
-void _invalidateServerProviders() {
+  void _invalidateServerProviders() {
     ref.invalidate(allSongsProvider);
     ref.invalidate(newestAlbumsProvider);
     ref.invalidate(randomSongsProvider);
@@ -147,60 +143,43 @@ void _invalidateServerProviders() {
   // post-frame callback still fires against a ScaffoldMessenger whose
   // scaffold list is empty (e.g. during shell rebuild). Losing the snack
   // is fine; crashing the UI is not.
-  void _safeSnack(String msg,
-      {bool isError = false, double? bottomOffset}) {
+  void _safeSnack(String msg, {bool isError = false, double? bottomOffset}) {
     try {
       showStyledSnack(context, msg,
           isError: isError, bottomOffset: bottomOffset);
     } catch (_) {}
   }
 
-  Widget _buildFloatingDock(ColorScheme scheme, Color? accentColor) {
-    final dockBg = AppTheme.dockBackground(accentColor, scheme);
-
-    // Outer horizontal padding creates spacing from screen edges. The internal
-    // nav items provide their own pill indicator padding.
+  Widget _buildFloatingDock(ColorScheme scheme) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: _kDockHorizontal),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: dockBg,
+      child: Material(
+        color: scheme.surfaceContainer,
+        elevation: 2,
+        shadowColor: scheme.shadow.withValues(alpha: 0.28),
+        shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(_kDockRadius),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.45),
-              blurRadius: 28,
-              offset: const Offset(0, 6),
-            ),
-          ],
+          side: BorderSide(
+            color: scheme.outlineVariant.withValues(alpha: 0.35),
+          ),
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(_kDockRadius),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-            child: Container(
-              height: _kDockHeight,
-              decoration: BoxDecoration(
-                color: dockBg,
-                borderRadius: BorderRadius.circular(_kDockRadius),
-              ),
-              child: Row(
-                children: [
-                  for (int i = 0; i < _labels.length; i++)
-                    Expanded(
-                      child: _FloatingNavItem(
-                        icon: _icons[i],
-                        selectedIcon: _selectedIcons[i],
-                        label: _labels[i],
-                        selected: i == _selectedIndex,
-                        scheme: scheme,
-                        accentColor: accentColor,
-                        onTap: () => setState(() => _selectedIndex = i),
-                      ),
-                    ),
-                ],
-              ),
-            ),
+        clipBehavior: Clip.antiAlias,
+        child: SizedBox(
+          height: _kDockHeight,
+          child: Row(
+            children: [
+              for (int i = 0; i < _labels.length; i++)
+                Expanded(
+                  child: _FloatingNavItem(
+                    icon: _icons[i],
+                    selectedIcon: _selectedIcons[i],
+                    label: _labels[i],
+                    selected: i == _selectedIndex,
+                    scheme: scheme,
+                    onTap: () => setState(() => _selectedIndex = i),
+                  ),
+                ),
+            ],
           ),
         ),
       ),
@@ -217,7 +196,7 @@ void _invalidateServerProviders() {
     final floatingNav = ref.watch(
       preferencesNotifierProvider.select((p) => p.floatingNavBar),
     );
-    // Accent color from album art — null until PaletteGenerator resolves.
+    // Album-art accents belong to the player, not navigation chrome.
     final accentColor = hasSong ? ref.watch(currentAccentColorProvider) : null;
 
     final safeBottom = MediaQuery.of(context).viewPadding.bottom;
@@ -277,8 +256,8 @@ void _invalidateServerProviders() {
           // silent because status didn't change).
           final wasError = prevItem?.status == 'error';
           final isError = entry.value.status == 'error';
-          final errMsgChanged = wasError &&
-              prevItem?.errorMessage != entry.value.errorMessage;
+          final errMsgChanged =
+              wasError && prevItem?.errorMessage != entry.value.errorMessage;
           if (isError && (!wasError || errMsgChanged)) {
             final errMsg = entry.value.errorMessage;
             final msg = errMsg != null
@@ -290,13 +269,10 @@ void _invalidateServerProviders() {
       });
     });
 
-    // Navigation bar background subtly adapts to accent color when available.
-    final navBg = accentColor != null
-        ? Color.lerp(accentColor, scheme.surface, 0.88)!
-        : scheme.surface;
-
-    // Navigation indicator pill uses accent when available.
-    final navIndicator = accentColor?.withValues(alpha: 0.30);
+    // Navigation chrome uses stable Material 3 tonal colors, independent of
+    // the currently playing album art.
+    final navBg = scheme.surfaceContainer;
+    final navIndicator = scheme.secondaryContainer;
 
     final scaffold = Scaffold(
       // extendBodyBehindAppBar: body fills behind the status bar so the
@@ -312,10 +288,9 @@ void _invalidateServerProviders() {
           ? null
           : NavigationBar(
               selectedIndex: _selectedIndex,
-              onDestinationSelected: (i) =>
-                  setState(() => _selectedIndex = i),
+              onDestinationSelected: (i) => setState(() => _selectedIndex = i),
               backgroundColor: navBg,
-              indicatorColor: navIndicator,
+              indicatorColor: scheme.secondaryContainer,
               elevation: 0,
               height: 62,
               destinations: const [
@@ -349,8 +324,8 @@ void _invalidateServerProviders() {
           MediaQuery(
             data: MediaQuery.of(context).copyWith(
               padding: MediaQuery.of(context).padding.copyWith(
-                bottom: MediaQuery.of(context).padding.bottom,
-              ),
+                    bottom: MediaQuery.of(context).padding.bottom,
+                  ),
             ),
             child: IndexedStack(
               index: _selectedIndex,
@@ -388,7 +363,7 @@ void _invalidateServerProviders() {
     );
 
     return ScaffoldMessenger(
-      child: Stack(
+        child: Stack(
       children: [
         scaffold,
 
@@ -409,7 +384,7 @@ void _invalidateServerProviders() {
                   child: Opacity(opacity: opacity, child: child!),
                 );
               },
-              child: _buildFloatingDock(scheme, accentColor),
+              child: _buildFloatingDock(scheme),
             ),
           ),
 
@@ -455,7 +430,7 @@ void _invalidateServerProviders() {
             ),
           ),
       ],
-      )); // Stack / ScaffoldMessenger
+    )); // Stack / ScaffoldMessenger
   }
 }
 
@@ -467,7 +442,6 @@ class _FloatingNavItem extends StatelessWidget {
   final String label;
   final bool selected;
   final ColorScheme scheme;
-  final Color? accentColor;
   final VoidCallback onTap;
 
   const _FloatingNavItem({
@@ -476,47 +450,41 @@ class _FloatingNavItem extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.scheme,
-    required this.accentColor,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     // Selection pill colour: accent when available, else system secondary container.
-    final pillColor = selected
-        ? (accentColor != null
-            ? accentColor!.withValues(alpha: 0.42)
-            : scheme.secondaryContainer)
-        : Colors.transparent;
+    final pillColor = selected ? scheme.secondaryContainer : Colors.transparent;
 
     // Icon/label colour on the pill: white on accent (always dark dock bg),
     // else the standard onSecondaryContainer token.
     // Guard against light accents — white text on a light pill is invisible.
-    final isLightAccent = accentColor != null &&
-        ThemeData.estimateBrightnessForColor(accentColor!) == Brightness.light;
-    final activeColor = accentColor != null && !isLightAccent
-        ? Colors.white
-        : scheme.onSecondaryContainer;
+    final activeColor = scheme.onSecondaryContainer;
 
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        // vertical 7 → pill is 38 tall; horizontal 10 gives the pill breathing
-        // room inside its cell so it reads as an indicator, not a filled cell.
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeInOut,
-          decoration: BoxDecoration(
-            color: pillColor,
-            borderRadius: BorderRadius.circular(_kPillRadius),
-          ),
-          child: Center(
-            child: Icon(
-              selected ? selectedIcon : icon,
-              size: 26,
-              color: selected ? activeColor : scheme.onSurfaceVariant,
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(_kPillRadius),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+            decoration: BoxDecoration(
+              color: pillColor,
+              borderRadius: BorderRadius.circular(_kPillRadius),
+            ),
+            child: Center(
+              child: Icon(
+                selected ? selectedIcon : icon,
+                size: 26,
+                color: selected ? activeColor : scheme.onSurfaceVariant,
+              ),
             ),
           ),
         ),

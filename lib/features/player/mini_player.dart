@@ -20,13 +20,9 @@ class MiniPlayer extends ConsumerWidget {
     final floatingNav = ref.watch(
       preferencesNotifierProvider.select((p) => p.floatingNavBar),
     );
-    // Accent color is already being computed via currentAccentColorProvider;
-    // watching it here triggers the dominantColorProvider pre-warm as well.
-    final accentColor = ref.watch(currentAccentColorProvider);
-
     return floatingNav
-        ? FloatingMiniPlayer(song: song, onOpen: onOpen, accentColor: accentColor)
-        : _ClassicMiniPlayer(song: song, onOpen: onOpen, accentColor: accentColor);
+        ? FloatingMiniPlayer(song: song, onOpen: onOpen)
+        : _ClassicMiniPlayer(song: song, onOpen: onOpen);
   }
 }
 
@@ -43,8 +39,7 @@ const _kClassicShapeCurve = Curves.easeInOutCubicEmphasized;
 class _ClassicMiniPlayer extends ConsumerWidget {
   final Song song;
   final VoidCallback onOpen;
-  final Color? accentColor;
-  const _ClassicMiniPlayer({required this.song, required this.onOpen, this.accentColor});
+  const _ClassicMiniPlayer({required this.song, required this.onOpen});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -53,12 +48,12 @@ class _ClassicMiniPlayer extends ConsumerWidget {
       playerStateStreamProvider.select((s) => s.valueOrNull?.playing ?? false),
     );
 
-    final bg = accentColor != null
-        ? Color.lerp(accentColor!, scheme.surface, 0.55)!
-        : Color.lerp(scheme.surface, scheme.primaryContainer, 0.28)!;
+    final bg = scheme.surfaceContainerHigh;
 
-    final topRadius = isPlaying ? _kClassicPlayingTopRadius : _kClassicPausedTopRadius;
-    final thumbRadius = isPlaying ? _kClassicThumbPlaying : _kClassicThumbPaused;
+    final topRadius =
+        isPlaying ? _kClassicPlayingTopRadius : _kClassicPausedTopRadius;
+    final thumbRadius =
+        isPlaying ? _kClassicThumbPlaying : _kClassicThumbPaused;
 
     return GestureDetector(
       onTap: onOpen,
@@ -71,65 +66,68 @@ class _ClassicMiniPlayer extends ConsumerWidget {
           borderRadius: BorderRadius.vertical(top: Radius.circular(topRadius)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.50),
-              blurRadius: 22,
-              offset: const Offset(0, -5),
+              color: scheme.shadow.withValues(alpha: 0.22),
+              blurRadius: 8,
+              offset: const Offset(0, -2),
             ),
           ],
+          border: Border.all(
+            color: scheme.outlineVariant.withValues(alpha: 0.35),
+          ),
         ),
         child: Container(
           height: 72,
           color: bg,
           child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const RepaintBoundary(child: _MiniPlayerProgress()),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Row(
-                      children: [
-                        TweenAnimationBuilder<double>(
-                          tween: Tween<double>(end: thumbRadius),
-                          duration: _kClassicShapeDuration,
-                          curve: _kClassicShapeCurve,
-                          builder: (_, r, __) => CoverArtImage(
-                            coverArtId: song.coverArt,
-                            externalUrl: song.externalCoverUrl,
-                            localPath: song.localPath,
-                            size: 44,
-                            borderRadius: r,
-                          ),
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const RepaintBoundary(child: _MiniPlayerProgress()),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(
+                    children: [
+                      TweenAnimationBuilder<double>(
+                        tween: Tween<double>(end: thumbRadius),
+                        duration: _kClassicShapeDuration,
+                        curve: _kClassicShapeCurve,
+                        builder: (_, r, __) => CoverArtImage(
+                          coverArtId: song.coverArt,
+                          externalUrl: song.externalCoverUrl,
+                          localPath: song.localPath,
+                          size: 44,
+                          borderRadius: r,
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(song.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 14,
-                                      color: scheme.onSurface)),
-                              Text(song.artist,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      color: scheme.onSurfaceVariant)),
-                            ],
-                          ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(song.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 14,
+                                    color: scheme.onSurface)),
+                            Text(song.artist,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: scheme.onSurfaceVariant)),
+                          ],
                         ),
-                        const RepaintBoundary(child: _MiniPlayerControls()),
-                      ],
-                    ),
+                      ),
+                      const RepaintBoundary(child: _MiniPlayerControls()),
+                    ],
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -146,8 +144,8 @@ class _MiniPlayerProgress extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     final accent = ref.watch(currentAccentColorProvider);
-    final fg = foregroundAccentColor(accent, scheme.brightness)
-        ?? scheme.primary;
+    final fg =
+        foregroundAccentColor(accent, scheme.brightness) ?? scheme.primary;
     final position =
         ref.watch(positionStreamProvider).valueOrNull ?? Duration.zero;
     final duration = ref.watch(durationStreamProvider).valueOrNull;
@@ -158,8 +156,7 @@ class _MiniPlayerProgress extends ConsumerWidget {
       value: progress.toDouble(),
       minHeight: 2,
       backgroundColor: Colors.transparent,
-      valueColor:
-          AlwaysStoppedAnimation(fg),
+      valueColor: AlwaysStoppedAnimation(fg),
     );
   }
 }
@@ -183,9 +180,8 @@ class _MiniPlayerControls extends ConsumerWidget {
               ref.read(audioHandlerNotifierProvider)?.skipToPrevious(),
         ),
         IconButton(
-          icon: Icon(isPlaying
-              ? Icons.pause_rounded
-              : Icons.play_arrow_rounded),
+          icon:
+              Icon(isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
           iconSize: 28,
           onPressed: () {
             final h = ref.read(audioHandlerNotifierProvider);
@@ -195,8 +191,7 @@ class _MiniPlayerControls extends ConsumerWidget {
         IconButton(
           icon: const Icon(Icons.skip_next_rounded),
           iconSize: 24,
-          onPressed: () =>
-              ref.read(audioHandlerNotifierProvider)?.skipToNext(),
+          onPressed: () => ref.read(audioHandlerNotifierProvider)?.skipToNext(),
         ),
       ],
     );

@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/song.dart';
@@ -6,13 +5,11 @@ import '../../../core/providers.dart';
 import '../../../shared/theme/app_theme.dart';
 import '../../../shared/widgets/cover_art_image.dart';
 
-// Paused: near-pill (28) card + circular (20) thumb — fully rounded, at rest.
-// Playing: 16 px card (matches dock radius) + 10 px thumb (half the card).
-// Shadow morphs in lockstep with the card via the same AnimatedContainer.
-const _kPausedRadius = 28.0;
-const _kPlayingRadius = 16.0;   // matches _kDockRadius in main_shell
-const _kThumbPaused = 20.0;     // full circle on 40 px thumbnail
-const _kThumbPlaying = 10.0;    // ≈ half of _kPlayingRadius — same curvature family
+// The mini player uses the same Android-first tonal surface as the dock.
+// Its shape remains a compact rounded rectangle in both playback states so the
+// two bottom surfaces read as one Material 3 group rather than morphing cards.
+const _kCardRadius = 20.0;
+const _kThumbRadius = 12.0;
 
 const _kShapeDuration = Duration(milliseconds: 400);
 const _kShapeCurve = Curves.easeInOutCubicEmphasized;
@@ -20,13 +17,10 @@ const _kShapeCurve = Curves.easeInOutCubicEmphasized;
 class FloatingMiniPlayer extends ConsumerWidget {
   final Song song;
   final VoidCallback onOpen;
-  final Color? accentColor;
-
   const FloatingMiniPlayer({
     super.key,
     required this.song,
     required this.onOpen,
-    this.accentColor,
   });
 
   @override
@@ -36,99 +30,84 @@ class FloatingMiniPlayer extends ConsumerWidget {
       playerStateStreamProvider.select((s) => s.valueOrNull?.playing ?? false),
     );
 
-    final cardRadius = isPlaying
-        ? BorderRadius.circular(_kPlayingRadius)
-        : BorderRadius.circular(_kPausedRadius);
-
-    final thumbRadius = isPlaying ? _kThumbPlaying : _kThumbPaused;
-    final bgColor = AppTheme.dockBackground(accentColor, scheme);
+    final bgColor = scheme.surfaceContainerHigh;
+    final cardRadius = BorderRadius.circular(_kCardRadius);
 
     return Padding(
-      // Side inset matches the dock. Bottom gap sits 6 px above the dock top.
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
-      child: GestureDetector(
-        onTap: onOpen,
-        // RepaintBoundary isolates shape-morph repaints from the surrounding
-        // dock so the animation doesn't dirty the dock's compositing layer.
-        child: RepaintBoundary(
-          child: AnimatedContainer(
-            duration: _kShapeDuration,
-            curve: _kShapeCurve,
-            clipBehavior: Clip.antiAlias,
-            // Shadow lives on the same decoration as the card so it morphs
-            // in lockstep — a fixed-radius shadow drifted behind the card
-            // during the transition and read as a second, misaligned shape.
-            decoration: BoxDecoration(
+      // Side inset matches the dock. Bottom gap separates the two tonal
+      // surfaces without producing a large shadow halo.
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Material(
+        color: bgColor,
+        elevation: 1,
+        shadowColor: scheme.shadow.withValues(alpha: 0.22),
+        shape: RoundedRectangleBorder(
+          borderRadius: cardRadius,
+          side: BorderSide(
+            color: scheme.outlineVariant.withValues(alpha: 0.35),
+          ),
+        ),
+        borderRadius: cardRadius,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onOpen,
+          // RepaintBoundary isolates shape-morph repaints from the surrounding
+          // dock so the animation doesn't dirty the dock's compositing layer.
+          child: RepaintBoundary(
+            child: Container(
+              height: 62,
               color: bgColor,
-              borderRadius: cardRadius,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.42),
-                  blurRadius: 24,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-              child: Container(
-                height: 62,
-                color: bgColor,
-                child: Stack(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      child: Row(
-                        children: [
-                          TweenAnimationBuilder<double>(
-                            tween: Tween<double>(end: thumbRadius),
-                            duration: _kShapeDuration,
-                            curve: _kShapeCurve,
-                            // CoverArtImage owns the ClipRRect so it must
-                            // rebuild each tick — borderRadius drives the clip.
-                            builder: (_, r, __) => CoverArtImage(
-                              coverArtId: song.coverArt,
-                              externalUrl: song.externalCoverUrl,
-                              localPath: song.localPath,
-                              size: 40,
-                              borderRadius: r,
-                            ),
+              child: Stack(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: Row(
+                      children: [
+                        TweenAnimationBuilder<double>(
+                          tween: Tween<double>(end: _kThumbRadius),
+                          duration: _kShapeDuration,
+                          curve: _kShapeCurve,
+                          builder: (_, r, __) => CoverArtImage(
+                            coverArtId: song.coverArt,
+                            externalUrl: song.externalCoverUrl,
+                            localPath: song.localPath,
+                            size: 40,
+                            borderRadius: r,
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(song.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 13,
-                                        color: scheme.onSurface)),
-                                Text(song.artist,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                        fontSize: 12,
-                                        color: scheme.onSurfaceVariant)),
-                              ],
-                            ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(song.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13,
+                                      color: scheme.onSurface)),
+                              Text(song.artist,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: scheme.onSurfaceVariant)),
+                            ],
                           ),
-                          const RepaintBoundary(child: _MiniPlayerControls()),
-                        ],
-                      ),
+                        ),
+                        const RepaintBoundary(child: _MiniPlayerControls()),
+                      ],
                     ),
-                    // Progress bar — painted at card bottom, clipped to card radius.
-                    const Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: RepaintBoundary(child: _MiniPlayerProgress()),
-                    ),
-                  ],
-                ),
+                  ),
+                  const Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: RepaintBoundary(child: _MiniPlayerProgress()),
+                  ),
+                ],
               ),
             ),
           ),
@@ -149,8 +128,8 @@ class _MiniPlayerProgress extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     final accent = ref.watch(currentAccentColorProvider);
-    final fg = foregroundAccentColor(accent, scheme.brightness)
-        ?? scheme.primary;
+    final fg =
+        foregroundAccentColor(accent, scheme.brightness) ?? scheme.primary;
     final position =
         ref.watch(positionStreamProvider).valueOrNull ?? Duration.zero;
     final duration = ref.watch(durationStreamProvider).valueOrNull;
@@ -161,8 +140,7 @@ class _MiniPlayerProgress extends ConsumerWidget {
       value: progress.toDouble(),
       minHeight: 2,
       backgroundColor: Colors.transparent,
-      valueColor:
-          AlwaysStoppedAnimation(fg),
+      valueColor: AlwaysStoppedAnimation(fg),
     );
   }
 }
@@ -185,8 +163,8 @@ class _MiniPlayerControls extends ConsumerWidget {
               ref.read(audioHandlerNotifierProvider)?.skipToPrevious(),
         ),
         IconButton(
-          icon: Icon(
-              isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
+          icon:
+              Icon(isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
           iconSize: 28,
           onPressed: () {
             final h = ref.read(audioHandlerNotifierProvider);
@@ -196,8 +174,7 @@ class _MiniPlayerControls extends ConsumerWidget {
         IconButton(
           icon: const Icon(Icons.skip_next_rounded),
           iconSize: 24,
-          onPressed: () =>
-              ref.read(audioHandlerNotifierProvider)?.skipToNext(),
+          onPressed: () => ref.read(audioHandlerNotifierProvider)?.skipToNext(),
         ),
       ],
     );

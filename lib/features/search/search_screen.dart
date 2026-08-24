@@ -1,6 +1,13 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../core/models/album.dart';
+import '../../core/models/artist.dart';
+import '../../core/models/recommended_track.dart';
+import '../../core/models/search_results.dart';
+import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/deezer_track_tile.dart';
@@ -9,15 +16,12 @@ import '../../shared/widgets/song_tile.dart';
 import '../library/album_detail_screen.dart';
 import '../library/artist_detail_screen.dart';
 
-// M3 Expressive motion tokens (mirrors home_screen.dart).
 const _kEmphasizedDecelerate = Cubic(0.05, 0.7, 0.1, 1.0);
 const _kEmphasizedDuration = Duration(milliseconds: 400);
 
-// Stagger delays for result sections (Songs → Artists → Albums → Deezer).
-const _kStagger0 = Duration.zero;
-const _kStagger1 = Duration(milliseconds: 60);
-const _kStagger2 = Duration(milliseconds: 120);
-const _kStagger3 = Duration(milliseconds: 180);
+// Search filters are local UI state: the query remains shared so the tab keeps
+// its query when IndexedStack switches screens.
+enum _SearchFilter { all, library, songs, albums, artists, deezer }
 
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key});
@@ -28,29 +32,51 @@ class SearchScreen extends ConsumerStatefulWidget {
 
 class _SearchScreenState extends ConsumerState<SearchScreen> {
   final _controller = TextEditingController();
+  final _focusNode = FocusNode();
   Timer? _debounceTimer;
+  _SearchFilter _filter = _SearchFilter.all;
 
   @override
   void initState() {
     super.initState();
-    // Seed controller from provider state in case the widget tree rebuilt
-    // while a query was active.
     final existing = ref.read(searchQueryProvider);
     if (existing.isNotEmpty) _controller.text = existing;
   }
 
   @override
   void dispose() {
-    _controller.dispose();
     _debounceTimer?.cancel();
+    _controller.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
-  void _onSearchChanged(String v) {
+  void _publishQuery({bool saveFocus = false}) {
     _debounceTimer?.cancel();
+    final query = _controller.text.trim();
+    ref.read(searchQueryProvider.notifier).state = query;
+    if (saveFocus) _focusNode.requestFocus();
+  }
+
+  void _onSearchChanged(String value) {
+    _debounceTimer?.cancel();
+    final query = value.trim();
     _debounceTimer = Timer(const Duration(milliseconds: 300), () {
-      ref.read(searchQueryProvider.notifier).state = v;
+      if (!mounted) return;
+      ref.read(searchQueryProvider.notifier).state = query;
     });
+  }
+
+  void _clearSearch() {
+    _debounceTimer?.cancel();
+    _controller.clear();
+    ref.read(searchQueryProvider.notifier).state = '';
+    _focusNode.requestFocus();
+  }
+
+  void _retry() {
+    ref.invalidate(searchResultsProvider);
+    ref.invalidate(deezerSearchProvider);
   }
 
   @override
@@ -59,185 +85,58 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final resultsAsync = ref.watch(searchResultsProvider);
     final deezerAsync = ref.watch(deezerSearchProvider);
     final scheme = Theme.of(context).colorScheme;
+    final isWide = MediaQuery.sizeOf(context).width >= 700;
 
     return Scaffold(
-      body: SafeArea(top: true, bottom: false,
+      body: SafeArea(
+        top: true,
+        bottom: false,
         child: Column(
           children: [
             const OfflineBanner(),
-            // Search bar
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: SearchBar(
-                controller: _controller,
-                hintText: 'Songs, albums, artists…',
-                leading: const Icon(Icons.search_rounded),
-                trailing: [
-                  if (query.isNotEmpty)
-                    IconButton(
-                      icon: const Icon(Icons.clear_rounded),
-                      onPressed: () => _controller.clear(),
-                    ),
-                ],
-                onChanged: _onSearchChanged,
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 960),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: SearchBar(
+                  controller: _controller,
+                  focusNode: _focusNode,
+                  hintText: 'Songs, albums, artists…',
+                  leading: const Icon(Icons.search_rounded),
+                  trailing: [
+                    if (_controller.text.isNotEmpty || query.isNotEmpty)
+                      IconButton(
+                        icon: const Icon(Icons.clear_rounded),
+                        tooltip: 'Clear search',
+                        onPressed: _clearSearch,
+                      ),
+                  ],
+                  onChanged: _onSearchChanged,
+                  onSubmitted: (_) {
+                    _publishQuery();
+                    _focusNode.unfocus();
+                  },
+                ),
               ),
             ),
-            // Results
+            if (query.isNotEmpty)
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 960),
+                child: _FilterBar(
+                  filter: _filter,
+                  isWide: isWide,
+                  onChanged: (filter) => setState(() => _filter = filter),
+                ),
+              ),
             Expanded(
               child: query.isEmpty
-                  ? _EmptySearch()
-                  : resultsAsync.when(
-                      loading: () =>
-                          const Center(child: CircularProgressIndicator()),
-                      error: (e, _) => Center(child: Text('$e')),
-                      data: (results) {
-                        final hasLibrary = results.songs.isNotEmpty ||
-                            results.artists.isNotEmpty ||
-                            results.albums.isNotEmpty;
-                        final deezerTracks =
-                            deezerAsync.valueOrNull ?? const [];
-                        final deezerLoading = deezerAsync.isLoading;
-
-                        if (!hasLibrary && !deezerLoading && deezerTracks.isEmpty) {
-                          return Center(
-                            child: Text('No results for "$query"',
-                                style: TextStyle(
-                                    color: scheme.onSurfaceVariant)),
-                          );
-                        }
-
-                        // Show spinner while waiting for first results
-                        if (!hasLibrary && deezerLoading) {
-                          return const Center(
-                              child: CircularProgressIndicator());
-                        }
-
-                        return ListView(
-                          keyboardDismissBehavior:
-                              ScrollViewKeyboardDismissBehavior.onDrag,
-                          padding:
-                              const EdgeInsets.only(bottom: 16),
-                          children: [
-                            if (results.songs.isNotEmpty)
-                              _fadeIn(
-                                delay: _kStagger0,
-                                child: _Section(
-                                  label: 'Songs',
-                                  children: results.songs.map((s) =>
-                                    RepaintBoundary(
-                                      key: ValueKey('search-song-${s.id}'),
-                                      child: SongTile(
-                                        song: s,
-                                        showAlbum: true,
-                                        onTap: () async {
-                                          final handler = ref.read(
-                                              audioHandlerNotifierProvider);
-                                          if (handler == null) return;
-                                          FocusScope.of(context).unfocus();
-                                          // If nothing playing, load fresh.
-                                          final currentSong = ref
-                                              .read(currentSongStreamProvider)
-                                              .valueOrNull;
-                                          if (currentSong == null) {
-                                            await handler.loadQueue([s]);
-                                          } else {
-                                            await handler.playNext(s);
-                                            await handler.skipToNext();
-                                          }
-                                        },
-                                      ),
-                                    ),
-                                  ).toList(),
-                                ),
-                              ),
-                            if (results.artists.isNotEmpty)
-                              _fadeIn(
-                                delay: _kStagger1,
-                                child: _Section(
-                                  label: 'Artists',
-                                  children: results.artists.map((a) =>
-                                    RepaintBoundary(
-                                      key: ValueKey('search-artist-${a.id}'),
-                                      child: ListTile(
-                                        leading: CoverArtImage(
-                                            coverArtId: a.coverArt,
-                                            size: 48,
-                                            borderRadius: 24),
-                                        title: Text(a.name),
-                                        subtitle: Text(
-                                            '${a.albumCount} ${a.albumCount == 1 ? 'album' : 'albums'}',
-                                            style: TextStyle(
-                                                color: scheme.onSurfaceVariant)),
-                                        trailing: const Icon(
-                                            Icons.chevron_right_rounded),
-                                        onTap: () => Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) =>
-                                                ArtistDetailScreen(artist: a),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ).toList(),
-                                ),
-                              ),
-                            if (results.albums.isNotEmpty)
-                              _fadeIn(
-                                delay: _kStagger2,
-                                child: _Section(
-                                  label: 'Albums',
-                                  children: results.albums.map((a) =>
-                                    RepaintBoundary(
-                                      key: ValueKey('search-album-${a.id}'),
-                                      child: ListTile(
-                                        leading: CoverArtImage(
-                                            coverArtId: a.coverArt,
-                                            size: 48),
-                                        title: Text(a.name),
-                                        subtitle: Text(a.artist,
-                                            style: TextStyle(
-                                                color:
-                                                    scheme.onSurfaceVariant)),
-                                        trailing: const Icon(
-                                            Icons.chevron_right_rounded),
-                                        onTap: () => Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) =>
-                                                AlbumDetailScreen(album: a),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ).toList(),
-                                ),
-                              ),
-                            // From Deezer
-                            if (deezerTracks.isNotEmpty)
-                              _fadeIn(
-                                delay: _kStagger3,
-                                child: _Section(
-                                  label: 'From Deezer',
-                                  children: deezerTracks.map((t) =>
-                                    RepaintBoundary(
-                                      key: ValueKey(
-                                          'search-deezer-${t.deezerId}'),
-                                      child: DeezerTrackTile(track: t),
-                                    ),
-                                  ).toList(),
-                                ),
-                              ),
-                            if (deezerTracks.isEmpty && deezerLoading)
-                              const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 16),
-                                child: Center(
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2)),
-                              ),
-                          ],
-                        );
-                      },
+                  ? const _EmptySearch()
+                  : _SearchResults(
+                      query: query,
+                      filter: _filter,
+                      resultsAsync: resultsAsync,
+                      deezerAsync: deezerAsync,
+                      onRetry: _retry,
                     ),
             ),
           ],
@@ -247,37 +146,336 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 }
 
-// ---------------------------------------------------------------------------
+class _FilterBar extends StatelessWidget {
+  final _SearchFilter filter;
+  final bool isWide;
+  final ValueChanged<_SearchFilter> onChanged;
 
-/// Fade + upward slide entrance animation. Mirrors home_screen._fadeIn.
-Widget _fadeIn({required Widget child, Duration delay = Duration.zero}) {
-  return TweenAnimationBuilder<double>(
-    tween: Tween(begin: 0.0, end: 1.0),
-    duration: _kEmphasizedDuration + delay,
-    curve: Interval(
-      delay.inMilliseconds / (_kEmphasizedDuration + delay).inMilliseconds,
-      1.0,
-      curve: _kEmphasizedDecelerate,
-    ),
-    builder: (_, value, ch) => Opacity(
-      opacity: value,
-      child: Transform.translate(
-        offset: Offset(0, 16 * (1 - value)),
-        child: ch,
-      ),
-    ),
-    child: child,
-  );
-}
-
-/// A labeled section in the results list.
-class _Section extends StatelessWidget {
-  final String label;
-  final List<Widget> children;
-  const _Section({required this.label, required this.children});
+  const _FilterBar({
+    required this.filter,
+    required this.isWide,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final labels = <_SearchFilter, String>{
+      _SearchFilter.all: 'All',
+      _SearchFilter.library: 'Library',
+      _SearchFilter.songs: 'Songs',
+      _SearchFilter.albums: 'Albums',
+      _SearchFilter.artists: 'Artists',
+      _SearchFilter.deezer: 'Deezer',
+    };
+    final segments = <ButtonSegment<_SearchFilter>>[
+      for (final entry in labels.entries)
+        ButtonSegment<_SearchFilter>(
+          value: entry.key,
+          label: Text(entry.value),
+          icon: Icon(_filterIcon(entry.key)),
+        ),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: SegmentedButton<_SearchFilter>(
+          segments: segments,
+          selected: {filter},
+          onSelectionChanged: (selection) => onChanged(selection.first),
+          showSelectedIcon: false,
+          style: SegmentedButton.styleFrom(
+            visualDensity:
+                isWide ? VisualDensity.standard : VisualDensity.compact,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+IconData _filterIcon(_SearchFilter filter) {
+  switch (filter) {
+    case _SearchFilter.all:
+      return Icons.apps_rounded;
+    case _SearchFilter.library:
+      return Icons.library_music_rounded;
+    case _SearchFilter.songs:
+      return Icons.music_note_rounded;
+    case _SearchFilter.albums:
+      return Icons.album_rounded;
+    case _SearchFilter.artists:
+      return Icons.person_rounded;
+    case _SearchFilter.deezer:
+      return Icons.public_rounded;
+  }
+}
+
+class _SearchResults extends StatelessWidget {
+  final String query;
+  final _SearchFilter filter;
+  final AsyncValue<SearchResults> resultsAsync;
+  final AsyncValue<List<RecommendedTrack>> deezerAsync;
+  final VoidCallback onRetry;
+
+  const _SearchResults({
+    required this.query,
+    required this.filter,
+    required this.resultsAsync,
+    required this.deezerAsync,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return resultsAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (_, __) => _SearchError(query: query, onRetry: onRetry),
+      data: (results) {
+        final showLibrary = filter != _SearchFilter.deezer;
+        final showDeezer =
+            filter == _SearchFilter.all || filter == _SearchFilter.deezer;
+        final showSongs = showLibrary &&
+            (filter == _SearchFilter.all ||
+                filter == _SearchFilter.library ||
+                filter == _SearchFilter.songs);
+        final showArtists = showLibrary &&
+            (filter == _SearchFilter.all ||
+                filter == _SearchFilter.library ||
+                filter == _SearchFilter.artists);
+        final showAlbums = showLibrary &&
+            (filter == _SearchFilter.all ||
+                filter == _SearchFilter.library ||
+                filter == _SearchFilter.albums);
+        final deezerTracks =
+            deezerAsync.valueOrNull ?? const <RecommendedTrack>[];
+        final hasVisibleLibrary = (showSongs && results.songs.isNotEmpty) ||
+            (showArtists && results.artists.isNotEmpty) ||
+            (showAlbums && results.albums.isNotEmpty);
+        final deezerLoading = deezerAsync.isLoading;
+        final deezerError = deezerAsync.hasError;
+        final hasVisibleResult =
+            hasVisibleLibrary || (showDeezer && deezerTracks.isNotEmpty);
+
+        if (!hasVisibleResult &&
+            (filter == _SearchFilter.deezer || !hasVisibleLibrary) &&
+            deezerLoading) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (!hasVisibleResult &&
+            !deezerLoading &&
+            (!showDeezer || !deezerError)) {
+          return _NoResults(query: query);
+        }
+        if (!hasVisibleResult && showDeezer && deezerError) {
+          return _SearchError(query: query, onRetry: onRetry);
+        }
+
+        final sections = <Widget>[];
+        if (showSongs && results.songs.isNotEmpty) {
+          sections.add(_AnimatedSection(
+            label: 'Songs · ${results.songs.length}',
+            child: _SongResults(songs: results.songs),
+          ));
+        }
+        if (showArtists && results.artists.isNotEmpty) {
+          sections.add(_AnimatedSection(
+            label: 'Artists · ${results.artists.length}',
+            child: _ArtistResults(artists: results.artists),
+          ));
+        }
+        if (showAlbums && results.albums.isNotEmpty) {
+          sections.add(_AnimatedSection(
+            label: 'Albums · ${results.albums.length}',
+            child: _AlbumResults(albums: results.albums),
+          ));
+        }
+        if (showDeezer && deezerTracks.isNotEmpty) {
+          sections.add(_AnimatedSection(
+            label: 'From Deezer · ${deezerTracks.length}',
+            child: _DeezerResults(tracks: deezerTracks),
+          ));
+        }
+        if (showDeezer && deezerLoading) {
+          sections.add(const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          ));
+        }
+        if (showDeezer && deezerError && hasVisibleLibrary) {
+          sections.add(const _PartialError(
+            message:
+                'Deezer results are unavailable. Library results are still shown.',
+          ));
+        }
+
+        return Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 960),
+            child: ListView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.only(bottom: 24),
+              children: sections,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SongResults extends StatelessWidget {
+  final List<Song> songs;
+  const _SongResults({required this.songs});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: songs
+          .map((song) => RepaintBoundary(
+                key: ValueKey('search-song-${song.id}'),
+                child: SongTile(
+                  song: song,
+                  showAlbum: true,
+                  onTap: () async {
+                    final handler =
+                        ProviderScope.containerOf(context, listen: false)
+                            .read(audioHandlerNotifierProvider);
+                    if (handler == null) return;
+                    FocusScope.of(context).unfocus();
+                    final current =
+                        ProviderScope.containerOf(context, listen: false)
+                            .read(currentSongStreamProvider)
+                            .valueOrNull;
+                    if (current == null) {
+                      await handler.loadQueue([song]);
+                    } else {
+                      await handler.playNext(song);
+                      await handler.skipToNext();
+                    }
+                  },
+                ),
+              ))
+          .toList(),
+    );
+  }
+}
+
+class _ArtistResults extends StatelessWidget {
+  final List<Artist> artists;
+  const _ArtistResults({required this.artists});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      children: artists
+          .map((artist) => RepaintBoundary(
+                key: ValueKey('search-artist-${artist.id}'),
+                child: ListTile(
+                  leading: CoverArtImage(
+                      coverArtId: artist.coverArt, size: 48, borderRadius: 24),
+                  title: Text(artist.name),
+                  subtitle: Text(
+                    '${artist.albumCount} ${artist.albumCount == 1 ? 'album' : 'albums'}',
+                    style: TextStyle(color: scheme.onSurfaceVariant),
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => ArtistDetailScreen(artist: artist)),
+                  ),
+                ),
+              ))
+          .toList(),
+    );
+  }
+}
+
+class _AlbumResults extends StatelessWidget {
+  final List<Album> albums;
+  const _AlbumResults({required this.albums});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      children: albums
+          .map((album) => RepaintBoundary(
+                key: ValueKey('search-album-${album.id}'),
+                child: ListTile(
+                  leading: CoverArtImage(coverArtId: album.coverArt, size: 48),
+                  title: Text(album.name),
+                  subtitle: Text(album.artist,
+                      style: TextStyle(color: scheme.onSurfaceVariant)),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => AlbumDetailScreen(album: album)),
+                  ),
+                ),
+              ))
+          .toList(),
+    );
+  }
+}
+
+class _DeezerResults extends StatelessWidget {
+  final List<RecommendedTrack> tracks;
+  const _DeezerResults({required this.tracks});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: tracks
+          .map((track) => RepaintBoundary(
+                key: ValueKey('search-deezer-${track.deezerId}'),
+                child: DeezerTrackTile(track: track),
+              ))
+          .toList(),
+    );
+  }
+}
+
+class _AnimatedSection extends StatelessWidget {
+  final String label;
+  final Widget child;
+  const _AnimatedSection({required this.label, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final disableAnimations = MediaQuery.disableAnimationsOf(context);
+    final section = _Section(label: label, child: child);
+    if (disableAnimations) return section;
+    return TweenAnimationBuilder<double>(
+      key: ValueKey(label),
+      tween: Tween(begin: 0, end: 1),
+      duration: _kEmphasizedDuration,
+      curve: _kEmphasizedDecelerate,
+      builder: (_, value, child) => Opacity(
+        opacity: value,
+        child: Transform.translate(
+          offset: Offset(0, 12 * (1 - value)),
+          child: child,
+        ),
+      ),
+      child: section,
+    );
+  }
+}
+
+class _Section extends StatelessWidget {
+  final String label;
+  final Widget child;
+  const _Section({required this.label, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -285,33 +483,99 @@ class _Section extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Text(label,
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurface,
+                    color: scheme.onSurface,
                   )),
         ),
-        ...children,
+        child,
       ],
     );
   }
 }
 
+class _NoResults extends StatelessWidget {
+  final String query;
+  const _NoResults({required this.query});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Text('No results for "$query"',
+          style:
+              TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+    );
+  }
+}
+
+class _PartialError extends StatelessWidget {
+  final String message;
+  const _PartialError({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Text(message, style: TextStyle(color: scheme.onSurfaceVariant)),
+    );
+  }
+}
+
+class _SearchError extends StatelessWidget {
+  final String query;
+  final VoidCallback onRetry;
+  const _SearchError({required this.query, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.cloud_off_rounded,
+                size: 48, color: scheme.onSurfaceVariant),
+            const SizedBox(height: 12),
+            Text('Could not search for "$query"',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Text('Check your connection and try again.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: scheme.onSurfaceVariant)),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _EmptySearch extends StatelessWidget {
+  const _EmptySearch();
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
       child: Center(
         child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.search_rounded,
-              size: 64,
-              color: Theme.of(context).colorScheme.onSurfaceVariant),
-          const SizedBox(height: 12),
-          Text('Search your library',
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color:
-                      Theme.of(context).colorScheme.onSurfaceVariant)),
-        ],
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.search_rounded,
+                size: 64,
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
+            const SizedBox(height: 12),
+            Text('Search your library',
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ],
         ),
       ),
     );

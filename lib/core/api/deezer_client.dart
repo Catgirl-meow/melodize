@@ -7,35 +7,88 @@ class DeezerAccountStatus {
   final bool arlValid;
   final String userName;
   final int offerId;
-  final bool hasPaidOffer;
+
+  /// Whether Deezer explicitly reported a paid offer. Null means the
+  /// response did not include reliable offer metadata; that is not proof of
+  /// an expired subscription when the ARL itself is valid.
+  final bool? hasPaidOffer;
   final bool isFreemiumCountry;
+
+  factory DeezerAccountStatus.fromUserJson(Map<String, dynamic> user) {
+    final userId = _asInt(user['USER_ID']);
+    if (userId == null || userId == 0) return const DeezerAccountStatus();
+
+    // Deezer has changed the shape/types of offer metadata over time. An
+    // absent or non-numeric OFFER_ID is unknown, not proof of expiration;
+    // the companion's successful download is also a valid capability signal.
+    final rawOfferId = _asInt(user['OFFER_ID']);
+    // Zero is commonly used for absent/legacy offer metadata. Do not turn a
+    // valid ARL into a false subscription-expired warning from that value.
+    final hasPaidOffer =
+        rawOfferId == null || rawOfferId == 0 ? null : rawOfferId > 0;
+    final isFreemiumCountry = _asBool(user['IS_FREEMIUM_COUNTRY']) ?? false;
+    final userName = (user['NAME'] as String?)?.trim() ?? '';
+
+    return DeezerAccountStatus(
+      arlValid: true,
+      userName: userName,
+      offerId: rawOfferId ?? 0,
+      hasPaidOffer: hasPaidOffer,
+      isFreemiumCountry: isFreemiumCountry,
+    );
+  }
 
   const DeezerAccountStatus({
     this.arlValid = false,
     this.userName = '',
     this.offerId = 0,
-    this.hasPaidOffer = false,
+    this.hasPaidOffer,
     this.isFreemiumCountry = false,
   });
 
-  /// Whether the account has an active paid subscription that can download.
-  bool get canDownload => arlValid && (hasPaidOffer || isFreemiumCountry);
+  /// Whether the account has an explicitly confirmed plan that can download.
+  bool get canDownload =>
+      arlValid && (hasPaidOffer == true || isFreemiumCountry);
+
+  /// Whether Deezer returned enough offer metadata to classify the plan.
+  bool get subscriptionStatusKnown => hasPaidOffer != null || isFreemiumCountry;
 
   /// Human-readable subscription tier description.
   String get offerLabel {
     if (!arlValid) return 'Not connected';
-    if (hasPaidOffer) {
+    if (hasPaidOffer == true) {
       switch (offerId) {
-        case 1: return 'Deezer Premium';
-        case 2: return 'Deezer Premium Family';
-        case 4: return 'Deezer HiFi';
-        case 5: return 'Deezer HiFi Family';
-        default: return 'Deezer Premium';
+        case 1:
+          return 'Deezer Premium';
+        case 2:
+          return 'Deezer Premium Family';
+        case 4:
+          return 'Deezer HiFi';
+        case 5:
+          return 'Deezer HiFi Family';
+        default:
+          return 'Deezer Premium';
       }
     }
     if (isFreemiumCountry) return 'Deezer Free (region)';
+    if (!subscriptionStatusKnown) return 'Deezer account verified';
     return 'Free / No subscription';
   }
+}
+
+int? _asInt(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString() ?? '');
+}
+
+bool? _asBool(Object? value) {
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  final normalized = value?.toString().trim().toLowerCase();
+  if (normalized == 'true' || normalized == '1') return true;
+  if (normalized == 'false' || normalized == '0') return false;
+  return null;
 }
 
 // Free Deezer API wrapper (no API key required).
@@ -82,8 +135,8 @@ class DeezerClient {
       final q2 = Uri.encodeQueryComponent(qParts.join(' '));
       final r2 = await _dio.get('/search?q=$q2&limit=8');
       for (final t in (r2.data?['data'] as List? ?? [])) {
-        final artistObj = (t as Map<String, dynamic>)['artist']
-            as Map<String, dynamic>?;
+        final artistObj =
+            (t as Map<String, dynamic>)['artist'] as Map<String, dynamic>?;
         final id = artistObj?['id'] as int?;
         if (id != null && matches(artistObj?['name'] as String?)) return id;
       }
@@ -102,8 +155,8 @@ class DeezerClient {
       final tracks = (resp.data as Map<String, dynamic>?)?['data'] as List?;
       if (tracks == null) return [];
       return tracks
-          .map((t) =>
-              RecommendedTrack.fromDeezerJson(t as Map<String, dynamic>))
+          .map(
+              (t) => RecommendedTrack.fromDeezerJson(t as Map<String, dynamic>))
           .where((t) => t.previewUrl != null)
           .toList();
     } catch (_) {
@@ -121,7 +174,8 @@ class DeezerClient {
       final tracks = (resp.data as Map<String, dynamic>?)?['data'] as List?;
       if (tracks == null) return [];
       return tracks
-          .map((t) => RecommendedTrack.fromDeezerJson(t as Map<String, dynamic>))
+          .map(
+              (t) => RecommendedTrack.fromDeezerJson(t as Map<String, dynamic>))
           .where((t) => t.previewUrl != null && t.previewUrl!.isNotEmpty)
           .toList();
     } catch (_) {
@@ -158,9 +212,9 @@ class DeezerClient {
     );
     final results = resp.data?['results'] as Map<String, dynamic>?;
     final user = results?['USER'] as Map<String, dynamic>?;
-    final userId = user?['USER_ID'];
+    final userId = _asInt(user?['USER_ID']);
     // Anonymous (invalid ARL) responses come back with USER_ID == 0.
-    return userId is int && userId != 0;
+    return userId != null && userId != 0;
   }
 
   /// Rich Deezer account check — returns [DeezerAccountStatus] with
@@ -192,27 +246,7 @@ class DeezerClient {
     final user = results?['USER'] as Map<String, dynamic>?;
     if (user == null) return const DeezerAccountStatus();
 
-    final userId = user['USER_ID'];
-    final arlValid = userId is int && userId != 0;
-    if (!arlValid) return const DeezerAccountStatus();
-
-    // OFFER_ID: 0 or absent usually means free / expired subscription.
-    // Values 1–4 map to different paid tiers (Premium, HiFi, etc.).
-    final offerId = user['OFFER_ID'];
-    final hasPaidOffer = offerId is int && offerId > 0;
-
-    // Country-level freemium flag — some regions allow free streaming.
-    final isFreemiumCountry = user['IS_FREEMIUM_COUNTRY'] == true;
-
-    final userName = (user['NAME'] as String?)?.trim() ?? '';
-
-    return DeezerAccountStatus(
-      arlValid: true,
-      userName: userName,
-      offerId: offerId is int ? offerId : 0,
-      hasPaidOffer: hasPaidOffer,
-      isFreemiumCountry: isFreemiumCountry,
-    );
+    return DeezerAccountStatus.fromUserJson(user);
   }
 
   // Deezer catalog search.
@@ -224,7 +258,8 @@ class DeezerClient {
       final data = resp.data as Map<String, dynamic>?;
       final tracks = data?['data'] as List? ?? [];
       return tracks
-          .map((t) => RecommendedTrack.fromDeezerJson(t as Map<String, dynamic>))
+          .map(
+              (t) => RecommendedTrack.fromDeezerJson(t as Map<String, dynamic>))
           .where((t) => t.previewUrl != null)
           .toList();
     } catch (_) {
