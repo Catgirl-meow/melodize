@@ -8,7 +8,7 @@ import '../../../shared/widgets/cover_art_image.dart';
 // The mini player uses the same Android-first tonal surface as the dock.
 // Its shape remains a compact rounded rectangle in both playback states so the
 // two bottom surfaces read as one Material 3 group rather than morphing cards.
-const _kCardRadius = 20.0;
+const _kCardRadius = 18.0;
 const _kThumbRadius = 12.0;
 
 const _kShapeDuration = Duration(milliseconds: 400);
@@ -30,7 +30,13 @@ class FloatingMiniPlayer extends ConsumerWidget {
       playerStateStreamProvider.select((s) => s.valueOrNull?.playing ?? false),
     );
 
-    final bgColor = scheme.surfaceContainerHigh;
+    // Keep the player one clear tonal step above the page and below the
+    // selected navigation indicator. This remains stable with dynamic color.
+    final bgColor = Color.alphaBlend(
+      scheme.primary.withValues(alpha: 0.10),
+      scheme.surfaceContainerHigh,
+    );
+    const cardHeight = 56.0;
     final cardRadius = BorderRadius.circular(_kCardRadius);
 
     return Padding(
@@ -39,23 +45,28 @@ class FloatingMiniPlayer extends ConsumerWidget {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       child: Material(
         color: bgColor,
-        elevation: 1,
-        shadowColor: scheme.shadow.withValues(alpha: 0.22),
+        elevation: 3,
+        shadowColor: scheme.shadow.withValues(alpha: 0.34),
         shape: RoundedRectangleBorder(
           borderRadius: cardRadius,
           side: BorderSide(
-            color: scheme.outlineVariant.withValues(alpha: 0.35),
+            color: Color.alphaBlend(
+              scheme.primary.withValues(alpha: 0.42),
+              scheme.outline,
+            ),
           ),
         ),
         borderRadius: cardRadius,
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onOpen,
+          splashFactory: NoSplash.splashFactory,
+          overlayColor: const WidgetStatePropertyAll(Colors.transparent),
           // RepaintBoundary isolates shape-morph repaints from the surrounding
           // dock so the animation doesn't dirty the dock's compositing layer.
           child: RepaintBoundary(
             child: Container(
-              height: 62,
+              height: cardHeight,
               color: bgColor,
               child: Stack(
                 children: [
@@ -71,11 +82,11 @@ class FloatingMiniPlayer extends ConsumerWidget {
                             coverArtId: song.coverArt,
                             externalUrl: song.externalCoverUrl,
                             localPath: song.localPath,
-                            size: 40,
+                            size: 36,
                             borderRadius: r,
                           ),
                         ),
-                        const SizedBox(width: 10),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -138,8 +149,8 @@ class _MiniPlayerProgress extends ConsumerWidget {
         : 0.0;
     return LinearProgressIndicator(
       value: progress.toDouble(),
-      minHeight: 2,
-      backgroundColor: Colors.transparent,
+      minHeight: 3,
+      backgroundColor: scheme.outlineVariant.withValues(alpha: 0.55),
       valueColor: AlwaysStoppedAnimation(fg),
     );
   }
@@ -158,14 +169,14 @@ class _MiniPlayerControls extends ConsumerWidget {
       children: [
         IconButton(
           icon: const Icon(Icons.skip_previous_rounded),
-          iconSize: 24,
+          iconSize: 22,
           onPressed: () =>
               ref.read(audioHandlerNotifierProvider)?.skipToPrevious(),
         ),
         IconButton(
           icon:
               Icon(isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
-          iconSize: 28,
+          iconSize: 26,
           onPressed: () {
             final h = ref.read(audioHandlerNotifierProvider);
             isPlaying ? h?.pause() : h?.play();
@@ -173,7 +184,7 @@ class _MiniPlayerControls extends ConsumerWidget {
         ),
         IconButton(
           icon: const Icon(Icons.skip_next_rounded),
-          iconSize: 24,
+          iconSize: 22,
           onPressed: () => ref.read(audioHandlerNotifierProvider)?.skipToNext(),
         ),
       ],

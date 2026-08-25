@@ -12,11 +12,12 @@ import '../player/mini_player.dart';
 import '../player/now_playing_screen.dart';
 
 // Android-first Material 3 navigation geometry, shared by Android and Linux.
-const _kDockHeight = 64.0;
+// Shared Android-first navigation geometry on every platform.
+const _kDockHeight = 56.0;
 const _kDockBottom = 12.0;
 const _kDockHorizontal = 16.0;
-const _kDockRadius = 28.0;
-const _kPillRadius = 20.0;
+const _kDockRadius = 24.0;
+const _kPillRadius = 16.0;
 
 class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
@@ -154,13 +155,13 @@ class _MainShellState extends ConsumerState<MainShell>
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: _kDockHorizontal),
       child: Material(
-        color: scheme.surfaceContainer,
+        color: scheme.surfaceContainerHighest,
         elevation: 2,
-        shadowColor: scheme.shadow.withValues(alpha: 0.28),
+        shadowColor: scheme.shadow.withValues(alpha: 0.36),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(_kDockRadius),
           side: BorderSide(
-            color: scheme.outlineVariant.withValues(alpha: 0.35),
+            color: scheme.outline.withValues(alpha: 0.42),
           ),
         ),
         clipBehavior: Clip.antiAlias,
@@ -199,6 +200,7 @@ class _MainShellState extends ConsumerState<MainShell>
     // Album-art accents belong to the player, not navigation chrome.
     final accentColor = hasSong ? ref.watch(currentAccentColorProvider) : null;
 
+    final dockHeight = _kDockHeight;
     final safeBottom = MediaQuery.of(context).viewPadding.bottom;
     final dockBodyPad =
         floatingNav ? _kDockHeight + _kDockBottom + safeBottom : 0.0;
@@ -214,7 +216,7 @@ class _MainShellState extends ConsumerState<MainShell>
     // MediaQuery override, so they can't rely on padding.bottom auto-resolution.
     final snackBottom = (hasSong ? 72.0 : 0.0) +
         (floatingNav
-            ? _kDockHeight + _kDockBottom + safeBottom
+            ? dockHeight + _kDockBottom + safeBottom
             : 62.0 + safeBottom);
 
     // Collapse player when the queue runs out.
@@ -469,9 +471,11 @@ class _FloatingNavItem extends StatelessWidget {
       label: label,
       child: InkWell(
         onTap: onTap,
+        splashFactory: NoSplash.splashFactory,
+        overlayColor: const WidgetStatePropertyAll(Colors.transparent),
         borderRadius: BorderRadius.circular(_kPillRadius),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeInOut,

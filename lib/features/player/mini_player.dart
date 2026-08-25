@@ -48,7 +48,10 @@ class _ClassicMiniPlayer extends ConsumerWidget {
       playerStateStreamProvider.select((s) => s.valueOrNull?.playing ?? false),
     );
 
-    final bg = scheme.surfaceContainerHigh;
+    final bg = Color.alphaBlend(
+      scheme.primary.withValues(alpha: 0.10),
+      scheme.surfaceContainerHigh,
+    );
 
     final topRadius =
         isPlaying ? _kClassicPlayingTopRadius : _kClassicPausedTopRadius;
@@ -66,13 +69,16 @@ class _ClassicMiniPlayer extends ConsumerWidget {
           borderRadius: BorderRadius.vertical(top: Radius.circular(topRadius)),
           boxShadow: [
             BoxShadow(
-              color: scheme.shadow.withValues(alpha: 0.22),
+              color: scheme.shadow.withValues(alpha: 0.32),
               blurRadius: 8,
               offset: const Offset(0, -2),
             ),
           ],
           border: Border.all(
-            color: scheme.outlineVariant.withValues(alpha: 0.35),
+            color: Color.alphaBlend(
+              scheme.primary.withValues(alpha: 0.42),
+              scheme.outline,
+            ),
           ),
         ),
         child: Container(
@@ -154,8 +160,8 @@ class _MiniPlayerProgress extends ConsumerWidget {
         : 0.0;
     return LinearProgressIndicator(
       value: progress.toDouble(),
-      minHeight: 2,
-      backgroundColor: Colors.transparent,
+      minHeight: 3,
+      backgroundColor: scheme.outlineVariant.withValues(alpha: 0.55),
       valueColor: AlwaysStoppedAnimation(fg),
     );
   }
