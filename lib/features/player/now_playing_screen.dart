@@ -88,21 +88,19 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
 
     if (song == null) return const SizedBox.shrink();
 
-    final coverUrl =
-        ref.watch(coverArtUrlProvider(song.coverArt ?? '')) ??
+    final coverUrl = ref.watch(coverArtUrlProvider(song.coverArt ?? '')) ??
         song.externalCoverUrl ??
         '';
     final scheme = Theme.of(context).colorScheme;
     final isDark = scheme.brightness == Brightness.dark;
     final bgBase = isDark ? Colors.black : Colors.white;
 
-    final rawAccent =
-        ref.watch(currentAccentColorProvider);
-    final fg = foregroundAccentColor(rawAccent, scheme.brightness)
-        ?? scheme.primary;
+    final rawAccent = ref.watch(currentAccentColorProvider);
+    final fg =
+        foregroundAccentColor(rawAccent, scheme.brightness) ?? scheme.primary;
     final dominantColor = rawAccent ?? bgBase;
 
-    final bgTop  = Color.lerp(dominantColor, bgBase, 0.52)!;
+    final bgTop = Color.lerp(dominantColor, bgBase, 0.52)!;
     final bgPeak = Color.lerp(dominantColor, bgBase, 0.10)!;
     final bgFade = Color.lerp(dominantColor, bgBase, 0.72)!;
     final bgGlow = dominantColor.withValues(alpha: isDark ? 0.42 : 0.15);
@@ -159,8 +157,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
                       onClose: widget.onClose,
                     ),
                     Expanded(
-                      child: ScrollConfiguration(        behavior: ScrollConfiguration.of(context).copyWith(
-          dragDevices: {
+                      child: ScrollConfiguration(
+                        behavior: ScrollConfiguration.of(context).copyWith(
+                          dragDevices: {
                             PointerDeviceKind.touch,
                             PointerDeviceKind.mouse,
                             PointerDeviceKind.trackpad,
@@ -254,7 +253,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
       sheetAnimationStyle: const AnimationStyle(reverseDuration: Duration.zero),
       builder: (_) {
         final scheme = Theme.of(context).colorScheme;
-        return _SlideDismiss(child: Material(
+        return _SlideDismiss(
+            child: Material(
           color: scheme.surface,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
           clipBehavior: Clip.hardEdge,
@@ -269,8 +269,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
                 ),
                 if (handler.hasSleepTimer)
                   ListTile(
-                    leading:
-                        Icon(Icons.timer_off_rounded, color: scheme.error),
+                    leading: Icon(Icons.timer_off_rounded, color: scheme.error),
                     title: const Text('Cancel timer'),
                     onTap: () {
                       handler.cancelSleepTimer();
@@ -370,7 +369,8 @@ class _SlideDismissState extends State<_SlideDismiss>
   void _animateOut(double vel, double screenH) {
     _dismissing = true;
     final remaining = screenH - _dy.value;
-    final ms = (remaining / math.max(vel, 600) * 1000).clamp(80.0, 280.0).round();
+    final ms =
+        (remaining / math.max(vel, 600) * 1000).clamp(80.0, 280.0).round();
     final anim = Tween<double>(begin: _dy.value, end: screenH).animate(
       CurvedAnimation(parent: _ctrl, curve: Curves.easeIn),
     );
@@ -378,7 +378,9 @@ class _SlideDismissState extends State<_SlideDismiss>
       ..duration = Duration(milliseconds: ms)
       ..reset();
     late final VoidCallback listener;
-    listener = () { _dy.value = anim.value; };
+    listener = () {
+      _dy.value = anim.value;
+    };
     _ctrl.addListener(listener);
     _ctrl.forward().whenComplete(() {
       _ctrl.removeListener(listener);
@@ -395,7 +397,9 @@ class _SlideDismissState extends State<_SlideDismiss>
       ..duration = const Duration(milliseconds: 240)
       ..reset();
     late final VoidCallback listener;
-    listener = () { _dy.value = anim.value; };
+    listener = () {
+      _dy.value = anim.value;
+    };
     _ctrl.addListener(listener);
     _ctrl.forward().whenComplete(() {
       _ctrl.removeListener(listener);
@@ -511,8 +515,7 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                                fontSize: 12,
-                                color: scheme.onSurfaceVariant)),
+                                fontSize: 12, color: scheme.onSurfaceVariant)),
                       ],
                     ),
                   ),
@@ -532,8 +535,7 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
             ListTile(
               leading: const Icon(Icons.auto_awesome_rounded),
               title: const Text('More like this'),
-              subtitle:
-                  const Text('Rebuild recommendations from this track'),
+              subtitle: const Text('Rebuild recommendations from this track'),
               onTap: () {
                 Navigator.pop(sheetCtx);
                 _moreLikeThis();
@@ -560,15 +562,15 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
               ),
             if (!isPreview && isDownloaded)
               ListTile(
-                leading: Icon(Icons.download_done_rounded,
-                    color: scheme.primary),
+                leading:
+                    Icon(Icons.download_done_rounded, color: scheme.primary),
                 title: const Text('Downloaded'),
                 enabled: false,
               ),
             if (!isPreview && canUseCompanion)
               ListTile(
-                leading: Icon(Icons.delete_forever_rounded,
-                    color: scheme.error),
+                leading:
+                    Icon(Icons.delete_forever_rounded, color: scheme.error),
                 title: Text('Delete from server',
                     style: TextStyle(color: scheme.error)),
                 onTap: () {
@@ -614,8 +616,7 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
   Future<void> _addToLibraryViaCompanion() async {
     final companion = ref.read(companionClientProvider);
     if (companion == null) {
-      _snack('Companion not configured — set it up in Settings',
-          isError: true);
+      _snack('Companion not configured — set it up in Settings', isError: true);
       return;
     }
     final prefs = ref.read(preferencesNotifierProvider);
@@ -634,8 +635,7 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
     }
     final arlStatus = ref.read(deezerArlStatusProvider).valueOrNull;
     if (arlStatus == DeezerArlStatus.invalid) {
-      _snack('Deezer session expired — update ARL in Settings',
-          isError: true);
+      _snack('Deezer session expired — update ARL in Settings', isError: true);
       return;
     }
     if (arlStatus == DeezerArlStatus.unreachable) {
@@ -645,12 +645,14 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
     _snack('Sending to server (FLAC)…');
 
     try {
-      final jobId = await companion.startDownload(url, deezerArl: prefs.deezerArl);
+      final jobId =
+          await companion.startDownload(url, deezerArl: prefs.deezerArl);
       if (!mounted) return;
       startDownloadPolling(companion, jobId);
     } catch (e) {
       if (!mounted) return;
-      _snack('Download could not start — check companion connection', isError: true);
+      _snack('Download could not start — check companion connection',
+          isError: true);
     }
   }
 }
@@ -685,7 +687,10 @@ class _PlayerPage extends StatelessWidget {
         children: [
           const Spacer(flex: 1),
           RepaintBoundary(
-            child: _AlbumArt(coverUrl: coverUrl, artSize: artSize, localPath: song.localPath),
+            child: _AlbumArt(
+                coverUrl: coverUrl,
+                artSize: artSize,
+                localPath: song.localPath),
           ),
           const Spacer(flex: 2),
           _SongInfoRow(song: song, fgAccent: fgAccent),
@@ -718,7 +723,8 @@ class _AlbumArt extends ConsumerWidget {
   final String coverUrl;
   final double artSize;
   final String? localPath;
-  const _AlbumArt({required this.coverUrl, required this.artSize, this.localPath});
+  const _AlbumArt(
+      {required this.coverUrl, required this.artSize, this.localPath});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -760,7 +766,9 @@ class _AlbumArt extends ConsumerWidget {
   Widget _localOrPlaceholder(ColorScheme scheme) {
     final local = localCoverArtPath(localPath);
     if (local != null && File(local).existsSync()) {
-      return Image.file(File(local), fit: BoxFit.cover,
+      return Image.file(
+        File(local),
+        fit: BoxFit.cover,
         errorBuilder: (_, __, ___) => _placeholder(scheme),
       );
     }
@@ -812,10 +820,9 @@ class _SongInfoRow extends StatelessWidget {
             ],
           ),
         ),
-          if (song.suffix != null)
+        if (song.suffix != null)
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
             decoration: BoxDecoration(
               color: fgAccent.withValues(alpha: 0.12),
               border: Border.all(color: fgAccent.withValues(alpha: 0.4)),
@@ -824,9 +831,7 @@ class _SongInfoRow extends StatelessWidget {
             child: Text(
               song.suffix!.toUpperCase(),
               style: TextStyle(
-                  color: fgAccent,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold),
+                  color: fgAccent, fontSize: 10, fontWeight: FontWeight.bold),
             ),
           ),
       ],
@@ -849,8 +854,8 @@ class _SeekSliderState extends ConsumerState<_SeekSlider> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final accent = ref.watch(currentAccentColorProvider);
-    final fg = foregroundAccentColor(accent, scheme.brightness)
-        ?? scheme.primary;
+    final fg =
+        foregroundAccentColor(accent, scheme.brightness) ?? scheme.primary;
     final position = ref.watch(
       positionStreamProvider.select((s) => s.valueOrNull ?? Duration.zero),
     );
@@ -866,8 +871,7 @@ class _SeekSliderState extends ConsumerState<_SeekSlider> {
       children: [
         SliderTheme(
           data: SliderTheme.of(context).copyWith(
-            thumbShape:
-                const RoundSliderThumbShape(enabledThumbRadius: 6),
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
             trackHeight: 3,
             activeTrackColor: fg,
             inactiveTrackColor: scheme.surfaceContainerHighest,
@@ -876,16 +880,18 @@ class _SeekSliderState extends ConsumerState<_SeekSlider> {
           ),
           child: Slider(
             value: _isDragging ? _sliderValue : progress.toDouble(),
-            onChangeStart: (v) =>
-                setState(() { _isDragging = true; _sliderValue = v; }),
+            onChangeStart: (v) => setState(() {
+              _isDragging = true;
+              _sliderValue = v;
+            }),
             onChanged: (v) => setState(() => _sliderValue = v),
             onChangeEnd: (v) {
               setState(() => _isDragging = false);
               final handler = ref.read(audioHandlerNotifierProvider);
               final dur = ref.read(durationStreamProvider).valueOrNull;
               if (handler != null && dur != null) {
-                handler.seek(Duration(
-                    milliseconds: (v * dur.inMilliseconds).round()));
+                handler.seek(
+                    Duration(milliseconds: (v * dur.inMilliseconds).round()));
               }
             },
           ),
@@ -896,11 +902,11 @@ class _SeekSliderState extends ConsumerState<_SeekSlider> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(_fmt(position),
-                  style: TextStyle(
-                      color: scheme.onSurfaceVariant, fontSize: 12)),
+                  style:
+                      TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
               Text(_fmt(duration ?? Duration.zero),
-                  style: TextStyle(
-                      color: scheme.onSurfaceVariant, fontSize: 12)),
+                  style:
+                      TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
             ],
           ),
         ),
@@ -922,8 +928,8 @@ class _PlayControls extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     final accent = ref.watch(currentAccentColorProvider);
-    final fg = foregroundAccentColor(accent, scheme.brightness)
-        ?? scheme.primary;
+    final fg =
+        foregroundAccentColor(accent, scheme.brightness) ?? scheme.primary;
     final isPlaying = ref.watch(
       playerStateStreamProvider.select((s) => s.valueOrNull?.playing ?? false),
     );
@@ -952,7 +958,8 @@ class _PlayControls extends ConsumerWidget {
             if (h == null) return;
             await h.toggleShuffle();
             // Persist the new mode.
-            final prefsNotifier = ref.read(preferencesNotifierProvider.notifier);
+            final prefsNotifier =
+                ref.read(preferencesNotifierProvider.notifier);
             final current = ref.read(preferencesNotifierProvider);
             await prefsNotifier.update(current.copyWith(
               shuffleMode: h.currentShuffleMode.name,
@@ -987,15 +994,16 @@ class _PlayControls extends ConsumerWidget {
         IconButton(
           icon: Icon(Icons.skip_next_rounded, color: scheme.onSurface),
           iconSize: 40,
-          onPressed: () =>
-              ref.read(audioHandlerNotifierProvider)?.skipToNext(),
+          onPressed: () => ref.read(audioHandlerNotifierProvider)?.skipToNext(),
         ),
         IconButton(
           icon: Icon(
             loopMode == LoopMode.one
                 ? Icons.repeat_one_rounded
                 : Icons.repeat_rounded,
-            color: loopMode != LoopMode.off ? fg : scheme.onSurface.withValues(alpha: 0.38),
+            color: loopMode != LoopMode.off
+                ? fg
+                : scheme.onSurface.withValues(alpha: 0.38),
           ),
           iconSize: 26,
           onPressed: () =>
@@ -1095,13 +1103,18 @@ class _ActionButton extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 24,
-                color: active ? activeColor : scheme.onSurface.withValues(alpha: 0.6)),
+            Icon(icon,
+                size: 24,
+                color: active
+                    ? activeColor
+                    : scheme.onSurface.withValues(alpha: 0.6)),
             const SizedBox(height: 4),
             Text(label,
                 style: TextStyle(
                     fontSize: 11,
-                    color: active ? activeColor : scheme.onSurface.withValues(alpha: 0.6))),
+                    color: active
+                        ? activeColor
+                        : scheme.onSurface.withValues(alpha: 0.6))),
           ],
         ),
       ),
@@ -1142,8 +1155,8 @@ class _VolumeSliderState extends ConsumerState<_VolumeSlider> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final accent = ref.watch(currentAccentColorProvider);
-    final fg = foregroundAccentColor(accent, scheme.brightness)
-        ?? scheme.primary;
+    final fg =
+        foregroundAccentColor(accent, scheme.brightness) ?? scheme.primary;
     final handler = ref.read(audioHandlerNotifierProvider);
     return Row(
       children: [
@@ -1159,8 +1172,7 @@ class _VolumeSliderState extends ConsumerState<_VolumeSlider> {
           ),
           padding: EdgeInsets.zero,
           visualDensity: VisualDensity.compact,
-          onPressed: () =>
-              handler?.player.setVolume(_volume > 0 ? 0.0 : 1.0),
+          onPressed: () => handler?.player.setVolume(_volume > 0 ? 0.0 : 1.0),
         ),
         Expanded(
           child: SliderTheme(
@@ -1199,6 +1211,8 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
   final _scrollCtrl = ScrollController();
   int _currentLine = 0;
   List<LyricLine> _syncedLines = [];
+  List<GlobalKey> _lineKeys = [];
+  int _lyricsGeneration = 0;
   // When true the user has manually scrolled — suppress auto-scroll so it
   // doesn't fight with their reading position.  Resets after a short idle
   // or when the song changes significantly.
@@ -1225,15 +1239,19 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
     // Auto-follow: skip if the user has manually scrolled recently.
     if (_userScrolled) return;
 
+    final generation = _lyricsGeneration;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollCtrl.hasClients) return;
-      const itemH = 48.0;
-      final target = (current * itemH -
-              MediaQuery.of(context).size.height * 0.35)
-          .clamp(0.0, _scrollCtrl.position.maxScrollExtent);
-      _scrollCtrl.animateTo(
-        target,
-        duration: const Duration(milliseconds: 450),
+      if (!mounted ||
+          generation != _lyricsGeneration ||
+          !_scrollCtrl.hasClients) {
+        return;
+      }
+      final targetContext = _lineKeys[current].currentContext;
+      if (targetContext == null) return;
+      Scrollable.ensureVisible(
+        targetContext,
+        alignment: 0.35,
+        duration: const Duration(milliseconds: 350),
         curve: Curves.easeOutCubic,
       );
     });
@@ -1260,8 +1278,8 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final accent = ref.watch(currentAccentColorProvider);
-    final fg = foregroundAccentColor(accent, scheme.brightness)
-        ?? scheme.primary;
+    final fg =
+        foregroundAccentColor(accent, scheme.brightness) ?? scheme.primary;
     final query = (
       songId: widget.song.id,
       artist: widget.song.artist,
@@ -1276,6 +1294,9 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
       _prevSongId = widget.song.id;
       _currentLine = 0;
       _syncedLines = [];
+      _lineKeys = [];
+      _lyricsGeneration++;
+      if (_scrollCtrl.hasClients) _scrollCtrl.jumpTo(0);
       _userScrolled = false;
       _userScrollResetTimer?.cancel();
     }
@@ -1285,23 +1306,32 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
         (_, next) => _onPosition(next.valueOrNull ?? Duration.zero));
 
     return lyricsAsync.when(
-      loading: () =>
-          Center(child: CircularProgressIndicator(color: fg)),
-      error: (_, __) => Center(
-          child: Text('Could not load lyrics',
-              style: TextStyle(color: scheme.onSurface.withValues(alpha: 0.7)))),
+      loading: () => Center(child: CircularProgressIndicator(color: fg)),
+      error: (e, _) => Center(
+          child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.error_outline_rounded,
+              size: 40, color: fg.withValues(alpha: 0.5)),
+          const SizedBox(height: 10),
+          Text('Could not load lyrics',
+              style: TextStyle(color: fg.withValues(alpha: 0.7))),
+        ],
+      )),
       data: (result) {
         if (result == null) {
           return Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.lyrics_outlined, size: 48,
-                    color: scheme.onSurface.withValues(alpha: 0.38)),
+                Icon(Icons.lyrics_outlined,
+                    size: 48, color: fg.withValues(alpha: 0.45)),
                 const SizedBox(height: 12),
                 Text('No lyrics found',
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: scheme.onSurface.withValues(alpha: 0.6))),
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyLarge
+                        ?.copyWith(color: fg.withValues(alpha: 0.6))),
               ],
             ),
           );
@@ -1309,7 +1339,15 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
 
         if (result.hasSynced) {
           final lines = result.syncedLines;
-          _syncedLines = lines;
+          if (!identical(_syncedLines, lines) ||
+              _lineKeys.length != lines.length) {
+            _syncedLines = lines;
+            _lineKeys = List<GlobalKey>.generate(
+              lines.length,
+              (_) => GlobalKey(),
+            );
+            _lyricsGeneration++;
+          }
 
           return NotificationListener<ScrollNotification>(
             onNotification: (notification) {
@@ -1322,123 +1360,86 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
               }
               return false;
             },
-            child: Stack(
-              children: [
-                ListView.builder(
-                  controller: _scrollCtrl,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 24, vertical: 60),
-                  itemCount: lines.length,
-                  itemBuilder: (_, i) => _LyricLine(
-                    key: ValueKey(i),
-                    text: lines[i].text,
-                    isActive: i == _currentLine,
+            child: RepaintBoundary(
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: fg.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(
+                    color: fg.withValues(alpha: 0.15),
                   ),
                 ),
-                // "Follow lyrics" button — reappears when user scrolls away.
-                if (_userScrolled)
-                  Positioned(
-                    bottom: 16,
-                    right: 16,
-                    child: FloatingActionButton.small(
-                      backgroundColor: scheme.primaryContainer,
-                      foregroundColor: scheme.onPrimaryContainer,
-                      onPressed: () {
-                        _userScrollResetTimer?.cancel();
-                        setState(() => _userScrolled = false);
-                        // Immediately scroll to current line.
-                        if (_syncedLines.isNotEmpty && _scrollCtrl.hasClients) {
-                          const itemH = 48.0;
-                          final target = (_currentLine * itemH -
-                                  MediaQuery.of(context).size.height * 0.35)
-                              .clamp(0.0, _scrollCtrl.position.maxScrollExtent);
-                          _scrollCtrl.animateTo(
-                            target,
-                            duration: const Duration(milliseconds: 450),
-                            curve: Curves.easeOutCubic,
-                          );
-                        }
-                      },
-                      child: const Icon(Icons.lyrics_rounded),
+                clipBehavior: Clip.hardEdge,
+                child: Stack(
+                  children: [
+                    ListView.builder(
+                      controller: _scrollCtrl,
+                      padding: const EdgeInsets.fromLTRB(20, 48, 20, 48),
+                      itemCount: lines.length,
+                      itemBuilder: (_, i) => _LyricLine(
+                        key: _lineKeys[i],
+                        text: lines[i].text,
+                        isActive: i == _currentLine,
+                        fg: fg,
+                      ),
                     ),
-                  ),
-              ],
+                    // "Follow lyrics" button — reappears when user scrolls away.
+                    if (_userScrolled)
+                      Positioned(
+                        bottom: 16,
+                        right: 16,
+                        child: FloatingActionButton.small(
+                          elevation: 2,
+                          backgroundColor: fg,
+                          foregroundColor: scheme.onPrimary,
+                          onPressed: () {
+                            _userScrollResetTimer?.cancel();
+                            setState(() => _userScrolled = false);
+                            // Immediately scroll to current line.
+                            if (_syncedLines.isNotEmpty &&
+                                _scrollCtrl.hasClients) {
+                              final targetContext =
+                                  _lineKeys[_currentLine].currentContext;
+                              if (targetContext != null) {
+                                Scrollable.ensureVisible(
+                                  targetContext,
+                                  alignment: 0.35,
+                                  duration: const Duration(milliseconds: 350),
+                                  curve: Curves.easeOutCubic,
+                                );
+                              }
+                            }
+                          },
+                          child: const Icon(Icons.my_location_rounded),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
           );
         }
 
-        return SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-          child: Text(
-            result.plain ?? '',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: scheme.onSurfaceVariant, height: 1.6),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _LyricLine extends StatefulWidget {
-  final String text;
-  final bool isActive;
-
-  const _LyricLine({required this.text, required this.isActive, super.key});
-
-  @override
-  State<_LyricLine> createState() => _LyricLineState();
-}
-
-class _LyricLineState extends State<_LyricLine>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  late Animation<double> _anim;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 280),
-      value: widget.isActive ? 1.0 : 0.0,
-    );
-    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
-  }
-
-  @override
-  void didUpdateWidget(_LyricLine old) {
-    super.didUpdateWidget(old);
-    if (widget.isActive != old.isActive) {
-      widget.isActive ? _ctrl.forward() : _ctrl.reverse();
-    }
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return AnimatedBuilder(
-      animation: _anim,
-      builder: (_, __) {
-        final t = _anim.value;
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Text(
-            widget.text,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: t > 0.5 ? FontWeight.w700 : FontWeight.w400,
-              color: Color.lerp(
-                scheme.onSurface.withValues(alpha: 0.28),
-                scheme.onSurface,
-                t,
+        return RepaintBoundary(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.fromLTRB(24, 28, 24, 28),
+            decoration: BoxDecoration(
+              color: fg.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(
+                color: fg.withValues(alpha: 0.15),
               ),
-              height: 1.4,
+            ),
+            child: SingleChildScrollView(
+              child: Text(
+                result.plain ?? '',
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: fg,
+                      height: 1.65,
+                    ),
+              ),
             ),
           ),
         );
@@ -1447,3 +1448,40 @@ class _LyricLineState extends State<_LyricLine>
   }
 }
 
+class _LyricLine extends StatelessWidget {
+  final String text;
+  final bool isActive;
+  final Color fg;
+
+  const _LyricLine({
+    required this.text,
+    required this.isActive,
+    required this.fg,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: isActive ? fg.withValues(alpha: 0.14) : Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        border: isActive ? Border.all(color: fg.withValues(alpha: 0.22)) : null,
+      ),
+      child: AnimatedDefaultTextStyle(
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+        style: Theme.of(context).textTheme.headlineSmall!.copyWith(
+              fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
+              color: isActive ? fg : fg.withValues(alpha: 0.35),
+              height: 1.35,
+            ),
+        child: Text(text),
+      ),
+    );
+  }
+}

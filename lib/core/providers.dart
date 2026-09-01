@@ -16,6 +16,7 @@ import 'api/subsonic_client.dart';
 import 'api/navidrome_client.dart' show CompanionClient;
 import 'api/deezer_client.dart';
 import 'api/lrclib_client.dart';
+import 'api/lyrics_ovh_client.dart';
 import 'models/recommended_track.dart';
 import 'models/recommendations_state.dart';
 import 'audio/shuffle_mode.dart';
@@ -907,6 +908,34 @@ final searchResultsProvider = FutureProvider<SearchResults>((ref) async {
 });
 
 // --- Lyrics ---
+Future<LyricsResult?> _fetchLyricsWithFallback({
+  required String artist,
+  required String title,
+  required String album,
+  required int duration,
+}) async {
+  try {
+    final synced = await LrcLibClient().getLyrics(
+      artist: artist,
+      title: title,
+      album: album,
+      duration: duration,
+    );
+    if (synced != null && synced.isUsable) return synced;
+  } catch (_) {}
+
+  try {
+    final plain = await LyricsOvhClient().getLyrics(
+      artist: artist,
+      title: title,
+    );
+    if (plain != null && plain.trim().isNotEmpty) {
+      return LyricsResult(plain: plain.trim());
+    }
+  } catch (_) {}
+  return null;
+}
+
 typedef LyricsQuery = ({
   String songId,
   String artist,
@@ -915,34 +944,58 @@ typedef LyricsQuery = ({
   int duration,
 });
 
-final lyricsProvider =
-    FutureProvider.family<LyricsResult?, LyricsQuery>((ref, q) async {
+final lyricsProvider = FutureProvider.autoDispose
+    .family<LyricsResult?, LyricsQuery>((ref, q) async {
   final db = ref.read(databaseProvider);
+  final lrcLib = LrcLibClient();
+  final lyricsOvh = LyricsOvhClient();
 
-  // Check cache first
+  // Cancel in-flight provider work when the lyrics page/song is abandoned.
+  final cancel = CancelToken();
+  ref.onDispose(cancel.cancel);
+
   final cached = await db.getCachedLyrics(q.songId);
   if (cached != null) {
-    return LyricsResult(
+    final result = LyricsResult(
       plain: cached.plainLyrics,
       synced: cached.syncedLyrics,
     );
+    if (result.isUsable) return result;
   }
 
-  // Fetch from LRClib
+  LyricsResult? result;
   try {
-    final result = await LrcLibClient().getLyrics(
+    result = await lrcLib.getLyrics(
       artist: q.artist,
       title: q.title,
       album: q.album,
       duration: q.duration,
+      cancelToken: cancel,
     );
-    if (result != null) {
-      await db.cacheLyrics(q.songId, result.plain, result.synced);
-    }
-    return result;
   } catch (_) {
-    return null;
+    // Continue to the independent plain-lyrics fallback.
   }
+
+  if (result == null || !result.isUsable) {
+    try {
+      final plain = await lyricsOvh.getLyrics(
+        artist: q.artist,
+        title: q.title,
+        cancelToken: cancel,
+      );
+      if (plain != null && plain.trim().isNotEmpty) {
+        result = LyricsResult(plain: plain.trim());
+      }
+    } catch (_) {
+      // Both providers failed; the UI will show the retryable empty state.
+    }
+  }
+
+  if (result != null && result.isUsable && !cancel.isCancelled) {
+    await db.cacheLyrics(q.songId, result.plain, result.synced);
+    return result;
+  }
+  return null;
 });
 
 // --- Preferences ---
@@ -1127,14 +1180,12 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
       await _db.markDownloaded(song.id, savePath);
       // Pre-cache lyrics so they're available offline. Fire-and-forget:
       // a lyrics failure must not fail the download.
-      unawaited(LrcLibClient()
-          .getLyrics(
+      unawaited(_fetchLyricsWithFallback(
         artist: song.artist,
         title: song.title,
         album: song.album,
         duration: song.duration ?? 0,
-      )
-          .then((result) {
+      ).then((result) {
         if (result != null) {
           _db.cacheLyrics(song.id, result.plain, result.synced);
         }

@@ -4,8 +4,9 @@ class LyricsResult {
 
   const LyricsResult({this.plain, this.synced});
 
-  bool get hasSynced => synced != null && synced!.isNotEmpty;
-  bool get hasPlain => plain != null && plain!.isNotEmpty;
+  bool get hasSynced => syncedLines.isNotEmpty;
+  bool get hasPlain => plain != null && plain!.trim().isNotEmpty;
+  bool get isUsable => hasSynced || hasPlain;
 
   List<LyricLine> get syncedLines {
     if (synced == null) return [];
@@ -20,7 +21,8 @@ class LyricsResult {
           final sec = int.parse(match.group(2)!);
           final hundredths = match.group(3)!.padRight(3, '0').substring(0, 3);
           final ms = int.parse(hundredths);
-          final text = match.group(4) ?? '';
+          final text = (match.group(4) ?? '').trim();
+          if (text.isEmpty) continue;
           result.add(LyricLine(
             timestamp: Duration(minutes: min, seconds: sec, milliseconds: ms),
             text: text,

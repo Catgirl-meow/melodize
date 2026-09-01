@@ -17,14 +17,17 @@ class LrcLibClient {
     required String title,
     required String album,
     required int duration,
+    CancelToken? cancelToken,
   }) async {
     try {
-      final resp = await _dio.get('/api/get', queryParameters: {
-        'artist_name': artist,
-        'track_name': title,
-        'album_name': album,
-        'duration': duration,
-      });
+      final resp = await _dio.get('/api/get',
+          queryParameters: {
+            'artist_name': artist,
+            'track_name': title,
+            'album_name': album,
+            'duration': duration,
+          },
+          cancelToken: cancelToken);
       final data = resp.data as Map<String, dynamic>;
       if (data['instrumental'] == true) {
         return const LyricsResult(plain: '[Instrumental]');
