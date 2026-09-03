@@ -30,7 +30,7 @@ class LrcLibClient {
           cancelToken: cancelToken);
       final data = resp.data as Map<String, dynamic>;
       if (data['instrumental'] == true) {
-        return const LyricsResult(plain: '[Instrumental]');
+        return LyricsResult(plain: '[Instrumental]');
       }
       return LyricsResult(
         plain: data['plainLyrics'] as String?,

@@ -908,34 +908,6 @@ final searchResultsProvider = FutureProvider<SearchResults>((ref) async {
 });
 
 // --- Lyrics ---
-Future<LyricsResult?> _fetchLyricsWithFallback({
-  required String artist,
-  required String title,
-  required String album,
-  required int duration,
-}) async {
-  try {
-    final synced = await LrcLibClient().getLyrics(
-      artist: artist,
-      title: title,
-      album: album,
-      duration: duration,
-    );
-    if (synced != null && synced.isUsable) return synced;
-  } catch (_) {}
-
-  try {
-    final plain = await LyricsOvhClient().getLyrics(
-      artist: artist,
-      title: title,
-    );
-    if (plain != null && plain.trim().isNotEmpty) {
-      return LyricsResult(plain: plain.trim());
-    }
-  } catch (_) {}
-  return null;
-}
-
 typedef LyricsQuery = ({
   String songId,
   String artist,
@@ -944,58 +916,129 @@ typedef LyricsQuery = ({
   int duration,
 });
 
+/// Caches [result] for offline use. Never lets a plain-only result clobber a
+/// cached row that already has synced lyrics, and swallows DB errors so a
+/// cache failure can never fail lyrics display or a download.
+Future<void> _persistLyrics(
+  AppDatabase db,
+  String songId,
+  LyricsResult result,
+) async {
+  try {
+    if (result.synced == null) {
+      final existing = await db.getCachedLyrics(songId);
+      if (existing?.syncedLyrics != null) return; // keep the better row
+    }
+    await db.cacheLyrics(songId, result.plain, result.synced);
+  } catch (_) {
+    // Cache write failures are non-fatal.
+  }
+}
+
+/// Fetches lyrics with an LRCLIB → lyrics.ovh fallback. Shared by
+/// [lyricsProvider] and the download pre-cache so both paths follow the same
+/// cache/fallback rules. Never throws.
+///
+/// Rules:
+///  * an existing usable cache row wins immediately (offline availability);
+///  * an unusable legacy cache row is overwritten on success, healing it;
+///  * after the [cancelToken] fires, remaining network work is skipped;
+///  * a plain-only ovh result is returned for display but NOT cached when
+///    LRCLIB failed transiently (as opposed to a definitive 404): caching it
+///    would permanently shadow a later synced fetch (rows have no TTL);
+///  * when [networkAllowed] is false (device offline) only the cache is
+///    consulted, so opening lyrics never blocks on network timeouts.
+Future<LyricsResult?> _fetchLyrics({
+  required AppDatabase db,
+  required LyricsQuery q,
+  CancelToken? cancelToken,
+  bool networkAllowed = true,
+}) async {
+  // Cache first: lyrics are available offline and cache hits avoid the
+  // network entirely.
+  try {
+    final cached = await db.getCachedLyrics(q.songId);
+    if (cached != null) {
+      final cachedResult = LyricsResult(
+        plain: cached.plainLyrics,
+        synced: cached.syncedLyrics,
+      );
+      if (cachedResult.isUsable) return cachedResult;
+    }
+  } catch (_) {
+    // Treat DB errors as a cache miss.
+  }
+
+  if (!networkAllowed || (cancelToken?.isCancelled ?? false)) return null;
+
+  // LRCLIB first: it can return synced lyrics.
+  LyricsResult? result;
+  var lrcDefinitiveMiss = false;
+  var fromOvh = false;
+  try {
+    final lrc = await LrcLibClient().getLyrics(
+      artist: q.artist,
+      title: q.title,
+      album: q.album,
+      duration: q.duration,
+      cancelToken: cancelToken,
+    );
+    if (lrc == null) {
+      // HTTP 404 — LRCLIB definitively has no record for this track.
+      lrcDefinitiveMiss = true;
+    } else if (lrc.isUsable) {
+      result = lrc;
+    }
+  } on DioException catch (e) {
+    if (e.type == DioExceptionType.cancel) return null;
+    // Other transport failures fall through to the plain-lyrics fallback.
+  } catch (_) {
+    // Fall through to the plain-lyrics fallback.
+  }
+
+  if (result == null) {
+    try {
+      final plain = await LyricsOvhClient().getLyrics(
+        artist: q.artist,
+        title: q.title,
+        cancelToken: cancelToken,
+      );
+      if (plain != null && plain.trim().isNotEmpty) {
+        result = LyricsResult(plain: plain.trim());
+        fromOvh = true;
+      }
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) return null;
+    } catch (_) {
+      // Both providers failed; the UI shows the empty state.
+    }
+  }
+
+  if (result == null || !result.isUsable) return null;
+
+  if (fromOvh && !lrcDefinitiveMiss) return result; // display only
+  await _persistLyrics(db, q.songId, result);
+  return result;
+}
+
 final lyricsProvider = FutureProvider.autoDispose
     .family<LyricsResult?, LyricsQuery>((ref, q) async {
   final db = ref.read(databaseProvider);
-  final lrcLib = LrcLibClient();
-  final lyricsOvh = LyricsOvhClient();
 
   // Cancel in-flight provider work when the lyrics page/song is abandoned.
   final cancel = CancelToken();
   ref.onDispose(cancel.cancel);
 
-  final cached = await db.getCachedLyrics(q.songId);
-  if (cached != null) {
-    final result = LyricsResult(
-      plain: cached.plainLyrics,
-      synced: cached.syncedLyrics,
-    );
-    if (result.isUsable) return result;
-  }
-
-  LyricsResult? result;
-  try {
-    result = await lrcLib.getLyrics(
-      artist: q.artist,
-      title: q.title,
-      album: q.album,
-      duration: q.duration,
-      cancelToken: cancel,
-    );
-  } catch (_) {
-    // Continue to the independent plain-lyrics fallback.
-  }
-
-  if (result == null || !result.isUsable) {
-    try {
-      final plain = await lyricsOvh.getLyrics(
-        artist: q.artist,
-        title: q.title,
-        cancelToken: cancel,
-      );
-      if (plain != null && plain.trim().isNotEmpty) {
-        result = LyricsResult(plain: plain.trim());
-      }
-    } catch (_) {
-      // Both providers failed; the UI will show the retryable empty state.
-    }
-  }
-
-  if (result != null && result.isUsable && !cancel.isCancelled) {
-    await db.cacheLyrics(q.songId, result.plain, result.synced);
-    return result;
-  }
-  return null;
+  // Skip the network entirely when the device is offline: the cache is the
+  // only possible source anyway, and the fallback timeouts would otherwise
+  // stall lyrics for tens of seconds.
+  final online = ref.read(isOnlineProvider).valueOrNull ?? true;
+  return _fetchLyrics(
+    db: db,
+    q: q,
+    cancelToken: cancel,
+    networkAllowed: online,
+  );
 });
 
 // --- Preferences ---
@@ -1179,17 +1222,19 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
       if (!mounted) return;
       await _db.markDownloaded(song.id, savePath);
       // Pre-cache lyrics so they're available offline. Fire-and-forget:
-      // a lyrics failure must not fail the download.
-      unawaited(_fetchLyricsWithFallback(
-        artist: song.artist,
-        title: song.title,
-        album: song.album,
-        duration: song.duration ?? 0,
-      ).then((result) {
-        if (result != null) {
-          _db.cacheLyrics(song.id, result.plain, result.synced);
-        }
-      }).catchError((_) {}));
+      // a lyrics failure must not fail the download. The shared helper
+      // applies the cache-first / no-downgrade / definitive-miss rules that
+      // lyricsProvider uses.
+      unawaited(_fetchLyrics(
+        db: _db,
+        q: (
+          songId: song.id,
+          artist: song.artist,
+          title: song.title,
+          album: song.album,
+          duration: song.duration ?? 0,
+        ),
+      ));
       // Pre-cache cover art for offline use. Fire-and-forget: a cover-art
       // failure must not fail the download.
       unawaited(_cacheCoverArt(song, savePath).catchError((_) {}));

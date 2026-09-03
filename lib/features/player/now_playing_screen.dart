@@ -1241,20 +1241,65 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
 
     final generation = _lyricsGeneration;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted ||
-          generation != _lyricsGeneration ||
-          !_scrollCtrl.hasClients) {
-        return;
-      }
-      final targetContext = _lineKeys[current].currentContext;
-      if (targetContext == null) return;
+      if (!mounted || generation != _lyricsGeneration) return;
+      _scrollToLine(current);
+    });
+  }
+
+  /// Scrolls the lyric row at [index] to the 35% line. When the row isn't
+  /// built yet (beyond the list's cache extent) its offset is estimated and
+  /// refined once the row materializes, instead of silently doing nothing.
+  void _scrollToLine(int index) {
+    if (!_scrollCtrl.hasClients || _syncedLines.isEmpty) return;
+    final target = index.clamp(0, _syncedLines.length - 1);
+    if (target >= _lineKeys.length) return;
+    final targetContext = _lineKeys[target].currentContext;
+    if (targetContext != null) {
       Scrollable.ensureVisible(
         targetContext,
         alignment: 0.35,
         duration: const Duration(milliseconds: 350),
         curve: Curves.easeOutCubic,
       );
-    });
+      return;
+    }
+    _scrollToEstimatedLine(target);
+  }
+
+  /// Scrolls toward an estimated offset for a row that isn't built yet, then
+  /// re-aligns precisely once the row is laid out near the viewport.
+  void _scrollToEstimatedLine(int target) {
+    // Average height of a lyric row (padding + headline-scale text).
+    const rowExtent = 68.0;
+    final position = _scrollCtrl.position;
+    final estimated = (target * rowExtent +
+            rowExtent / 2 -
+            position.viewportDimension * 0.35)
+        .clamp(0.0, position.maxScrollExtent)
+        .toDouble();
+    _scrollCtrl
+        .animateTo(
+          estimated,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOutCubic,
+        )
+        .whenComplete(() {
+          // The row should now be within the cache extent of the estimate.
+          // Give up silently if it still isn't (e.g. wrapped lines) rather
+          // than re-estimating forever.
+          if (!mounted || !_scrollCtrl.hasClients) return;
+          if (target >= _lineKeys.length) return;
+          // Re-read the context after the animation; it may have been
+          // rebuilt (and is guarded by its own mounted check).
+          final ctx = _lineKeys[target].currentContext;
+          if (ctx == null || !ctx.mounted) return;
+          Scrollable.ensureVisible(
+            ctx,
+            alignment: 0.35,
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeOutCubic,
+          );
+        });
   }
 
   /// Called when the user manually scrolls the lyrics list.
@@ -1396,20 +1441,9 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
                           onPressed: () {
                             _userScrollResetTimer?.cancel();
                             setState(() => _userScrolled = false);
-                            // Immediately scroll to current line.
-                            if (_syncedLines.isNotEmpty &&
-                                _scrollCtrl.hasClients) {
-                              final targetContext =
-                                  _lineKeys[_currentLine].currentContext;
-                              if (targetContext != null) {
-                                Scrollable.ensureVisible(
-                                  targetContext,
-                                  alignment: 0.35,
-                                  duration: const Duration(milliseconds: 350),
-                                  curve: Curves.easeOutCubic,
-                                );
-                              }
-                            }
+                            // Scroll to the active line (estimating its offset
+                            // when the row isn't built yet).
+                            _scrollToLine(_currentLine);
                           },
                           child: const Icon(Icons.my_location_rounded),
                         ),

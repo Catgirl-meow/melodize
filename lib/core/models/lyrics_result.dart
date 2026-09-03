@@ -2,14 +2,22 @@ class LyricsResult {
   final String? plain;
   final String? synced;
 
-  const LyricsResult({this.plain, this.synced});
+  LyricsResult({this.plain, this.synced});
 
   bool get hasSynced => syncedLines.isNotEmpty;
   bool get hasPlain => plain != null && plain!.trim().isNotEmpty;
   bool get isUsable => hasSynced || hasPlain;
 
-  List<LyricLine> get syncedLines {
-    if (synced == null) return [];
+  List<LyricLine>? _parsedSynced;
+
+  /// Parsed [synced] lines. The parse result is cached on first access so
+  /// callers can rely on instance identity (e.g. `identical()` comparisons
+  /// guarding key regeneration) instead of re-parsing the LRC text on every
+  /// read.
+  List<LyricLine> get syncedLines => _parsedSynced ??= _parseSyncedLines();
+
+  List<LyricLine> _parseSyncedLines() {
+    if (synced == null) return const [];
     final lines = synced!.split('\n');
     final result = <LyricLine>[];
     final pattern = RegExp(r'\[(\d{2}):(\d{2})\.(\d{2,3})\]\s*(.*)');
