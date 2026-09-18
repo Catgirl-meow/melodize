@@ -11,15 +11,18 @@ import '../models/song.dart';
 import '../api/subsonic_client.dart';
 import '../api/companion_audio_api.dart';
 import '../linux/linux_mpris.dart';
+import '../utils/platform_info.dart';
 import 'playback_core.dart';
 import 'shuffle_mode.dart';
 import 'smart_shuffle_engine.dart';
 
-// Linux shuffle workaround:
+// Shuffle workaround (originally for Linux):
 // just_audio_media_kit does not implement setShuffleOrder, so just_audio's
 // shuffle indices diverge from mpv's internal order. Fix: never call
-// setShuffleModeEnabled on Linux. Instead, re-order the list at loadQueue()
-// time and use a virtual playback index for mid-playback toggles.
+// setShuffleModeEnabled at all. Instead, re-order the list at loadQueue()
+// time and use a virtual playback index for mid-playback toggles. The same
+// virtual-order path is used on Android and macOS, so shuffle behaves
+// identically on every platform.
 
 // Audio handler. Bridges just_audio with audio_service for MediaSession,
 // notifications, lock-screen controls, and media-button routing.
@@ -29,7 +32,9 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _initStateSync();
     _initScrobbling();
     _initCrossfade();
-    if (Platform.isLinux) {
+    // Desktop keyboard shortcuts. MPRIS (Linux) and the Now Playing service
+    // (macOS) handle the media keys; this covers the rest of the keyboard.
+    if (isDesktopPlatform) {
       HardwareKeyboard.instance.addHandler(_handleMediaKey);
     }
   }
@@ -54,7 +59,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   /// Separate deck for companion-rendered transitions. It is deliberately
   /// not part of [_playlistSource]: transition WAVs are implementation
   /// details, not queue entries, so song indices and media metadata remain
-  /// one-to-one on Android and Linux.
+  /// one-to-one on Android, Linux and macOS.
   final AudioPlayer _transitionPlayer = AudioPlayer(
     audioLoadConfiguration: const AudioLoadConfiguration(
       androidLoadControl: AndroidLoadControl(
@@ -707,10 +712,10 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     // Do not emit while [_playlistSource] still points at the previous queue:
     // a shuffle snapshot could be built against the wrong physical indices.
 
-    // Build the source upfront on both platforms. Linux needs the full source
+    // Build the source upfront on every platform. Linux needs the full source
     // because media_kit/libmpv does not reliably support playlist moves;
-    // Android benefits from lazy preparation and preload:false so the first
-    // track can start without preparing the entire queue.
+    // Android and macOS benefit from lazy preparation and preload:false so the
+    // first track can start without preparing the entire queue.
     _playlistSource = ConcatenatingAudioSource(
       children: songs.map(_songToSource).toList(),
       useLazyPreparation: true,
@@ -1614,8 +1619,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         }
 
         // Fetch through Dio rather than the native player. This preserves the
-        // companion API key and self-signed-certificate behavior on both
-        // Android and Linux, then lets just_audio play a local WAV file.
+        // companion API key and self-signed-certificate behavior on every
+        // platform, then lets just_audio play a local WAV file.
         final bytes = await api.downloadTransition(rawUrl);
         if (bytes == null || bytes.length < 12 ||
             String.fromCharCodes(bytes.take(4)) != 'RIFF' ||
@@ -2284,7 +2289,9 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     return AudioSource.uri(uri, tag: song);
   }
 
-  // Linux MPRIS (playerctl / media keys)
+  // Linux MPRIS (playerctl / media keys). Other platforms rely on
+  // audio_service: Android's MediaSession and macOS's Now Playing info +
+  // remote command center are wired up by connectAudioService().
 
   Future<void> setupMpris() async {
     if (!Platform.isLinux || _disposed) return;
@@ -2316,7 +2323,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     await _cancelCrossfade();
   }
 
-  // Linux media key handling via HardwareKeyboard.
+  // Desktop media key / keyboard shortcut handling via HardwareKeyboard.
 
   bool _isTextFieldFocused() {
     final focus = FocusManager.instance.primaryFocus;
@@ -2352,6 +2359,14 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   bool _handleMediaKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
+
+    // Never intercept OS/menu chords. macOS in particular maps Cmd+M to
+    // Minimize, Cmd+S to Save, Cmd+R to Reload and so on.
+    if (HardwareKeyboard.instance.isMetaPressed ||
+        HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isAltPressed) {
+      return false;
+    }
 
     // XF86 media keys — always handle regardless of focus.
     switch (event.logicalKey) {
@@ -2423,8 +2438,10 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
-    if (Platform.isLinux) {
+    if (isDesktopPlatform) {
       HardwareKeyboard.instance.removeHandler(_handleMediaKey);
+    }
+    if (Platform.isLinux) {
       await _mpris?.dispose();
       _mpris = null;
     }

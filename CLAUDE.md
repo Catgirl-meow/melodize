@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Melodize — a Flutter music player for Navidrome/Subsonic servers, targeting Android and Linux. Lossless streaming, offline downloads, Deezer-powered discovery, DJ-style smart shuffle, crossfade. See `README.md` for the feature overview and `docs/three-pass-plan.md` for the roadmap state (Pass 1 ✅, Pass 2 mostly ✅, Pass 3 M3 Expressive partially shipped).
+Melodize — a Flutter music player for Navidrome/Subsonic servers, targeting Android, Linux, and macOS. Lossless streaming, offline downloads, Deezer-powered discovery, DJ-style smart shuffle, crossfade. See `README.md` for the feature overview and `docs/three-pass-plan.md` for the roadmap state (Pass 1 ✅, Pass 2 mostly ✅, Pass 3 M3 Expressive partially shipped).
 
 A companion Python service (`companion/`, see `COMPANION.md`) runs on the Navidrome host and unlocks audio analysis (BPM/key/energy), rendered transitions, server-side deletes, and Deezer downloads. The app must remain fully functional without it.
 
@@ -20,8 +20,13 @@ The repo has a gitignored local Flutter SDK checkout at `./flutter/` (3.44.4 sta
 ./flutter/bin/flutter run              # debug run (Linux desktop is the fast dev loop)
 ./flutter/bin/flutter build linux --release
 ./flutter/bin/flutter build apk        # Android release → build/app/outputs/flutter-apk/
+./flutter/bin/flutter build macos --release   # macOS release → build/macos/Build/Products/Release/
 ./scripts/package-linux-release.sh     # tar.gz the release bundle for GitHub Releases
 ```
+
+macOS builds can only be produced on a Mac (Xcode + CocoaPods); there are no
+darwin engine artifacts in the repo-local Linux SDK, so the macOS runner and
+native config can be edited here but must be compiled on the Mac.
 
 **Codegen:** drift uses build_runner; providers are hand-written (riverpod_generator is a dev dependency but unused in lib/):
 
@@ -31,7 +36,7 @@ The repo has a gitignored local Flutter SDK checkout at `./flutter/` (3.44.4 sta
 
 The generated `lib/core/db/database.g.dart` is committed — never hand-edit it; regenerate after schema changes.
 
-Tests are pure-Dart unit tests of the audio logic (no widget tests of substance; `widget_test.dart` is boilerplate). Linux playback needs libmpv.
+Tests are pure-Dart unit tests of the audio logic (no widget tests of substance; `widget_test.dart` is boilerplate). Linux playback needs libmpv; macOS and Android use their native backends.
 
 ## Architecture
 
@@ -43,7 +48,7 @@ Playback logic is deliberately split into pure, unit-testable classes plus one i
 - **`PlaybackPlanner`** (`playback_core.dart`) — takes a queue and returns a reordered one. Heard songs + current always stay at the front; only the *upcoming* segment is reordered. Shuffle is seeded (stable seed derived from content when none given).
 - **`TransitionPolicy`** (`playback_core.dart`) — plans 1–3 upcoming transitions using companion analysis: auto crossfade duration from BPM/energy/tail silence, phrase-boundary and vocal-aware fade starts, beat-grid-aligned starts, DJ-blend eligibility (BPM ±15 % + Camelot key distance ≤ 2).
 - **`SmartShuffleEngine`** — `BpmCache` (bpm/key/energy/phrases/tail silence per song, with an `isEstimated` flag), `buildBpmCache()` (estimates from genre when no real data), `orderSongs()` (entry point), `buildDjArc()` (energy-curve warm-up → peak → cool-down). Three auto-detected tiers: Full DJ (companion data), Partial DJ (Deezer BPM), Simple DJ (genre estimates only).
-- **`MelodizeAudioHandler`** (`audio_handler.dart`, ~2.5k lines) — the integration point: `extends BaseAudioHandler` (audio_service). Owns the just_audio player, keeps a **virtual order** mapping over the physical just_audio playlist (shuffle reorders virtually; queue edits translate virtual ↔ physical indices — see `_insertIntoVirtualOrder`/`_removePhysicalIndicesFromVirtualOrder`). Implements two transition mechanisms: volume crossfade on the main player, and companion-**rendered** transition mixdowns played on a second deck (`_prepareRenderedTransition`/`_startRenderedTransition`). Also: scrobbling (50 % or 4 min), sleep timer, MPRIS setup, handler disposal rules (Linux disposes on detach; Android keeps the handler for background audio).
+- **`MelodizeAudioHandler`** (`audio_handler.dart`, ~2.5k lines) — the integration point: `extends BaseAudioHandler` (audio_service). Owns the just_audio player, keeps a **virtual order** mapping over the physical just_audio playlist (shuffle reorders virtually; queue edits translate virtual ↔ physical indices — see `_insertIntoVirtualOrder`/`_removePhysicalIndicesFromVirtualOrder`). Implements two transition mechanisms: volume crossfade on the main player, and companion-**rendered** transition mixdowns played on a second deck (`_prepareRenderedTransition`/`_startRenderedTransition`). Also: scrobbling (50 % or 4 min), sleep timer, MPRIS setup, desktop keyboard shortcuts, handler disposal rules (Linux disposes on detach; Android keeps the handler for background audio; macOS relies on audio_service's Now Playing and quits on last-window-close).
 
 UI code never touches the handler directly: it reads provider streams and calls handler methods.
 
@@ -65,6 +70,8 @@ Every Riverpod provider lives here (~1.4k lines). Key patterns:
 
 - **Android**: `audio_service` provides MediaSession/lock-screen; edge-to-edge UI (Linux skips it); clamping scroll physics.
 - **Linux**: media_kit/mpv backend (just_audio_media_kit, `prefetchPlaylist = true` for gapless); MPRIS2 via `lib/core/linux/linux_mpris.dart` (playerctl/keyboard shortcuts); bouncing scroll physics; handler disposed on app detach.
+- **macOS**: just_audio's AVFoundation backend (no media_kit, no libmpv); Now Playing + remote commands via `audio_service`; no MPRIS (that file is Linux-only); desktop keyboard shortcuts; sandboxed with `com.apple.security.network.client` and an ATS exception for plain-HTTP servers in `macos/Runner/`.
+- **Platform branching**: use `isDesktopPlatform` / `isMobilePlatform` from `lib/core/utils/platform_info.dart` instead of raw `Platform.isLinux || Platform.isMacOS` checks.
 - Downloads live in `melodize_downloads/` under the app storage dir (`core/utils/platform_dirs.dart`).
 
 ### UI
@@ -78,4 +85,6 @@ Every Riverpod provider lives here (~1.4k lines). Key patterns:
 - Crossfade and rendered transitions have their own state machines with generation counters; the safest change is usually inside `_startCrossfadeFadeOut`/`_prepareRenderedTransition`, never the outer call sites.
 - Smart-shuffle behavior is pinned by regression tests (`smart_shuffle_queue_regression_test.dart`, `shuffle_edge_cases_test.dart`, `shuffle_stress_test.dart`) — run them after any change to `PlaybackQueue`, `PlaybackPlanner`, or the shuffle engine.
 - `/melodize/` at the repo root is a gitignored accidental project copy; `./flutter/` is the gitignored SDK. Neither is part of the repo.
+- `./flutter/bin/flutter analyze` at the repo root also walks those two ignored copies and reports thousands of bogus errors — analyze `lib test` to get a meaningful result.
+- macOS is App-Sandboxed: any new network/filesystem capability needs an entitlement in **both** `macos/Runner/DebugProfile.entitlements` and `macos/Runner/Release.entitlements`.
 - Version bumps: `pubspec.yaml` `version:` (e.g. `1.12.2+88`); releases are cut with `chore: release vX.Y.Z` commits.

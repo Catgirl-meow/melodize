@@ -11,6 +11,7 @@ import '../../core/models/song.dart';
 import '../../core/models/lyrics_result.dart';
 import '../../core/providers.dart';
 import '../../core/audio/shuffle_mode.dart';
+import '../../core/utils/platform_info.dart';
 import '../../shared/utils/download_polling_mixin.dart';
 import '../../shared/utils/snack.dart';
 import '../../shared/utils/song_actions.dart';
@@ -696,7 +697,9 @@ class _PlayerPage extends StatelessWidget {
           _SongInfoRow(song: song, fgAccent: fgAccent),
           const SizedBox(height: 16),
           const RepaintBoundary(child: _SeekSlider()),
-          if (Platform.isLinux) ...[
+          // Desktop only: on mobile the hardware volume keys control the app,
+          // while on Linux/macOS they control the output device.
+          if (isDesktopPlatform) ...[
             const SizedBox(height: 8),
             const RepaintBoundary(child: _VolumeSlider()),
           ],

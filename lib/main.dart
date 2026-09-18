@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'core/utils/platform_dirs.dart';
+import 'core/utils/platform_info.dart';
 import 'core/audio/shuffle_mode.dart';
 import 'core/audio/audio_handler.dart';
 import 'core/db/database.dart';
@@ -30,7 +31,8 @@ void main() {
   // Edge-to-edge: content renders behind status bar and nav bar so the camera
   // cutout area is filled with app content rather than a solid system-bar color.
   // SafeArea widgets throughout the app handle the inset padding automatically.
-  if (!Platform.isLinux) {
+  // Android-only system chrome — desktop windows have no system bars.
+  if (isMobilePlatform) {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   }
 
@@ -48,8 +50,9 @@ void main() {
     ),
   );
 
-  // Phase 2: connect audio_service (Android MediaSession + lock-screen) and
-  // register MPRIS on Linux so that playerctl / niri XF86 keybindings work.
+  // Phase 2: connect audio_service — Android MediaSession/lock-screen, macOS
+  // Now Playing + remote commands — and register MPRIS on Linux so that
+  // playerctl / niri XF86 keybindings work.
   WidgetsBinding.instance.addPostFrameCallback((_) {
     connectAudioService(audioHandler);
     audioHandler.setupMpris();
@@ -65,8 +68,9 @@ class _AppScrollBehavior extends ScrollBehavior {
   @override
   ScrollPhysics getScrollPhysics(BuildContext context) {
     // Android's clamping physics avoids the extra overscroll animation and
-    // matches native list behavior; retain the expressive bounce on Linux.
-    if (Platform.isLinux) {
+    // matches native list behavior; desktop (Linux/macOS) gets the expressive
+    // bounce that matches the rest of the desktop platform.
+    if (isDesktopPlatform) {
       return const BouncingScrollPhysics(
         parent: AlwaysScrollableScrollPhysics(),
       );
@@ -104,7 +108,9 @@ class _MelodizeAppState extends ConsumerState<MelodizeApp>
     // Android audio_service owns the handler beyond the Activity lifecycle;
     // never dispose it when the UI is detached or backgrounded. Linux has no
     // equivalent background audio service, so release its player/MPRIS
-    // resources when the desktop app is actually detached.
+    // resources when the desktop app is actually detached. macOS gets a
+    // background Now Playing service through audio_service (MPRemoteCommandCenter)
+    // and terminates on last-window-close, so it needs no disposal here.
     if (Platform.isLinux &&
         state == AppLifecycleState.detached &&
         !_handlerDisposed) {
@@ -140,7 +146,7 @@ class _MelodizeAppState extends ConsumerState<MelodizeApp>
             ? Brightness.light
             : Brightness.dark;
 
-    if (!Platform.isLinux && brightness != _lastBrightness) {
+    if (isMobilePlatform && brightness != _lastBrightness) {
       _lastBrightness = brightness;
       SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,

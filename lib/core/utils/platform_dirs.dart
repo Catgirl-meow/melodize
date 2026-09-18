@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
+import 'platform_info.dart';
+
 /// Returns the directory where Melodize stores its database, preferences, and
 /// downloads.
 ///
@@ -8,11 +10,12 @@ import 'package:path_provider/path_provider.dart';
 /// existing users' data at its original location is preserved.
 ///
 /// On desktop (Linux, Windows, macOS) we use [getApplicationSupportDirectory]
-/// (`~/.local/share/melodize` on Linux) because it is always present and
-/// doesn't rely on XDG_DOCUMENTS_DIR, which is frequently unset on minimal
-/// desktop setups and causes MissingPlatformDirectoryException.
+/// (`~/.local/share/melodize` on Linux, `~/Library/Containers/<bundle-id>/Data/
+/// Library/Application Support` inside the macOS sandbox) because it is always
+/// present and doesn't rely on XDG_DOCUMENTS_DIR, which is frequently unset on
+/// minimal desktop setups and causes MissingPlatformDirectoryException.
 Future<Directory> getAppStorageDirectory() async {
-  if (Platform.isAndroid || Platform.isIOS) {
+  if (isMobilePlatform) {
     return getApplicationDocumentsDirectory();
   }
   return getApplicationSupportDirectory();

@@ -1,8 +1,9 @@
 # Melodize
 
 A Flutter music player for [Navidrome](https://www.navidrome.org/) /
-Subsonic-compatible servers. Supports **Android** and **Linux** with a focus
-on lossless playback, a polished Material 3 UI, and offline support.
+Subsonic-compatible servers. Supports **Android**, **Linux**, and **macOS**
+with a focus on lossless playback, a polished Material 3 UI, and offline
+support.
 
 ---
 
@@ -21,14 +22,15 @@ on lossless playback, a polished Material 3 UI, and offline support.
 - **Smart Shuffle** — BPM-progressive ordering powered by companion audio analysis; Camelot-wheel harmonic mixing; energy-curve DJ arc planning with warm-up → peak → cool-down; non-deterministic (every activation produces a different sequence); heard-song preservation (only upcoming tracks are reordered); genre-transition scoring matrix; automatic tier detection based on available data quality
 - **Crossfade** — deck-based overlap between tracks (0–12 s); loads the next track on a temporary second player and crossfades volumes; automatically offsets by trailing silence so the fade doesn't start during silence
 - **DJ transitions** — when companion analysis is available and BPM is compatible (±15 %), transitions are tagged for enhanced blending; toggleable in Settings
-- **Android lock-screen controls** — MediaSession wired automatically via `audio_service`
-- **Linux MPRIS2 + keyboard shortcuts** — exposes playback to `playerctl`, media keybindings; keyboard controls for playback, seek, shuffle, repeat, nav tabs
+- **System media controls** — Android MediaSession/lock-screen and macOS Now Playing (Control Center + media keys) wired automatically via `audio_service`
+- **Linux MPRIS2** — exposes playback to `playerctl` and niri's XF86 media keybindings
+- **Desktop keyboard shortcuts** — Linux and macOS get keyboard controls for playback, seek, shuffle, repeat, nav tabs (media keys on Linux come from MPRIS, on macOS from the system Now Playing service)
 - **Dock toggle** — switch between classic `NavigationBar` and floating pill dock
 - **Shape-morphing mini player** — radius and thumbnail morph between paused and playing states
 - **Offline banner** — animated inline banner ("Offline. Browse downloads") with tappable link to downloads screen
 - **Server reachability diagnostics** — specific error messages for each failure mode (unreachable, TLS error, unauthorized, forbidden, server error); tap-to-retry
 - **Deezer ARL session management** — paste your Deezer ARL cookie in Settings to enable FLAC downloads; inline expiry banner when the session dies
-- **Linux keyboard shortcuts** — `Space` play/pause, `N` next, `P` previous, `L`/`H` seek fwd/back (Shift for 30 s), `J`/`K` volume down/up, `M` mute, `S` toggle shuffle, `R` cycle loop mode (skip when text field is focused)
+- **Keyboard shortcuts** (Linux + macOS) — `Space` play/pause, `N` next, `P` previous, `L`/`H` seek fwd/back (Shift for 30 s), `J`/`K` volume down/up, `M` mute, `S` toggle shuffle, `R` cycle loop mode (skipped while a text field is focused or when Cmd/Ctrl/Alt is held)
 - **Auto-download modes** — Never / When played / All songs
 
 ---
@@ -84,6 +86,44 @@ apt install libgtk-3-0 libglib2.0-0 libepoxy0
 pacman -S gtk3
 ```
 
+### macOS
+
+**Requirements:** macOS 12 (Monterey) or newer — including Sequoia on Intel
+Macs — plus Xcode 15+ and a running Navidrome instance. Unlike Linux there is
+no libmpv dependency: macOS uses the system AVFoundation backend. This project
+resolves its plugins through Swift Package Manager, so CocoaPods is not normally
+needed — install it only if `flutter run -d macos` asks for it.
+
+```bash
+# Xcode command line tools (if not already installed)
+xcode-select --install
+
+flutter pub get
+flutter run -d macos                  # debug
+flutter build macos --release         # → build/macos/Build/Products/Release/melodize.app
+```
+
+The build is self-contained: `melodize.app` keeps its database, preferences,
+and downloads inside `~/Library/Containers/com.catgirl.melodize/Data/`.
+
+#### macOS notes
+
+- The app is sandboxed by default. `macos/Runner/*.entitlements` already grant
+  `com.apple.security.network.client` — without it every network request fails
+  with `Operation not permitted, errno = 1`.
+- App Transport Security exceptions are enabled in `macos/Runner/Info.plist` so
+  plain-HTTP Navidrome setups work (ATS otherwise blocks cleartext requests to
+  real domain names).
+- Distributing outside your own machine requires signing + notarization with a
+  Developer ID certificate; `flutter build macos` output is ad-hoc signed and
+  only runs locally.
+- Self-signed HTTPS servers: the Dart HTTP layer (library, cover art, companion)
+  accepts self-signed certificates, but the native AVFoundation player used for
+  streaming does not. Use plain HTTP or a properly trusted certificate for
+  playback.
+- macOS gets an in-app volume slider on the Now Playing screen (desktop only),
+  and the desktop keyboard shortcuts listed above.
+
 ---
 
 ## Melodize Companion (optional)
@@ -133,6 +173,8 @@ With the ARL configured, long-pressing a recommendation or tapping the download 
 - Flutter 3.x (`flutter --version`)
 - **Android:** Android SDK / Android Studio + a physical device or emulator
 - **Linux:** GTK 3 dev headers + libmpv + standard build tools
+- **macOS:** Xcode 15+ and CocoaPods. macOS binaries can only be produced on a
+  Mac — Flutter cannot cross-compile them from Linux/Windows.
 
 ```bash
 # Ubuntu/Debian Linux build deps
@@ -155,6 +197,9 @@ flutter build apk      # release APK → build/app/outputs/flutter-apk/app-relea
 
 # Linux
 flutter build linux    # release build → build/linux/x64/release/bundle/
+
+# macOS (run on a Mac)
+flutter build macos    # release build → build/macos/Build/Products/Release/melodize.app
 ```
 
 ---
@@ -168,7 +213,7 @@ lib/
 │   ├── audio/         # MelodizeAudioHandler, PlaybackQueue, PlaybackPlanner, TransitionPolicy, SmartShuffleEngine, ShuffleMode, BpmEstimator
 │   ├── db/            # Drift SQLite database (songs, downloads, queue, lyrics cache)
 │   ├── models/        # Song, Album, Artist, Playlist, AppPreferences, RecommendedTrack, LyricsResult, SearchResults, RecommendationsState
-│   ├── utils/         # PlatformDirs, TitleNormalize
+│   ├── utils/         # PlatformDirs, PlatformInfo, TitleNormalize
 │   ├── linux/         # LinuxMprisService (MPRIS2 + playerctl)
 │   └── providers.dart # All Riverpod providers
 ├── features/
@@ -196,7 +241,7 @@ lib/
 - [`dynamic_color`](https://pub.dev/packages/dynamic_color) — Material You wallpaper colors
 - [`palette_generator`](https://pub.dev/packages/palette_generator) — cover-art accent colors
 - [`cached_network_image`](https://pub.dev/packages/cached_network_image) — album art caching
-- [`just_audio_media_kit`](https://pub.dev/packages/just_audio_media_kit) — Linux mpv backend
+- [`just_audio_media_kit`](https://pub.dev/packages/just_audio_media_kit) — Linux mpv backend (macOS/Android use just_audio's native backends)
 - [`dbus`](https://pub.dev/packages/dbus) — Linux MPRIS2
 
 ---
