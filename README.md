@@ -117,9 +117,11 @@ and downloads inside `~/Library/Containers/com.catgirl.melodize/Data/`.
 - Distributing outside your own machine requires signing + notarization with a
   Developer ID certificate; `flutter build macos` output is ad-hoc signed and
   only runs locally.
-- Self-signed HTTPS servers: the Dart HTTP layer (library, cover art, companion)
-  accepts self-signed certificates, but the native AVFoundation player used for
-  streaming does not. Use plain HTTP or a properly trusted certificate for
+- Self-signed HTTPS servers: the companion client accepts a self-signed
+  certificate only when the companion is on a private address (LAN, loopback,
+  Tailscale, `.local`/`.lan`); a public host needs a trusted certificate. The
+  native AVFoundation player used for streaming accepts no self-signed
+  certificate at all. Use plain HTTP or a properly trusted certificate for
   playback.
 - macOS gets an in-app volume slider on the Now Playing screen (desktop only),
   and the desktop keyboard shortcuts listed above.

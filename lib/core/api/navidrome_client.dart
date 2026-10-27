@@ -1,6 +1,5 @@
-import 'dart:io';
 import 'package:dio/dio.dart';
-import 'package:dio/io.dart';
+import 'companion_http.dart';
 
 // Client for the melodize-companion sidecar service.
 class CompanionClient {
@@ -16,9 +15,8 @@ class CompanionClient {
       receiveTimeout: const Duration(seconds: 15),
       headers: {'X-API-Key': apiKey},
     ));
-    // Accept self-signed certs; companion runs on the user's own server.
-    (_dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () =>
-        HttpClient()..badCertificateCallback = (_, __, ___) => true;
+    // Accept self-signed certs, but only on a private network.
+    allowSelfSignedOnPrivateHosts(_dio);
   }
 
   // Returns true if reachable and the API key is valid.
@@ -41,7 +39,7 @@ class CompanionClient {
   }
 
   Future<void> deleteSong(String songId) async {
-    await _dio.delete('/api/songs/$songId');
+    await _dio.delete('/api/songs/${Uri.encodeComponent(songId)}');
   }
 
   // Start a server-side download job. Returns the job ID for polling.
@@ -55,7 +53,8 @@ class CompanionClient {
   }
 
   Future<Map<String, dynamic>> getDownloadStatus(String jobId) async {
-    final resp = await _dio.get('/api/songs/download/$jobId');
+    final resp =
+        await _dio.get('/api/songs/download/${Uri.encodeComponent(jobId)}');
     return resp.data as Map<String, dynamic>;
   }
 }

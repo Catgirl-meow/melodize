@@ -1,6 +1,5 @@
-import 'dart:io';
 import 'package:dio/dio.dart';
-import 'package:dio/io.dart';
+import 'companion_http.dart';
 
 class CompanionAudioApi {
   final String baseUrl;
@@ -16,8 +15,7 @@ class CompanionAudioApi {
       receiveTimeout: const Duration(seconds: 60), // longer for analysis
       headers: {'X-API-Key': apiKey},
     ));
-    (_dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () =>
-        HttpClient()..badCertificateCallback = (_, __, ___) => true;
+    allowSelfSignedOnPrivateHosts(_dio);
   }
 
   late final String _resolvedBaseUrl;
@@ -26,8 +24,13 @@ class CompanionAudioApi {
 
   /// Resolve a companion API path returned by a job into an absolute URL.
   /// The companion may return either a relative path or an absolute URL.
-  String resolveUrl(String path) {
+  /// Returns null for an absolute URL on another origin: requests to it would
+  /// carry the API key to a host other than the companion.
+  String? resolveUrl(String path) {
     if (path.startsWith('http://') || path.startsWith('https://')) {
+      final url = Uri.tryParse(path);
+      final base = Uri.tryParse(_resolvedBaseUrl);
+      if (url == null || base == null || !isSameOrigin(url, base)) return null;
       return path;
     }
     return '$_resolvedBaseUrl${path.startsWith('/') ? path : '/$path'}';
@@ -53,7 +56,8 @@ class CompanionAudioApi {
 
   Future<Map<String, dynamic>?> pollAnalysis(String jobId) async {
     try {
-      final resp = await _dio.get('/api/audio/analyze-batch/$jobId');
+      final resp = await _dio
+          .get('/api/audio/analyze-batch/${Uri.encodeComponent(jobId)}');
       return resp.data as Map<String, dynamic>?;
     } on DioException {
       return null;
@@ -74,7 +78,8 @@ class CompanionAudioApi {
 
   Future<Map<String, dynamic>?> getAnalysis(String songId) async {
     try {
-      final resp = await _dio.get('/api/audio/analysis/$songId');
+      final resp = await _dio
+          .get('/api/audio/analysis/${Uri.encodeComponent(songId)}');
       return resp.data as Map<String, dynamic>?;
     } on DioException {
       return null;
@@ -102,7 +107,8 @@ class CompanionAudioApi {
 
   Future<Map<String, dynamic>?> pollTransition(String jobId) async {
     try {
-      final resp = await _dio.get('/api/audio/mix-transition/$jobId');
+      final resp = await _dio
+          .get('/api/audio/mix-transition/${Uri.encodeComponent(jobId)}');
       return resp.data as Map<String, dynamic>?;
     } on DioException {
       return null;
@@ -113,9 +119,11 @@ class CompanionAudioApi {
   /// as the API calls. This is important for self-signed companion HTTPS,
   /// which native audio backends do not inherit from Dio.
   Future<List<int>?> downloadTransition(String path) async {
+    final url = resolveUrl(path);
+    if (url == null) return null;
     try {
       final resp = await _dio.get<List<int>>(
-        resolveUrl(path),
+        url,
         options: Options(
           responseType: ResponseType.bytes,
           validateStatus: (status) => status != null && status >= 200 && status < 300,

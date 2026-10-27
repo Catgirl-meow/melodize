@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import '../utils/platform_dirs.dart';
+import '../utils/platform_info.dart';
 
 class AppPreferences {
   final String streamQuality; // 'lossless' | '320' | '192' | '128'
@@ -82,22 +83,27 @@ class AppPreferences {
         shuffleMode: shuffleMode ?? this.shuffleMode,
       );
 
+  // Tolerant field readers: one field with an unexpected type must not make
+  // fromJson throw, because load() would then reset every setting.
+  static String _str(Object? v, String fallback) => v is String ? v : fallback;
+  static bool _bool(Object? v, bool fallback) => v is bool ? v : fallback;
+
   factory AppPreferences.fromJson(Map<String, dynamic> j) => AppPreferences(
-        streamQuality: j['streamQuality'] as String? ?? 'lossless',
-        autoDownload: j['autoDownload'] as String? ?? 'never',
-        downloadQuality: j['downloadQuality'] as String? ?? 'lossless',
-        companionUrl: j['companionUrl'] as String? ?? '',
-        companionApiKey: j['companionApiKey'] as String? ?? '',
-        deezerArl: j['deezerArl'] as String? ?? '',
-        librarySongSort: j['librarySongSort'] as String? ?? 'name',
-        librarySongAscending: j['librarySongAscending'] as bool? ?? true,
-        libraryAlbumSort: j['libraryAlbumSort'] as String? ?? 'name',
-        libraryAlbumAscending: j['libraryAlbumAscending'] as bool? ?? true,
-        libraryArtistSort: j['libraryArtistSort'] as String? ?? 'name',
-        libraryArtistAscending: j['libraryArtistAscending'] as bool? ?? true,
-        floatingNavBar: j['floatingNavBar'] as bool? ?? true,
-        themeMode: j['themeMode'] as String? ?? 'dark',
-        shuffleMode: j['shuffleMode'] as String? ?? 'off',
+        streamQuality: _str(j['streamQuality'], 'lossless'),
+        autoDownload: _str(j['autoDownload'], 'never'),
+        downloadQuality: _str(j['downloadQuality'], 'lossless'),
+        companionUrl: _str(j['companionUrl'], ''),
+        companionApiKey: _str(j['companionApiKey'], ''),
+        deezerArl: _str(j['deezerArl'], ''),
+        librarySongSort: _str(j['librarySongSort'], 'name'),
+        librarySongAscending: _bool(j['librarySongAscending'], true),
+        libraryAlbumSort: _str(j['libraryAlbumSort'], 'name'),
+        libraryAlbumAscending: _bool(j['libraryAlbumAscending'], true),
+        libraryArtistSort: _str(j['libraryArtistSort'], 'name'),
+        libraryArtistAscending: _bool(j['libraryArtistAscending'], true),
+        floatingNavBar: _bool(j['floatingNavBar'], true),
+        themeMode: _str(j['themeMode'], 'dark'),
+        shuffleMode: _str(j['shuffleMode'], 'off'),
       );
 
   Map<String, dynamic> toJson() => {
@@ -134,10 +140,19 @@ class AppPreferences {
     return const AppPreferences();
   }
 
+  // Written to a temp file and renamed so a crash mid-write can't leave a
+  // truncated file (load() would then silently reset every setting, including
+  // the companion API key). The file holds secrets, so on desktop it is made
+  // readable by the owner only.
   Future<void> save() async {
     try {
       final f = await _file;
-      await f.writeAsString(jsonEncode(toJson()));
+      final tmp = File('${f.path}.tmp');
+      await tmp.writeAsString(jsonEncode(toJson()), flush: true);
+      if (isDesktopPlatform && !Platform.isWindows) {
+        await Process.run('chmod', ['600', tmp.path]);
+      }
+      await tmp.rename(f.path);
     } catch (_) {}
   }
 }
