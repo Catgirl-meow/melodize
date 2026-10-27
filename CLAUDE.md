@@ -21,7 +21,7 @@ The repo has a gitignored local Flutter SDK checkout at `./flutter/` (3.44.4 sta
 ./flutter/bin/flutter build linux --release
 ./flutter/bin/flutter build apk        # Android release → build/app/outputs/flutter-apk/
 ./flutter/bin/flutter build macos --release   # macOS release → build/macos/Build/Products/Release/
-./scripts/package-linux-release.sh     # tar.gz the release bundle for GitHub Releases
+./scripts/build-linux-release.sh       # release tarball for GitHub Releases (Ubuntu 22.04 container, podman)
 ```
 
 macOS builds can only be produced on a Mac (Xcode + CocoaPods); there are no
@@ -97,4 +97,5 @@ Every Riverpod provider lives here (~1.4k lines). Key patterns:
 - `/melodize/` at the repo root is a gitignored accidental project copy; `./flutter/` is the gitignored SDK. Neither is part of the repo.
 - `./flutter/bin/flutter analyze` at the repo root also walks those two ignored copies and reports thousands of bogus errors — analyze `lib test` to get a meaningful result.
 - macOS is App-Sandboxed: any new network/filesystem capability needs an entitlement in **both** `macos/Runner/DebugProfile.entitlements` and `macos/Runner/Release.entitlements`.
+- Never publish a Linux tarball from a plain host build: this laptop's Gentoo glibc is built with `-march=native`, so every executable linked here is tagged x86-64-v4 and won't start on CPUs without AVX-512 ("CPU ISA level is lower than required"). `scripts/build-linux-release.sh` builds in a container; `package-linux-release.sh` refuses bundles needing > x86-64-v2 or glibc > 2.35. Set `FLUTTER_SDK=` when running from a worktree (the SDK only lives in the main checkout).
 - Version bumps: `pubspec.yaml` `version:` (e.g. `1.12.2+88`); releases are cut with `chore: release vX.Y.Z` commits.
