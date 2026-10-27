@@ -36,7 +36,17 @@ native config can be edited here but must be compiled on the Mac.
 
 The generated `lib/core/db/database.g.dart` is committed — never hand-edit it; regenerate after schema changes.
 
-Tests are pure-Dart unit tests of the audio logic (no widget tests of substance; `widget_test.dart` is boilerplate). Linux playback needs libmpv; macOS and Android use their native backends.
+Tests are pure-Dart unit tests (audio logic, models, companion HTTP helpers) plus live API tests in `test/live/` that are skipped unless a test server is configured. Linux playback needs libmpv; macOS and Android use their native backends.
+
+```bash
+scripts/test-navidrome.sh up             # throwaway Navidrome 0.64 + generated test library (podman)
+eval "$(scripts/test-navidrome.sh env)"  # then ./flutter/bin/flutter test also runs test/live/
+scripts/test-navidrome.sh reset          # restore the library after delete-flow testing
+uv run --no-project --with numpy --with soundfile --with librosa --with pyrubberband \
+  python -m unittest discover -s companion/tests   # companion tests
+```
+
+Never point the live tests at a production server.
 
 ## Architecture
 

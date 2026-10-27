@@ -74,6 +74,7 @@ Create `/etc/melodize-companion/config.json`:
 |-----|-------------|
 | `api_key` | Secret the app sends with every request. Must match the key in app Settings. |
 | `port` | Companion listen port. Default `8765`. |
+| `bind` | Listen address. Default `0.0.0.0`; set `127.0.0.1` when a reverse proxy on the same host fronts the companion. |
 | `music_dir` | Absolute path to Navidrome's music folder. |
 | `navidrome_db` | Path to Navidrome's SQLite database. |
 | `download_format` | Format for non-Deezer downloads: `flac`, `opus`, `mp3`. |
