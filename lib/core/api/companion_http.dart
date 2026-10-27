@@ -36,6 +36,25 @@ bool isPrivateNetworkHost(String host) {
   return (b[0] & 0xfe) == 0xfc || (b[0] == 0xfe && (b[1] & 0xc0) == 0x80);
 }
 
+/// Checks a Navidrome or companion URL. Plain http is only accepted for
+/// hosts on a local or private network ([isPrivateNetworkHost]: localhost,
+/// LAN, Tailscale/WireGuard): on a public host it would send the Subsonic
+/// token and the companion API key in the clear. Returns an error message,
+/// or null when [url] is fine.
+String? serverUrlError(String url) {
+  final uri = Uri.tryParse(url.trim());
+  if (uri == null ||
+      !(uri.isScheme('http') || uri.isScheme('https')) ||
+      uri.host.isEmpty) {
+    return 'URL must start with http:// or https://';
+  }
+  if (uri.isScheme('http') && !isPrivateNetworkHost(uri.host)) {
+    return 'Use https://. Plain http:// only works for localhost, LAN and '
+        'Tailscale/WireGuard addresses';
+  }
+  return null;
+}
+
 /// Lets [dio] accept a self-signed certificate from the companion, but only
 /// when the companion lives on a private network (see [isPrivateNetworkHost]).
 void allowSelfSignedOnPrivateHosts(Dio dio) {
