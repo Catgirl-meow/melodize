@@ -38,6 +38,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _initStateSync();
     _initScrobbling();
     _initCrossfade();
+    _initVirtualAdvance();
     // Desktop keyboard shortcuts. MPRIS (Linux) and the Now Playing service
     // (macOS) handle the media keys; this covers the rest of the keyboard.
     if (isDesktopPlatform) {
@@ -169,6 +170,11 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   // Last physical index. Distinguishes auto-advance from programmatic seeks.
   int? _lastKnownPhysicalIndex;
+
+  // Physical index [_initVirtualAdvance] already jumped away from, so it
+  // fires once per song, and when the player last changed song.
+  int? _virtualAdvanceFrom;
+  DateTime _indexChangedAt = DateTime.now();
 
   // Guard against re-entering virtual-order correction during an in-flight seek.
   bool _correctingAutoAdvance = false;
@@ -372,6 +378,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
       final prevPhysical = _lastKnownPhysicalIndex;
       _lastKnownPhysicalIndex = index;
+      if (index != _virtualAdvanceFrom) _virtualAdvanceFrom = null;
+      if (index != prevPhysical) _indexChangedAt = DateTime.now();
       if (_crossfadeActive && index == _crossfadeNextIndex) {
         // Natural auto-advance happened while a crossfade fade-out was
         // in progress. Start the fade-in on the new song.
@@ -1204,16 +1212,15 @@ class MelodizeAudioHandler extends BaseAudioHandler {
           final songsForPlanning = List<Song>.of(_loadQueueSongs);
           final planningSeed =
               _shuffleSeed ?? DateTime.now().microsecondsSinceEpoch;
-          final orderedIds = await Isolate.run(() => _planSongsInIsolate(
-                songData: songsForPlanning.map(_songToIsolateData).toList(
-                  growable: false,
-                ),
-                currentIndex: currentIdx
-                    .clamp(0, songsForPlanning.length - 1)
-                    .toInt(),
-                cacheData: _cacheToIsolateData(_companionBpmCache),
-                seed: planningSeed,
-              ));
+          final orderedIds = await _planSmartShuffle(
+            songData: songsForPlanning.map(_songToIsolateData).toList(
+              growable: false,
+            ),
+            currentIndex:
+                currentIdx.clamp(0, songsForPlanning.length - 1).toInt(),
+            cacheData: _cacheToIsolateData(_companionBpmCache),
+            seed: planningSeed,
+          );
           if (generation != _recalcGeneration ||
               _queueSnapshotCtrl.isClosed) {
             return;
@@ -1270,6 +1277,24 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     }
     _emitQueueSnapshot(immediate: true);
   }
+
+  /// Runs [_planSongsInIsolate] on a worker isolate. Static on purpose: a
+  /// closure created inside an instance method captures `this`, and the
+  /// handler (timers, players, stream controllers) cannot be sent to another
+  /// isolate, so every smart-shuffle plan used to fail with "object is
+  /// unsendable" and the previous order was silently kept.
+  static Future<List<String>> _planSmartShuffle({
+    required List<Map<String, Object?>> songData,
+    required int currentIndex,
+    required Map<String, Object?> cacheData,
+    required int seed,
+  }) =>
+      Isolate.run(() => _planSongsInIsolate(
+            songData: songData,
+            currentIndex: currentIndex,
+            cacheData: cacheData,
+            seed: seed,
+          ));
 
   static List<String> _planSongsInIsolate({
     required List<Map<String, Object?>> songData,
@@ -1490,6 +1515,67 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   // ---------------------------------------------------------------------------
   // Scrobbling via Subsonic
+
+  /// Linux and macOS: the platform player cannot follow the virtual order,
+  /// and media_kit prefetches and plays physical index + 1 the moment the
+  /// current song ends. Jump to the planned next song just before the end
+  /// instead, so that other song never starts. The correction in the
+  /// currentIndexStream listener stays as the fallback.
+  void _initVirtualAdvance() {
+    if (_useNativeShuffleOrder) return;
+    // mpv needs a few hundred ms to act on the seek; any less and it has
+    // already moved to the prefetched song.
+    const lead = Duration(milliseconds: 500);
+    player.positionStream.listen((position) {
+      if (_queueSnapshotCtrl.isClosed ||
+          _loading ||
+          _seekingVirtual ||
+          _renderedTransitionActive ||
+          _shuffleOrder.isEmpty ||
+          !player.playing ||
+          player.loopMode == LoopMode.one) {
+        return;
+      }
+      final index = player.currentIndex;
+      final duration = player.duration;
+      // Right after a song change, position and duration can still belong
+      // to the previous song and would look like "about to end".
+      if (index == null ||
+          index == _virtualAdvanceFrom ||
+          DateTime.now().difference(_indexChangedAt) <
+              const Duration(seconds: 1) ||
+          duration == null ||
+          duration <= lead ||
+          duration - position > lead) {
+        return;
+      }
+      final vp = _physicalToVirtual[index];
+      if (vp == null || vp + 1 >= _shuffleOrder.length) return;
+      final next = _shuffleOrder[vp + 1];
+      // The natural advance already lands on the right song.
+      if (next == index + 1 || next < 0 || next >= _playlistSource.length) {
+        return;
+      }
+      _virtualAdvanceFrom = index;
+      if (_crossfadeActive && _crossfadeNextIndex == next) {
+        // A DJ fade-out that runs into the end of the song: hand over now.
+        // The fade-in starts when the player reports the new index.
+        _crossfadeTimer?.cancel();
+        _crossfadeTimer = null;
+        _performVirtualSeekForCrossfade(next);
+        return;
+      }
+      if (_isTransitionFading) return;
+      _shufflePos = vp + 1;
+      _seekingVirtual = true;
+      player
+          .seek(Duration.zero, index: next)
+          .catchError((Object e) => debugPrint('Virtual advance failed: $e'))
+          .whenComplete(() => _seekingVirtual = false);
+      _queue.setCurrentIndex(next);
+      _emitQueueSnapshot(immediate: true);
+    });
+  }
 
   void _initScrobbling() {
     player.currentIndexStream.listen((_) {
@@ -1962,6 +2048,12 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       // shuffle is the only mode that may inspect transition metadata or
       // modify volume.
       if (_shuffleMode != ShuffleMode.smartShuffle) return;
+      // Just after a song change the position can still be the previous
+      // song's, which would start a fade-out (and skip) on the new song.
+      if (DateTime.now().difference(_indexChangedAt) <
+          const Duration(seconds: 1)) {
+        return;
+      }
 
       final from = _loadQueueSongs[index];
 
@@ -2070,8 +2162,16 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _crossfadeActive = true;
     _crossfadeNextIndex = nextIdx;
 
-    final totalMs =
+    // Planned fades often run right up to the end of the song. Finish the
+    // fade-out a little early so the seek to the next virtual song lands
+    // before the player advances to physical index + 1 on its own.
+    var totalMs =
         transition.duration.inMilliseconds.clamp(100, 30000).toInt();
+    final duration = player.duration;
+    if (duration != null) {
+      final remainingMs = (duration - player.position).inMilliseconds - 750;
+      if (remainingMs < totalMs) totalMs = max(100, remainingMs);
+    }
     final startVol = _userVolume;
     final startTime = DateTime.now();
 
