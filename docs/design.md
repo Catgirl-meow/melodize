@@ -29,7 +29,7 @@ are `titleLarge` in bold (the artist header: `headlineSmall`).
 
 ## App bars
 
-- Tab roots and sub-pages: `SliverAppBar.medium`.
+- Sub-pages (Settings pages, Downloads): `SliverAppBar.medium`. Library keeps its plain `AppBar` with tabs.
 - Album, artist and playlist detail screens: a full-bleed cover-art `SliverAppBar` with
   `flexibleSpace`. Intentional; keep it.
 - Home has no collapsing bar. M3's medium and large bars bottom-align the title, which left a
