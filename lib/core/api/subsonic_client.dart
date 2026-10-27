@@ -342,6 +342,33 @@ class SubsonicClient {
     }
   }
 
+  // Pings the server and returns null on success, or a message saying what
+  // went wrong (bad credentials, not a Subsonic server, unreachable, TLS...).
+  Future<String?> checkConnection() async {
+    try {
+      await _get('ping');
+      return null;
+    } on DioException catch (e) {
+      final status = e.response?.statusCode;
+      if (status == 401 || status == 403) return 'Wrong username or password';
+      if (status == 404) {
+        return 'No Subsonic API at this URL — check the address';
+      }
+      if (status != null) return 'Server returned HTTP $status';
+      if (e.error is HandshakeException || e.error is TlsException) {
+        return 'Secure connection failed — check the certificate or use http://';
+      }
+      return 'Could not reach the server';
+    } on FormatException {
+      return 'No Subsonic API at this URL — check the address';
+    } catch (e) {
+      // _get throws "Subsonic error: <server message>" for API-level errors
+      // such as a wrong password (HTTP 200 with status "failed").
+      final msg = e.toString().replaceFirst('Exception: ', '');
+      return msg.replaceFirst('Subsonic error: ', '');
+    }
+  }
+
   Future<ServerReachability> pingDetailed() async {
     try {
       await _get('ping');
