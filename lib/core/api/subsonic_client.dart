@@ -38,13 +38,14 @@ class SubsonicClient {
   static const _clientName = 'melodize';
   static const _apiVersion = '1.16.1';
 
-  SubsonicClient(this.config) {
+  SubsonicClient(this.config, {Dio? dio}) {
     _baseUrl = config.serverUrl.replaceAll(RegExp(r'/+$'), '');
-    _dio = Dio(BaseOptions(
-      baseUrl: _baseUrl,
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 30),
-    ));
+    _dio = dio ??
+        Dio(BaseOptions(
+          baseUrl: _baseUrl,
+          connectTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 30),
+        ));
   }
 
   // --- Auth ---
@@ -318,6 +319,16 @@ class SubsonicClient {
       await _get('startScan');
     } catch (_) {
       // Non-fatal — Navidrome will do a scheduled scan anyway
+    }
+  }
+
+  // Whether a library scan is running. False when the status can't be read.
+  Future<bool> isScanning() async {
+    try {
+      final resp = await _get('getScanStatus');
+      return resp['scanStatus']?['scanning'] == true;
+    } catch (_) {
+      return false;
     }
   }
 
