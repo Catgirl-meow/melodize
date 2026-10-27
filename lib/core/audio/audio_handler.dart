@@ -171,6 +171,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   BpmCache? _companionBpmCache;
 
   DateTime _lastSnapshotEmit = DateTime(2000);
+  Timer? _snapshotTrailingTimer;
   bool _loading = false;
 
   Timer? _recalcDebounceTimer;
@@ -181,9 +182,6 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   // Building the fallback BPM/genre cache is linear in queue size. Keep it
   // across shuffle recalculations so toggling modes or a queue snapshot does
   // not repeatedly redo the same work on Android's main isolate.
-  BpmCache? _queueBpmCache;
-  int _queueBpmCacheSignature = 0;
-  BpmCache? _queueBpmCacheCompanion;
 
   /// Supplies the companion client used only to prepare rendered DJ mixes.
   /// Analysis and ordinary playback remain usable when this is null.
@@ -215,9 +213,6 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       return;
     }
     _companionBpmCache = cache;
-    _queueBpmCache = null;
-    _queueBpmCacheSignature = 0;
-    _queueBpmCacheCompanion = null;
     // Invalidate transition-plan cache so transition pills update.
     _cachedNormalSnapshot = null;
     _cachedShuffleOrder = null;
@@ -298,38 +293,6 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       }
     }
     return true;
-  }
-
-  BpmCache _cacheForSongs(List<Song> songs) {
-    final signature = Object.hashAll(songs.map((song) => Object.hash(
-          song.id,
-          song.genre,
-          song.bpm,
-          song.albumId,
-          song.track,
-        )));
-    if (_queueBpmCache != null &&
-        _queueBpmCacheSignature == signature &&
-        identical(_queueBpmCacheCompanion, _companionBpmCache)) {
-      return _queueBpmCache!;
-    }
-
-    final companion = _companionBpmCache;
-    final cache = buildBpmCache(
-      songs,
-      knownBpm: companion?.bpm,
-      knownKeys: companion?.key,
-      knownEnergy: companion?.energy,
-      knownSpectralCentroid: companion?.spectralCentroid,
-      knownTailSilence: companion?.tailSilence,
-      knownPhrasePositions: companion?.phrasePositions,
-      knownFirstBeatOffset: companion?.firstBeatOffset,
-      knownVocalSections: companion?.vocalSections,
-    );
-    _queueBpmCache = cache;
-    _queueBpmCacheSignature = signature;
-    _queueBpmCacheCompanion = companion;
-    return cache;
   }
 
   // Restore persisted shuffle mode on startup.
@@ -664,13 +627,26 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   }
 
   // Emit a queue snapshot. [immediate] skips the 500 ms debounce.
+  // Throttled to one emit per 150 ms. A throttled call schedules a trailing
+  // emit instead of being dropped, so the last change (e.g. the second of two
+  // quick skips) always reaches the UI.
   void _emitQueueSnapshot({bool immediate = false}) {
     if (_queueSnapshotCtrl.isClosed) return;
     if (!immediate) {
-      final now = DateTime.now();
-      if (now.difference(_lastSnapshotEmit).inMilliseconds < 150) return;
-      _lastSnapshotEmit = now;
+      if (_snapshotTrailingTimer != null) return;
+      final wait = const Duration(milliseconds: 150) -
+          DateTime.now().difference(_lastSnapshotEmit);
+      if (wait > Duration.zero) {
+        _snapshotTrailingTimer = Timer(wait, () {
+          _snapshotTrailingTimer = null;
+          _emitQueueSnapshot(immediate: true);
+        });
+        return;
+      }
     }
+    _snapshotTrailingTimer?.cancel();
+    _snapshotTrailingTimer = null;
+    _lastSnapshotEmit = DateTime.now();
     _queueSnapshotCtrl.add(_snapshot());
   }
 
@@ -1503,21 +1479,6 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   final _historyController = StreamController<Song>.broadcast();
   Stream<Song> get playHistoryStream => _historyController.stream;
 
-  int? _resolveNextPhysicalIndex(int physicalIndex) {
-    if (_shuffleOrder.isNotEmpty) {
-      // O(1) lookup via inverted map instead of O(n) indexOf.
-      final vp = _physicalToVirtual[physicalIndex];
-      if (vp == null || vp >= _shuffleOrder.length - 1) return null;
-      return _shuffleOrder[vp + 1];
-    }
-    if (physicalIndex < 0 ||
-        physicalIndex >= _loadQueueSongs.length - 1 ||
-        _loadQueueSongs.isEmpty) {
-      return null;
-    }
-    return physicalIndex + 1;
-  }
-
   bool _canPlayOffline(Song song) {
     if (song.externalStreamUrl != null) return true;
     if (song.isDownloaded && song.localPath != null) return true;
@@ -1583,7 +1544,9 @@ class MelodizeAudioHandler extends BaseAudioHandler {
           mixDuration: duration,
         );
         if (generation != _renderedTransitionGeneration ||
-            _companionAudioApi != api) return;
+            _companionAudioApi != api) {
+          return;
+        }
 
         Map<String, dynamic>? result = response;
         final initialStatus = result?['status']?.toString().toLowerCase();
@@ -1629,7 +1592,9 @@ class MelodizeAudioHandler extends BaseAudioHandler {
           return;
         }
         if (generation != _renderedTransitionGeneration ||
-            _companionAudioApi != api) return;
+            _companionAudioApi != api) {
+          return;
+        }
         final tempDir = await getTemporaryDirectory();
         final safeName = 'melodize_transition_${key.hashCode.abs()}.wav';
         final path = '${tempDir.path}/$safeName';
@@ -1994,7 +1959,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         // Request the rendered bridge while there is still time to prepare it.
         // If it is not ready at the boundary, the normal fail-safe volume ramp
         // below is used instead.
-        final prepareLead = const Duration(seconds: 15);
+        const prepareLead = Duration(seconds: 15);
         if (position >= transition.fromStart - prepareLead &&
             position < transition.fromStart) {
           unawaited(_prepareRenderedTransition(transition));
@@ -2446,15 +2411,13 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       _mpris = null;
     }
     _shuffleModeCtrl.close();
+    _snapshotTrailingTimer?.cancel();
     _queueSnapshotCtrl.close();
     _shuffleOrder = [];
     _shufflePos = 0;
     _physicalToVirtual = {};
     _invalidateSnapshotCaches();
     _loadQueueSongs = const [];
-    _queueBpmCache = null;
-    _queueBpmCacheSignature = 0;
-    _queueBpmCacheCompanion = null;
     await _transitionStateSub?.cancel();
     _crossfadeSub?.cancel();
     _crossfadeTimer?.cancel();

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
-import '../../shared/theme/app_theme.dart';
 import '../../shared/utils/snack.dart';
 import '../home/home_screen.dart';
 import '../library/library_screen.dart';
@@ -197,10 +196,8 @@ class _MainShellState extends ConsumerState<MainShell>
     final floatingNav = ref.watch(
       preferencesNotifierProvider.select((p) => p.floatingNavBar),
     );
-    // Album-art accents belong to the player, not navigation chrome.
-    final accentColor = hasSong ? ref.watch(currentAccentColorProvider) : null;
 
-    final dockHeight = _kDockHeight;
+    const dockHeight = _kDockHeight;
     final safeBottom = MediaQuery.of(context).viewPadding.bottom;
     final dockBodyPad =
         floatingNav ? _kDockHeight + _kDockBottom + safeBottom : 0.0;
@@ -274,7 +271,6 @@ class _MainShellState extends ConsumerState<MainShell>
     // Navigation chrome uses stable Material 3 tonal colors, independent of
     // the currently playing album art.
     final navBg = scheme.surfaceContainer;
-    final navIndicator = scheme.secondaryContainer;
 
     final scaffold = Scaffold(
       // extendBodyBehindAppBar: body fills behind the status bar so the

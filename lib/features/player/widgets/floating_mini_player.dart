@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/song.dart';
 import '../../../core/providers.dart';
-import '../../../shared/theme/app_theme.dart';
 import '../../../shared/widgets/cover_art_image.dart';
 
 // The mini player uses the same Android-first tonal surface as the dock.
@@ -26,9 +25,6 @@ class FloatingMiniPlayer extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final isPlaying = ref.watch(
-      playerStateStreamProvider.select((s) => s.valueOrNull?.playing ?? false),
-    );
 
     // Keep the player one clear tonal step above the page and below the
     // selected navigation indicator. This remains stable with dynamic color.
