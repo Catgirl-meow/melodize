@@ -53,10 +53,14 @@ class AnalysisCache:
         try:
             conn.executescript(_CREATE_SQL)
             # Migration: add tail_silence column for schema v1→v2.
-            try:
-                conn.execute("ALTER TABLE analysis_cache ADD COLUMN tail_silence REAL DEFAULT 0")
-            except sqlite3.OperationalError:
-                pass  # column already exists
+            for ddl in (
+                "ALTER TABLE analysis_cache ADD COLUMN tail_silence REAL DEFAULT 0",
+                "ALTER TABLE analysis_cache ADD COLUMN phrase_positions TEXT",
+            ):
+                try:
+                    conn.execute(ddl)
+                except sqlite3.OperationalError:
+                    pass  # column already exists
             conn.commit()
         finally:
             conn.close()
@@ -65,13 +69,19 @@ class AnalysisCache:
         """Return cached analysis for a song, or None."""
         conn = self._conn()
         try:
+            # Name the columns: databases migrated with ALTER TABLE have a
+            # different physical column order than freshly created ones, so
+            # `SELECT *` + positional indexes returned the wrong fields.
             cur = conn.execute(
-                "SELECT * FROM analysis_cache WHERE song_id = ?", (song_id,)
+                "SELECT song_id, file_path, file_mtime, file_size, bpm, "
+                "camelot_key, energy, spectral_centroid, duration, "
+                "tail_silence, data_version, analyzed_at, phrase_positions "
+                "FROM analysis_cache WHERE song_id = ?", (song_id,)
             )
             row = cur.fetchone()
             if row is None:
                 return None
-            return {
+            result = {
                 "song_id": row[0],
                 "file_path": row[1],
                 "file_mtime": row[2],
@@ -85,6 +95,12 @@ class AnalysisCache:
                 "data_version": row[10],
                 "analyzed_at": row[11],
             }
+            if row[12] is not None:
+                try:
+                    result["phrase_positions"] = json.loads(row[12])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            return result
         finally:
             conn.close()
 
@@ -144,9 +160,24 @@ class AnalysisCache:
         Given a list of {song_id, file_path, mtime, size}, return only
         the ones that need (re-)analysis.
         """
+        # One query for the whole library instead of a new connection and
+        # query per song (that was O(n) connections for every batch request).
+        conn = self._conn()
+        try:
+            known = {
+                row[0]: row[1:]
+                for row in conn.execute(
+                    "SELECT file_path, file_mtime, file_size, data_version "
+                    "FROM analysis_cache"
+                )
+            }
+        finally:
+            conn.close()
         stale = []
         for s in songs:
-            if self.needs_update(s["file_path"], s["mtime"], s["size"]):
+            row = known.get(s["file_path"])
+            if (row is None or (row[2] or 0) < SCHEMA_VERSION
+                    or row[0] != s["mtime"] or row[1] != s["size"]):
                 stale.append(s)
         return stale
 

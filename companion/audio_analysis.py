@@ -6,6 +6,7 @@ Requires: librosa, numpy, soundfile, pyrubberband
 
 import logging
 import os
+import threading
 import time
 from concurrent.futures import TimeoutError
 from typing import Optional
@@ -70,7 +71,9 @@ def analyze_song(file_path: str) -> Optional[dict]:
         phrase_positions: Optional[list] = None
         if bpm is not None and not (isinstance(bpm, float) and np.isnan(bpm)):
             try:
-                tempo, beats = librosa.beat.beat_track(y=y, sr=sr, units="time")
+                # Reuse the beat grid from the BPM pass above: beat tracking
+                # is the most expensive step, running it twice doubled the
+                # per-song analysis time.
                 if len(beats) > 0:
                     first_beat_offset = float(beats[0])
                     beat_interval = 60.0 / bpm if bpm > 0 else 0.5
@@ -404,9 +407,7 @@ def generate_transition(
         head_b = _fit_segment(head_b, target_len)
 
         # Equal-power crossfade envelope
-        fade = np.linspace(0, 1, min_len)
-        fade_out = 1 - fade  # A fades out
-        fade_in = fade       # B fades in
+        fade = np.linspace(0, 1, target_len)
         # Equal-power: gain stays roughly constant
         fade_out_eq = np.cos(fade * np.pi / 2)
         fade_in_eq = np.sin(fade * np.pi / 2)
@@ -440,8 +441,13 @@ def _load_tail(file_path: str, duration: float, sr: int = 44100,
     import librosa
 
     try:
-        info = sf.info(file_path)
-        total = info.frames / info.samplerate
+        try:
+            info = sf.info(file_path)
+            total = info.frames / info.samplerate
+        except Exception:
+            # libsndfile can't open every container (m4a/AAC, older builds
+            # without MP3/Opus); librosa falls back to audioread for those.
+            total = float(librosa.get_duration(path=file_path))
         # Load extra so we can discard the silent tail
         load_len = min(duration + tail_silence, total)
         offset = max(0, total - load_len)
@@ -486,14 +492,31 @@ def _load_head(file_path: str, duration: float, sr: int = 44100):
 # Batch analysis job tracking
 
 class AnalysisJobManager:
-    """Manages the lifecycle of a batch analysis job."""
+    """Manages the lifecycle of a batch analysis job.
+
+    Request handlers run on their own threads, so every access is locked.
+    """
 
     def __init__(self):
         self._jobs: dict[str, dict] = {}
+        self._created: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def prune(self, max_age_seconds: float) -> None:
+        """Forget finished jobs older than *max_age_seconds*."""
+        cutoff = time.time() - max_age_seconds
+        with self._lock:
+            for jid, created in list(self._created.items()):
+                job = self._jobs.get(jid)
+                if created < cutoff and (job is None or job.get("status") == "done"):
+                    self._jobs.pop(jid, None)
+                    self._created.pop(jid, None)
 
     def create_job(self, job_id: str, song_ids: list[dict]) -> str:
         """Create a new analysis job. song_ids is list of {song_id, file_path}."""
-        self._jobs[job_id] = {
+        with self._lock:
+            self._created[job_id] = time.time()
+            self._jobs[job_id] = {
             "job_id": job_id,
             "status": "queued",
             "total": len(song_ids),
@@ -502,25 +525,36 @@ class AnalysisJobManager:
             "failed": 0,
             "results": [],
             "songs": song_ids,
-        }
+            }
         return job_id
 
     def get_job(self, job_id: str) -> Optional[dict]:
-        return self._jobs.get(job_id)
+        """Return a snapshot of the job (safe to serialise while it runs)."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            snap = dict(job)
+            snap["results"] = list(job["results"])
+            return snap
 
     def update_job(self, job_id: str, **kwargs):
-        job = self._jobs.get(job_id)
-        if job:
-            job.update(kwargs)
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job:
+                job.update(kwargs)
 
     def add_result(self, job_id: str, result: dict):
-        job = self._jobs.get(job_id)
-        if job:
-            job["results"].append(result)
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job:
+                job["results"].append(result)
 
     def cleanup(self, job_id: str):
         """Remove a finished job to free memory."""
-        self._jobs.pop(job_id, None)
+        with self._lock:
+            self._jobs.pop(job_id, None)
+            self._created.pop(job_id, None)
 
 
 analysis_jobs = AnalysisJobManager()

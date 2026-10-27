@@ -14,7 +14,7 @@ Config: /etc/melodize-companion/config.json
 """
 
 import hashlib, hmac, http.server, json, logging, os, pathlib, re
-import sqlite3, subprocess, sys, threading, time
+import secrets, sqlite3, subprocess, sys, threading, time, urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
@@ -47,16 +47,85 @@ def load_config() -> dict:
 
 _jobs: dict[str, dict] = {}   # job_id -> {status, url, error, path}
 _jobs_lock = threading.Lock()
+_job_created: dict[str, float] = {}
+
+# Finished jobs are kept this long so the app can still poll their result.
+JOB_TTL_SECONDS = 6 * 3600
+# Upper bound on concurrent yt-dlp/deemix processes.
+MAX_CONCURRENT_DOWNLOADS = 3
+_download_slots = threading.BoundedSemaphore(MAX_CONCURRENT_DOWNLOADS)
+
+MAX_BODY_BYTES = 1 << 20
+MAX_BATCH_SONG_IDS = 20000
+_SQLITE_CHUNK = 500
+
+
+def _prune_jobs() -> None:
+    """Drop jobs older than JOB_TTL_SECONDS so the registry can't grow forever."""
+    cutoff = time.time() - JOB_TTL_SECONDS
+    with _jobs_lock:
+        for jid in [j for j, t in _job_created.items() if t < cutoff]:
+            _jobs.pop(jid, None)
+            _job_created.pop(jid, None)
+
+
+def _register_job(job_id: str, job: dict) -> None:
+    _prune_jobs()
+    with _jobs_lock:
+        _jobs[job_id] = job
+        _job_created[job_id] = time.time()
 
 
 def _new_job(job_id: str, url: str) -> None:
-    with _jobs_lock:
-        _jobs[job_id] = {"status": "queued", "url": url, "error": None, "path": None}
+    _register_job(job_id, {"status": "queued", "url": url, "error": None, "path": None})
+
+
+def _host_of(url: str) -> str:
+    try:
+        return (urllib.parse.urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def is_deezer_url(url: str) -> bool:
+    """True only when the URL's host is deezer.com or a subdomain of it."""
+    host = _host_of(url)
+    return host == "deezer.com" or host.endswith(".deezer.com") or host == "deezer.page.link"
+
+
+def validate_download_url(url: str) -> Optional[str]:
+    """Return an error message if *url* must not be handed to yt-dlp/deemix.
+
+    The URL ends up as a command-line argument, so anything that could be
+    parsed as an option (``--exec ...``) or a non-network scheme is refused.
+    """
+    if len(url) > 2048:
+        return "url is too long"
+    if any(c.isspace() or ord(c) < 0x20 for c in url):
+        return "url must not contain whitespace or control characters"
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return "url is not valid"
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return "url must be an http(s) URL"
+    return None
+
+
+_ARL_RE = re.compile(r"^[A-Za-z0-9]{32,512}$")
+
+
+def is_valid_arl(arl: str) -> bool:
+    """Deezer ARLs are long hex strings; reject anything that could smuggle
+    extra cookies or curl config directives."""
+    return bool(_ARL_RE.match(arl))
 
 
 def _update_job(job_id: str, **kwargs) -> None:
     with _jobs_lock:
-        _jobs[job_id].update(kwargs)
+        job = _jobs.get(job_id)
+        if job is not None:
+            job.update(kwargs)
 
 
 # Writable state dir — matches StateDirectory=melodize-companion in the systemd unit.
@@ -96,16 +165,21 @@ def _validate_deezer_connectivity(arl: str, cfg: dict) -> tuple[bool, bool]:
         'https://www.deezer.com/ajax/gw-light.php'
         '?method=deezer.getUserData&api_version=1.0&api_token=&input=3'
     )
+    arl = arl.strip()
+    if not is_valid_arl(arl):
+        return (True, False)
     try:
         cmd = [
             'curl', '-4', '-s', '-X', 'POST', '-d', '',
             '-H', 'User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-            '-b', f'arl={arl.strip()}',
+            # Read the cookie from stdin so the ARL never shows up in `ps`.
+            '-K', '-',
         ]
         cmd.extend(_deezer_proxy_args(cfg))
         cmd.append(url)
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15,
+                                input=f'cookie = "arl={arl}"\n')
         body = result.stdout.strip()
         if not body:
             log.warning("Deezer API returned empty body — server IP may be blocked")
@@ -129,8 +203,12 @@ def _validate_deezer_connectivity(arl: str, cfg: dict) -> tuple[bool, bool]:
 
 def _write_deemix_arl(arl: str) -> None:
     """Persist ARL and high-quality artwork config so deemix picks them up."""
-    _DEEMIX_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    (_DEEMIX_CONFIG_DIR / ".arl").write_text(arl.strip(), encoding="utf-8")
+    _DEEMIX_CONFIG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    arl_path = _DEEMIX_CONFIG_DIR / ".arl"
+    fd = os.open(arl_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(arl.strip())
+    os.chmod(arl_path, 0o600)
 
     # Write/update config.json — only set artwork quality, leave everything else
     # at deemix defaults so we don't stomp on user-configured preferences.
@@ -146,7 +224,8 @@ def _write_deemix_arl(arl: str) -> None:
 
 def _run_download(job_id: str, url: str, cfg: dict, deezer_arl: str = "") -> None:
     try:
-        _run_download_inner(job_id, url, cfg, deezer_arl)
+        with _download_slots:
+            _run_download_inner(job_id, url, cfg, deezer_arl)
     except Exception as e:
         # Safety net: ensure the job never gets stuck in "downloading" forever.
         log.exception(f"[job {job_id}] unexpected error")
@@ -156,7 +235,7 @@ def _run_download(job_id: str, url: str, cfg: dict, deezer_arl: str = "") -> Non
 def _run_download_inner(job_id: str, url: str, cfg: dict, deezer_arl: str = "") -> None:
     _update_job(job_id, status="downloading")
     music_dir = cfg["music_dir"]
-    is_deezer = "deezer.com" in url
+    is_deezer = is_deezer_url(url)
     effective_arl = deezer_arl or cfg.get("deezer_arl", "")
 
     if is_deezer:
@@ -183,7 +262,7 @@ def _run_download_inner(job_id: str, url: str, cfg: dict, deezer_arl: str = "") 
         _write_deemix_arl(effective_arl)
         deemix = cfg.get("deemix_path", "deemix")
         # Pass the config dir so deemix finds the .arl file we just wrote.
-        cmd = [deemix, "-b", "FLAC", "-p", music_dir, url]
+        cmd = [deemix, "-b", "FLAC", "-p", music_dir, "--", url]
         err_label = "deemix"
     else:
         ytdlp = cfg.get("ytdlp_path", "yt-dlp")
@@ -197,6 +276,7 @@ def _run_download_inner(job_id: str, url: str, cfg: dict, deezer_arl: str = "") 
             "--no-playlist",
             "--no-progress",
             "--add-metadata",
+            "--",
             url,
         ]
         err_label = "yt-dlp"
@@ -287,7 +367,11 @@ def _run_download_inner(job_id: str, url: str, cfg: dict, deezer_arl: str = "") 
 # ---------------------------------------------------------------------------
 
 class _Handler(http.server.BaseHTTPRequestHandler):
-    """Single threaded for now — DB writes are serialised by the GIL anyway."""
+    """One thread per request (see _Server). Shared state is lock-protected
+    and every SQLite access opens its own connection."""
+
+    # Drop idle/slow clients instead of letting them hold a worker forever.
+    timeout = 30
 
     # Silence default access log; we use our own
     def log_message(self, fmt, *args):
@@ -307,15 +391,22 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _auth(self) -> bool:
-        key = self.headers.get("X-API-Key", "")
-        if not hmac.compare_digest(key, self.server.cfg["api_key"]):
+        key = self.headers.get("X-API-Key", "").encode("utf-8", "surrogateescape")
+        expected = self.server.cfg["api_key"].encode("utf-8")
+        if not hmac.compare_digest(key, expected):
             self._send(403, {"error": "invalid or missing API key"})
             return False
         return True
 
     def _body(self) -> dict:
+        """Parse a JSON object body. Raises ValueError on bad input."""
         n = int(self.headers.get("Content-Length", 0))
-        return json.loads(self.rfile.read(n)) if n > 0 else {}
+        if n < 0 or n > MAX_BODY_BYTES:
+            raise ValueError("request body too large")
+        body = json.loads(self.rfile.read(n)) if n > 0 else {}
+        if not isinstance(body, dict):
+            raise ValueError("JSON body must be an object")
+        return body
 
     def _lookup_path(self, song_id: str) -> Optional[str]:
         """Return relative path (filename) for a Navidrome song ID, or None."""
@@ -329,7 +420,30 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     # --- routing ---
 
+    def _guarded(self, fn) -> None:
+        """Turn unexpected exceptions into a JSON 500 instead of a dropped
+        connection, so the app sees a clean error."""
+        try:
+            fn()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception:
+            log.exception("Unhandled error for %s %s", self.command, self.path)
+            try:
+                self._send(500, {"error": "internal server error"})
+            except Exception:
+                pass
+
     def do_GET(self):
+        self._guarded(self._do_get)
+
+    def do_DELETE(self):
+        self._guarded(self._do_delete)
+
+    def do_POST(self):
+        self._guarded(self._do_post)
+
+    def _do_get(self):
         p = self.path.split("?")[0]
         if p == "/health":
             self._send(200, {"status": "ok", "version": "1.3.0"})
@@ -413,18 +527,22 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if not wav_path.is_file():
                 self._send(404, {"error": "transition not found"})
                 return
-            data = wav_path.read_bytes()
+            size = wav_path.stat().st_size
             self.send_response(200)
             self.send_header("Content-Type", "audio/wav")
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "public, max-age=86400")
+            self.send_header("Content-Length", str(size))
+            # Authenticated content: shared caches (reverse proxies) must
+            # not store it and serve it to clients without the API key.
+            self.send_header("Cache-Control", "private, max-age=86400")
             self.end_headers()
-            self.wfile.write(data)
+            with wav_path.open("rb") as f:
+                while chunk := f.read(64 * 1024):
+                    self.wfile.write(chunk)
             return
 
         self._send(404, {"error": "not found"})
 
-    def do_DELETE(self):
+    def _do_delete(self):
         if not self._auth():
             return
         m = re.match(r"^/api/songs/([^/?]+)$", self.path.split("?")[0])
@@ -461,7 +579,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             log.exception("Unexpected error during delete")
             self._send(500, {"error": str(e)})
 
-    def do_POST(self):
+    def _do_post(self):
         if not self._auth():
             return
         p = self.path.split("?")[0]
@@ -482,13 +600,21 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(400, {"error": "invalid JSON body"})
             return
 
-        url = (body.get("url") or "").strip()
+        url = body.get("url")
+        url = url.strip() if isinstance(url, str) else ""
         if not url:
             self._send(400, {"error": "'url' is required"})
             return
-        deezer_arl = (body.get("deezer_arl") or "").strip()
+        err = validate_download_url(url)
+        if err:
+            self._send(400, {"error": err})
+            return
+        deezer_arl = body.get("deezer_arl")
+        deezer_arl = deezer_arl.strip() if isinstance(deezer_arl, str) else ""
+        if deezer_arl and not is_valid_arl(deezer_arl):
+            self._send(400, {"error": "deezer_arl is not a valid ARL"})
+            return
 
-        import secrets
         job_id = secrets.token_urlsafe(12)
         _new_job(job_id, url)
         t = threading.Thread(
@@ -503,8 +629,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _handle_analyze_batch(self):
         """Start a batch analysis of the song library."""
-        import secrets
-
         try:
             body = self._body()
         except (json.JSONDecodeError, ValueError):
@@ -513,17 +637,28 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         # Build the list of songs to analyze from Navidrome DB
         song_ids = body.get("song_ids")  # optional subset
+        if song_ids is not None and (
+                not isinstance(song_ids, list)
+                or len(song_ids) > MAX_BATCH_SONG_IDS
+                or not all(isinstance(s, str) for s in song_ids)):
+            self._send(400, {"error": f"song_ids must be a list of at most "
+                                      f"{MAX_BATCH_SONG_IDS} strings"})
+            return
         conn = sqlite3.connect(self.server.cfg["navidrome_db"], check_same_thread=False)
         try:
             if song_ids:
-                placeholders = ",".join("?" for _ in song_ids)
-                cur = conn.execute(
-                    f"SELECT id, path FROM media_file WHERE id IN ({placeholders})",
-                    song_ids,
-                )
+                # Chunk the IN (...) list: SQLite caps bound parameters.
+                rows = []
+                ids = list(dict.fromkeys(song_ids))
+                for i in range(0, len(ids), _SQLITE_CHUNK):
+                    chunk = ids[i:i + _SQLITE_CHUNK]
+                    placeholders = ",".join("?" for _ in chunk)
+                    rows.extend(conn.execute(
+                        f"SELECT id, path FROM media_file WHERE id IN ({placeholders})",
+                        chunk,
+                    ).fetchall())
             else:
-                cur = conn.execute("SELECT id, path FROM media_file")
-            rows = cur.fetchall()
+                rows = conn.execute("SELECT id, path FROM media_file").fetchall()
         finally:
             conn.close()
 
@@ -561,6 +696,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
 
         job_id = f"ana_{secrets.token_urlsafe(8)}"
+        analysis_jobs.prune(JOB_TTL_SECONDS)
         # Store full song list for progress tracking
         analysis_jobs.create_job(job_id, songs_to_check)
         analysis_jobs.update_job(job_id, status="in_progress", skipped=skipped)
@@ -621,16 +757,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _handle_mix_transition(self):
         """Generate a time-stretched crossfade mix between two songs."""
-        import secrets
-
         try:
             body = self._body()
         except (json.JSONDecodeError, ValueError):
             self._send(400, {"error": "invalid JSON body"})
             return
 
-        song_a_id = body.get("song_a_id", "").strip()
-        song_b_id = body.get("song_b_id", "").strip()
+        song_a_id = body.get("song_a_id")
+        song_b_id = body.get("song_b_id")
+        song_a_id = song_a_id.strip() if isinstance(song_a_id, str) else ""
+        song_b_id = song_b_id.strip() if isinstance(song_b_id, str) else ""
         if not song_a_id or not song_b_id:
             self._send(400, {"error": "song_a_id and song_b_id are required"})
             return
@@ -638,6 +774,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         try:
             mix_duration = float(body.get("mix_duration", 10))
         except (TypeError, ValueError):
+            self._send(400, {"error": "mix_duration must be a number"})
+            return
+        if mix_duration != mix_duration:  # NaN
             self._send(400, {"error": "mix_duration must be a number"})
             return
         if not 2.0 <= mix_duration <= 30.0:
@@ -704,14 +843,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         # Generate mix in executor to avoid blocking
         job_id = f"mix_{secrets.token_urlsafe(8)}"
-        with _jobs_lock:
-            _jobs[job_id] = {
-                "status": "mixing",
-                "song_a": song_a_id,
-                "song_b": song_b_id,
-                "url": None,
-                "quality": quality,
-            }
+        _register_job(job_id, {
+            "status": "mixing",
+            "song_a": song_a_id,
+            "song_b": song_b_id,
+            "url": None,
+            "quality": quality,
+        })
 
         executor = self.server.executor
         executor.submit(
@@ -735,7 +873,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 tail_silence_a=tail_silence_a,
             )
             if wav_bytes:
-                mix_path.write_bytes(wav_bytes)
+                # Write then rename so a concurrent GET never serves a
+                # half-written file.
+                tmp = mix_path.with_suffix(f".{secrets.token_hex(4)}.tmp")
+                tmp.write_bytes(wav_bytes)
+                os.replace(tmp, mix_path)
                 mix_filename = mix_path.name
                 with _jobs_lock:
                     _jobs[job_id] = {
@@ -759,7 +901,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
 # ---------------------------------------------------------------------------
 
-class _Server(http.server.HTTPServer):
+class _Server(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+
     def __init__(self, addr, handler, cfg):
         self.cfg = cfg
         self.executor = ThreadPoolExecutor(max_workers=cfg.get("analysis_threads", 2))
@@ -773,8 +917,11 @@ class _Server(http.server.HTTPServer):
 def main():
     cfg = load_config()
     port = int(cfg.get("port", 8765))
-    srv = _Server(("0.0.0.0", port), _Handler, cfg)
-    log.info(f"melodize-companion v1.3 — listening on 0.0.0.0:{port}")
+    # Set "bind" to 127.0.0.1 when a reverse proxy on the same host fronts the
+    # companion, so the plain-HTTP port isn't reachable from the network.
+    bind = cfg.get("bind", "0.0.0.0")
+    srv = _Server((bind, port), _Handler, cfg)
+    log.info(f"melodize-companion v1.3 — listening on {bind}:{port}")
     log.info(f"  music_dir:     {cfg['music_dir']}")
     log.info(f"  navidrome_db:  {cfg['navidrome_db']}")
     try:
