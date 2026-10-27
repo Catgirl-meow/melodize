@@ -121,4 +121,27 @@ void main() {
     expect(rest.where((p) => p.endsWith('getScanStatus')).length,
         greaterThanOrEqualTo(3));
   });
+
+  test('remove all skips the delete when nothing is missing', () async {
+    final adapter = _FakeAdapter((o) {
+      if (o.path == '/auth/login') return _json(200, {'token': 'tok'});
+      return _json(200, [], headers: {'x-total-count': ['0']});
+    });
+    expect(await _client(adapter).removeAllMissingFiles(), 0);
+    expect(adapter.requests.where((r) => r.method == 'DELETE'), isEmpty);
+  });
+
+  test('remove all reports the count it removed', () async {
+    final adapter = _FakeAdapter((o) {
+      if (o.path == '/auth/login') return _json(200, {'token': 'tok'});
+      if (o.method == 'GET') {
+        return _json(200, [{}], headers: {'x-total-count': ['83']});
+      }
+      return _json(200, {});
+    });
+    expect(await _client(adapter).removeAllMissingFiles(), 83);
+    final del = adapter.requests.last;
+    expect(del.method, 'DELETE');
+    expect(del.uri.query, isEmpty);
+  });
 }

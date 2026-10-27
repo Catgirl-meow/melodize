@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/api/navidrome_native_client.dart';
+import '../../core/api/subsonic_client.dart' show SubsonicConfig;
 import '../../core/models/app_preferences.dart';
 import '../../core/providers.dart';
 import '../../core/utils/platform_dirs.dart';
@@ -287,6 +289,14 @@ class _ServerSettingsScreen extends ConsumerWidget {
         const _SectionHeader('Actions'),
         GroupedSection(
           children: [
+            if (config != null)
+              ListTile(
+                leading: const Icon(Icons.cleaning_services_rounded),
+                title: const Text('Remove missing files'),
+                subtitle: const Text(
+                    'Clears songs Navidrome lists as missing after they were deleted'),
+                onTap: () => _removeMissingFiles(context, ref, config),
+              ),
             ListTile(
               leading: Icon(Icons.swap_horiz_rounded, color: scheme.error),
               title: Text(
@@ -1089,6 +1099,45 @@ class _SectionHeader extends StatelessWidget {
             ),
       ),
     );
+  }
+}
+
+Future<void> _removeMissingFiles(
+    BuildContext context, WidgetRef ref, SubsonicConfig config) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog.adaptive(
+      title: const Text('Remove missing files?'),
+      content: const Text(
+        'Navidrome keeps songs whose files are gone from disk in its "Missing files" list. This removes all of them from Navidrome, along with their play counts and playlist entries. Your admin account is needed.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext, false),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext, true),
+          child: const Text('Remove'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true || !context.mounted) return;
+
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    final removed =
+        await NavidromeNativeClient(config).removeAllMissingFiles();
+    messenger.showSnackBar(SnackBar(
+      content: Text(removed == 0
+          ? 'Navidrome has no missing files'
+          : 'Removed $removed missing ${removed == 1 ? 'file' : 'files'}'),
+    ));
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(
+      content: Text('Could not remove missing files: $e'),
+    ));
   }
 }
 
