@@ -52,7 +52,6 @@ class FloatingMiniPlayer extends ConsumerWidget {
             ),
           ),
         ),
-        borderRadius: cardRadius,
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onOpen,

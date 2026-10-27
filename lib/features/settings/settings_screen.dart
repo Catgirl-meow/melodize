@@ -1163,7 +1163,8 @@ Future<void> _changeServer(BuildContext context, WidgetRef ref) async {
       ],
     ),
   );
-  if (confirmed != true) return;
+  if (confirmed != true || !context.mounted) return;
+  final navigator = Navigator.of(context, rootNavigator: true);
 
   final handler = ref.read(audioHandlerNotifierProvider);
   await handler?.stop();
@@ -1183,6 +1184,10 @@ Future<void> _changeServer(BuildContext context, WidgetRef ref) async {
   ref.invalidate(downloadedSongsProvider);
   ref.invalidate(downloadNotifierProvider);
   ref.invalidate(allSongsProvider);
+
+  // The startup router puts the setup screen at the root; close the settings
+  // pages pushed above it, or they stay on screen with no server.
+  navigator.popUntil((route) => route.isFirst);
 }
 
 String _qualityLabel(String quality) {

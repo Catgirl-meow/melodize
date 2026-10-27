@@ -461,29 +461,35 @@ class _FloatingNavItem extends StatelessWidget {
     // Guard against light accents — white text on a light pill is invisible.
     final activeColor = scheme.onSecondaryContainer;
 
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: label,
-      child: InkWell(
-        onTap: onTap,
-        splashFactory: NoSplash.splashFactory,
-        overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-        borderRadius: BorderRadius.circular(_kPillRadius),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeInOut,
-            decoration: BoxDecoration(
-              color: pillColor,
-              borderRadius: BorderRadius.circular(_kPillRadius),
-            ),
-            child: Center(
-              child: Icon(
-                selected ? selectedIcon : icon,
-                size: 26,
-                color: selected ? activeColor : scheme.onSurfaceVariant,
+    // Icon-only dock: the tooltip names the tab on hover (desktop) and long
+    // press (Android).
+    return Tooltip(
+      message: label,
+      excludeFromSemantics: true,
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: label,
+        child: InkWell(
+          onTap: onTap,
+          splashFactory: NoSplash.splashFactory,
+          overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+          borderRadius: BorderRadius.circular(_kPillRadius),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+              decoration: BoxDecoration(
+                color: pillColor,
+                borderRadius: BorderRadius.circular(_kPillRadius),
+              ),
+              child: Center(
+                child: Icon(
+                  selected ? selectedIcon : icon,
+                  size: 26,
+                  color: selected ? activeColor : scheme.onSurfaceVariant,
+                ),
               ),
             ),
           ),
