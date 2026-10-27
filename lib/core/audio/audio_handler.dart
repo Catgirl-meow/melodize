@@ -12,6 +12,7 @@ import '../api/subsonic_client.dart';
 import '../api/companion_audio_api.dart';
 import '../linux/linux_mpris.dart';
 import '../utils/platform_info.dart';
+import 'fixed_shuffle_order.dart';
 import 'playback_core.dart';
 import 'shuffle_mode.dart';
 import 'smart_shuffle_engine.dart';
@@ -23,6 +24,11 @@ import 'smart_shuffle_engine.dart';
 // time and use a virtual playback index for mid-playback toggles. The same
 // virtual-order path is used on Android and macOS, so shuffle behaves
 // identically on every platform.
+//
+// On Android the virtual order is also handed to ExoPlayer as its shuffle
+// order (see [_syncNativeShuffleOrder]), so the natural advance goes straight
+// to the planned next song instead of playing physical index + 1 until the
+// correcting seek lands.
 
 // Audio handler. Bridges just_audio with audio_service for MediaSession,
 // notifications, lock-screen controls, and media-button routing.
@@ -75,10 +81,16 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   );
 
   // Replaced on every loadQueue call to avoid an expensive clear() round-trip.
-  ConcatenatingAudioSource _playlistSource = ConcatenatingAudioSource(
+  FixedShuffleOrder _nativeShuffleOrder = FixedShuffleOrder();
+  late ConcatenatingAudioSource _playlistSource = ConcatenatingAudioSource(
     children: [],
     useLazyPreparation: true,
+    shuffleOrder: _nativeShuffleOrder,
   );
+
+  // just_audio_media_kit (Linux) has no setShuffleOrder, and the macOS path
+  // is untested, so only Android uses the player's own shuffle order.
+  static final bool _useNativeShuffleOrder = Platform.isAndroid;
 
   SubsonicConfig? _config;
   // One client per config: each SubsonicClient owns a Dio connection pool, so
@@ -640,6 +652,10 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   // quick skips) always reaches the UI.
   void _emitQueueSnapshot({bool immediate = false}) {
     if (_queueSnapshotCtrl.isClosed) return;
+    // Every virtual-order change ends in a snapshot, so this is the one place
+    // the player's own order is kept in step. Not throttled: the next natural
+    // advance must already see the new order.
+    _syncNativeShuffleOrder();
     if (!immediate) {
       if (_snapshotTrailingTimer != null) return;
       final wait = const Duration(milliseconds: 150) -
@@ -656,6 +672,26 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _snapshotTrailingTimer = null;
     _lastSnapshotEmit = DateTime.now();
     _queueSnapshotCtrl.add(_snapshot());
+  }
+
+  /// Android: make ExoPlayer follow [_shuffleOrder] on its own. Cheap when
+  /// nothing changed, so it can run on every snapshot.
+  void _syncNativeShuffleOrder() {
+    if (!_useNativeShuffleOrder || _disposed || _loading) return;
+    final length = _playlistSource.length;
+    final enable = _shuffleOrder.isNotEmpty && length > 1;
+    if (enable && _nativeShuffleOrder.assign(_shuffleOrder, length)) {
+      // shuffle() keeps our order (FixedShuffleOrder.shuffle is a no-op) and
+      // sends it to the platform.
+      player.shuffle().catchError((Object e) {
+        debugPrint('Native shuffle order sync failed: $e');
+      });
+    }
+    if (player.shuffleModeEnabled != enable) {
+      player.setShuffleModeEnabled(enable).catchError((Object e) {
+        debugPrint('Native shuffle mode sync failed: $e');
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -700,9 +736,13 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     // because media_kit/libmpv does not reliably support playlist moves;
     // Android and macOS benefit from lazy preparation and preload:false so the
     // first track can start without preparing the entire queue.
+    // A fresh order starts as the identity, so the player follows the
+    // physical queue until the virtual order is calculated below.
+    _nativeShuffleOrder = FixedShuffleOrder();
     _playlistSource = ConcatenatingAudioSource(
       children: songs.map(_songToSource).toList(),
       useLazyPreparation: true,
+      shuffleOrder: _nativeShuffleOrder,
     );
     try {
       await player.setAudioSource(_playlistSource,
