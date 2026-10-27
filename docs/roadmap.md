@@ -25,18 +25,18 @@ playback rework, the queue rewrite) is in git history and the release notes.
 | Hard-coded detail headers | trivial | Album and playlist titles use `fontSize: 20`, the artist header `fontSize: 22`. Use `titleLarge` / `headlineSmall` with bold weight. |
 | Quality badge radius | trivial | `_QualityBadge` in `song_tile.dart` uses radius 4; everything around it uses 8. |
 | Section spacing | small | Sort-row padding differs between Library tabs (`16,16,16,8` vs `16,10,8,4`), and the header-to-content gap is 12 px on Home and 4 px in Library. Pick one rhythm (M3E says 16). |
-| Medium collapsing app bars | small to medium | Downloads, Downloaded songs and the Settings sub-pages still use a plain `AppBar`; Library is harder because each tab has its own scroll view. Don't redo Home: see [design.md](design.md#app-bars). |
-| Wavy progress bar on Now Playing | medium | Flutter has no M3E wavy slider, so it needs a custom painter. The most visible M3E piece still missing. |
-| Haptics on play, skip and reorder | small | Android only, with an off switch in Settings. |
+| Medium collapsing app bars | small | Downloads, Downloaded songs and the Settings sub-pages still use a plain `AppBar`. Library and Home keep theirs (see [design.md](design.md#app-bars)). |
 
 ## Features
 
 | Item | Effort | Notes |
 |---|---|---|
-| "Not interested" on recommendations | medium | Long-press a recommendation to hide it for good: a small `dismissed_recommendations` table (Deezer id, date), a schema bump to v5, and an undo / reset option. |
 | Prebuilt macOS app | needs an Apple Developer ID | Without signing and notarization a downloaded build won't open on other Macs. |
 
 ## Not planned
 
 Starred songs and favourites, CarPlay / Android Auto, and recommendations from Navidrome's
 similar-songs API (Deezer finds music you don't already have).
+
+Dropped for now (October 2026): a wavy progress bar, haptics, "not interested" on
+recommendations, and a collapsing app bar on Library.

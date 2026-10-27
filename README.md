@@ -54,7 +54,7 @@ More: [architecture and gotchas](CLAUDE.md), [roadmap](docs/roadmap.md),
 
 ## Credits and licenses
 
-Melodize is licensed under the MIT license.
+Melodize is licensed under the [MIT license](LICENSE).
 
 - **Navidrome** ([navidrome/navidrome](https://github.com/navidrome/navidrome), GPL-3.0) and the
   [Subsonic API](http://www.subsonic.org/pages/api.jsp): the server and protocol Melodize talks
