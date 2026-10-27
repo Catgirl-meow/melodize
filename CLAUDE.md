@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Melodize — a Flutter music player for Navidrome/Subsonic servers, targeting Android, Linux, and macOS. Lossless streaming, offline downloads, Deezer-powered discovery, DJ-style smart shuffle, crossfade. See `README.md` for the feature overview and `docs/three-pass-plan.md` for the roadmap state (Pass 1 ✅, Pass 2 mostly ✅, Pass 3 M3 Expressive partially shipped).
+Melodize — a Flutter music player for Navidrome/Subsonic servers, targeting Android, Linux, and macOS. Lossless streaming, offline downloads, Deezer-powered discovery, DJ-style smart shuffle, crossfade. See `README.md` for the feature overview and `docs/roadmap.md` for what is still open.
 
-A companion Python service (`companion/`, see `COMPANION.md`) runs on the Navidrome host and unlocks audio analysis (BPM/key/energy), rendered transitions, server-side deletes, and Deezer downloads. The app must remain fully functional without it.
+A companion Python service (`companion/`, see `docs/companion.md`) runs on the Navidrome host and unlocks audio analysis (BPM/key/energy), rendered transitions, server-side deletes, and Deezer downloads. The app must remain fully functional without it.
 
 ## Commands
 
@@ -86,7 +86,7 @@ Every Riverpod provider lives here (~1.4k lines). Key patterns:
 
 ### UI
 
-`lib/features/` (home, library, player, search, settings, downloads, setup, shell) + `lib/shared/` (widgets, theme, utils). Theming: `AppTheme` with `DynamicColorBuilder` + `DynamicSchemeVariant.expressive`; Now Playing derives accent colors from album art via `palette_generator` (`dominantColorProvider`/`currentAccentColorProvider`). `docs/design-consistency.md` holds the visual conventions backlog.
+`lib/features/` (home, library, player, search, settings, downloads, setup, shell) + `lib/shared/` (widgets, theme, utils). Theming: `AppTheme` with `DynamicColorBuilder` + `DynamicSchemeVariant.expressive`; Now Playing derives accent colors from album art via `palette_generator` (`dominantColorProvider`/`currentAccentColorProvider`). `docs/design.md` holds the visual conventions; open polish items are in `docs/roadmap.md`.
 
 ## Gotchas
 
