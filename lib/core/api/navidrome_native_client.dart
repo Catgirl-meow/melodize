@@ -38,62 +38,65 @@ class NavidromeNativeClient {
     return _token = token;
   }
 
+  // Sends a request with the session token, logging in again once if the
+  // token has expired.
+  Future<Response> _authed(Future<Response> Function(Options) send) async {
+    Options opts(String token) => Options(
+          headers: {_authHeader: 'Bearer $token'},
+          validateStatus: (s) => s != null && s < 500,
+        );
+    var resp = await send(opts(_token ?? await _login()));
+    if (resp.statusCode == 401) resp = await send(opts(await _login()));
+    if (resp.statusCode == 403) {
+      throw Exception('Removing missing files needs a Navidrome admin user');
+    }
+    return resp;
+  }
+
   // Removes the given songs from Navidrome's missing-files list.
   //
   // Returns false when none of them is flagged missing yet (the rescan has not
-  // reached them). Never call this with an empty list: Navidrome treats that
-  // as "remove every missing file".
+  // reached them). Navidrome answers a delete of unknown ids with 200, so the
+  // list is checked first, and only ids it holds are sent: a delete with no
+  // ids means "remove every missing file".
   Future<bool> removeMissingFiles(List<String> songIds) async {
     if (songIds.isEmpty) return true;
-    final query = songIds
-        .map((id) => 'id=${Uri.encodeQueryComponent(id)}')
-        .join('&');
-    Future<Response> send(String token) => _dio.delete(
-          '/api/missing?$query',
-          options: Options(
-            headers: {_authHeader: 'Bearer $token'},
-            validateStatus: (s) => s != null && s < 500,
-          ),
-        );
+    String idQuery(Iterable<String> ids) =>
+        ids.map((id) => 'id=${Uri.encodeQueryComponent(id)}').join('&');
 
-    var resp = await send(_token ?? await _login());
-    if (resp.statusCode == 401) resp = await send(await _login());
-    switch (resp.statusCode) {
-      case 200:
-        return true;
-      case 404:
-        return false;
-      case 403:
-        throw Exception('Removing missing files needs a Navidrome admin user');
-      default:
-        throw Exception('Navidrome returned HTTP ${resp.statusCode}');
+    final list = await _authed(
+        (o) => _dio.get('/api/missing?${idQuery(songIds)}', options: o));
+    if (list.statusCode != 200) {
+      throw Exception('Navidrome returned HTTP ${list.statusCode}');
     }
+    final wanted = songIds.toSet();
+    final flagged = [
+      for (final row in (list.data as List? ?? const []))
+        if (row is Map && wanted.contains(row['id'])) row['id'] as String,
+    ];
+    if (flagged.isEmpty) return false;
+
+    final del = await _authed(
+        (o) => _dio.delete('/api/missing?${idQuery(flagged)}', options: o));
+    if (del.statusCode != 200) {
+      throw Exception('Navidrome returned HTTP ${del.statusCode}');
+    }
+    return flagged.length == wanted.length;
   }
 
   // Removes every file Navidrome currently flags as missing, as the web UI's
   // "Remove all" does. Returns how many were removed.
   Future<int> removeAllMissingFiles() async {
-    Future<Response> get(String token) => _dio.get(
+    final resp = await _authed((o) => _dio.get(
           '/api/missing',
           queryParameters: {'_start': 0, '_end': 1},
-          options: Options(
-            headers: {_authHeader: 'Bearer $token'},
-            validateStatus: (s) => s != null && s < 500,
-          ),
-        );
-    var resp = await get(_token ?? await _login());
-    if (resp.statusCode == 401) resp = await get(await _login());
-    if (resp.statusCode == 403) {
-      throw Exception('Removing missing files needs a Navidrome admin user');
-    }
+          options: o,
+        ));
     final count =
         int.tryParse(resp.headers.value('x-total-count') ?? '') ?? 0;
     if (count == 0) return 0;
 
-    final del = await _dio.delete(
-      '/api/missing',
-      options: Options(headers: {_authHeader: 'Bearer $_token'}),
-    );
+    final del = await _authed((o) => _dio.delete('/api/missing', options: o));
     if (del.statusCode != 200) {
       throw Exception('Navidrome returned HTTP ${del.statusCode}');
     }

@@ -39,10 +39,20 @@ NavidromeNativeClient _client(_FakeAdapter adapter) {
 }
 
 void main() {
-  test('logs in once and deletes only the given ids', () async {
+  // Answers a GET of /api/missing with the rows in [missing] whose id was
+  // asked for, the way Navidrome filters by id.
+  ResponseBody missingList(RequestOptions o, Set<String> missing) => _json(
+      200,
+      [
+        for (final id in o.uri.queryParametersAll['id'] ?? const <String>[])
+          if (missing.contains(id)) {'id': id}
+      ]);
+
+  test('logs in once and deletes only the flagged ids', () async {
     final adapter = _FakeAdapter((o) {
       if (o.path == '/auth/login') return _json(200, {'token': 'tok'});
-      return _json(200, {'ids': ['a b']});
+      if (o.method == 'GET') return missingList(o, {'a b', 'c'});
+      return _json(200, {});
     });
     final client = _client(adapter);
 
@@ -51,8 +61,7 @@ void main() {
 
     final logins = adapter.requests.where((r) => r.path == '/auth/login');
     expect(logins, hasLength(1));
-    final del = adapter.requests[1];
-    expect(del.method, 'DELETE');
+    final del = adapter.requests.firstWhere((r) => r.method == 'DELETE');
     expect(del.uri.toString(), 'http://nd.test/api/missing?id=a+b');
     expect(del.headers['X-ND-Authorization'], 'Bearer tok');
   });
@@ -63,21 +72,38 @@ void main() {
     expect(adapter.requests, isEmpty);
   });
 
-  test('404 means not flagged missing yet', () async {
-    final adapter = _FakeAdapter((o) => o.path == '/auth/login'
-        ? _json(200, {'token': 'tok'})
-        : ResponseBody.fromString('not found', 404));
+  test('not flagged yet: returns false and sends no delete', () async {
+    // Navidrome answers a delete of unknown ids with 200, so a bare delete
+    // would wrongly report success.
+    final adapter = _FakeAdapter((o) {
+      if (o.path == '/auth/login') return _json(200, {'token': 'tok'});
+      if (o.method == 'GET') return missingList(o, {});
+      return _json(200, {});
+    });
     expect(await _client(adapter).removeMissingFiles(['x']), isFalse);
+    expect(adapter.requests.where((r) => r.method == 'DELETE'), isEmpty);
+  });
+
+  test('partly flagged: deletes those and reports not done', () async {
+    final adapter = _FakeAdapter((o) {
+      if (o.path == '/auth/login') return _json(200, {'token': 'tok'});
+      if (o.method == 'GET') return missingList(o, {'x'});
+      return _json(200, {});
+    });
+    expect(await _client(adapter).removeMissingFiles(['x', 'y']), isFalse);
+    final del = adapter.requests.firstWhere((r) => r.method == 'DELETE');
+    expect(del.uri.query, 'id=x');
   });
 
   test('re-logs in when the token expired', () async {
-    var deletes = 0;
+    var gets = 0;
     final adapter = _FakeAdapter((o) {
       if (o.path == '/auth/login') return _json(200, {'token': 'tok'});
-      deletes++;
-      return deletes == 2
-          ? _json(200, {})
-          : ResponseBody.fromString('expired', 401);
+      if (o.method == 'GET' && gets++ == 0) {
+        return ResponseBody.fromString('expired', 401);
+      }
+      if (o.method == 'GET') return missingList(o, {'x'});
+      return _json(200, {});
     });
     final client = _client(adapter);
     expect(await client.removeMissingFiles(['x']), isTrue);
@@ -86,13 +112,15 @@ void main() {
 
   test('purgeDeletedSongs waits for the scan, then rescans until flagged',
       () async {
+    var listCalls = 0;
     var deleteCalls = 0;
     final nd = _FakeAdapter((o) {
       if (o.path == '/auth/login') return _json(200, {'token': 'tok'});
+      if (o.method == 'GET') {
+        return missingList(o, listCalls++ < 1 ? {} : {'x'});
+      }
       deleteCalls++;
-      return deleteCalls < 2
-          ? ResponseBody.fromString('not found', 404)
-          : _json(200, {});
+      return _json(200, {});
     });
     var statusCalls = 0;
     final rest = <String>[];
@@ -116,7 +144,8 @@ void main() {
       pollInterval: Duration.zero,
     );
 
-    expect(deleteCalls, 2);
+    expect(listCalls, 2);
+    expect(deleteCalls, 1);
     expect(rest.where((p) => p.endsWith('startScan')), hasLength(1));
     expect(rest.where((p) => p.endsWith('getScanStatus')).length,
         greaterThanOrEqualTo(3));
