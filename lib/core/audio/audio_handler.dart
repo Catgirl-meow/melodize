@@ -81,6 +81,14 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   );
 
   SubsonicConfig? _config;
+  // One client per config: each SubsonicClient owns a Dio connection pool, so
+  // building one per scrobble / cover / stream URL leaked sockets.
+  SubsonicClient? _clientCache;
+  SubsonicClient _clientFor(SubsonicConfig config) {
+    final cached = _clientCache;
+    if (cached != null && identical(cached.config, config)) return cached;
+    return _clientCache = SubsonicClient(config);
+  }
   String _streamQuality = 'lossless';
   StreamSubscription<Duration>? _crossfadeSub;
   // Volume-ramp fallback remains available whenever the companion cannot
@@ -435,7 +443,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       Uri? artUri;
       if (_config != null && (song.coverArt?.isNotEmpty ?? false)) {
         artUri =
-            Uri.tryParse(SubsonicClient(_config!).coverArtUrl(song.coverArt!));
+            Uri.tryParse(_clientFor(_config!).coverArtUrl(song.coverArt!));
       } else if (song.externalCoverUrl != null) {
         artUri = Uri.tryParse(song.externalCoverUrl!);
       }
@@ -503,7 +511,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         (song.coverArt?.isNotEmpty ?? false)) {
       mediaItem.add(current.copyWith(
         artUri:
-            Uri.tryParse(SubsonicClient(config).coverArtUrl(song.coverArt!)),
+            Uri.tryParse(_clientFor(config).coverArtUrl(song.coverArt!)),
       ));
     }
   }
@@ -1459,7 +1467,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
       if (!_nowPlayingReported && position.inSeconds >= 1) {
         _nowPlayingReported = true;
-        SubsonicClient(cfg).scrobble(song.id, submission: false);
+        _clientFor(cfg).scrobble(song.id, submission: false);
         _historyController.add(song);
       }
 
@@ -1469,7 +1477,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
           final pct = position.inMilliseconds / dur.inMilliseconds;
           if (pct >= 0.5 || position.inSeconds >= 240) {
             _scrobbled = true;
-            SubsonicClient(cfg).scrobble(song.id, submission: true);
+            _clientFor(cfg).scrobble(song.id, submission: true);
           }
         }
       }
@@ -2245,7 +2253,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       uri = Uri.file(song.localPath!);
     } else if (_config != null) {
       uri = Uri.parse(
-          SubsonicClient(_config!).streamUrl(song.id, quality: _streamQuality));
+          _clientFor(_config!).streamUrl(song.id, quality: _streamQuality));
     } else {
       // No server config and song is not downloaded — produce a silent/error
       // source so just_audio can skip it gracefully instead of crashing.

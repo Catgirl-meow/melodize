@@ -82,37 +82,31 @@ mixin DownloadPollingMixin<T extends ConsumerStatefulWidget>
     );
   }
 
-  /// Ask Navidrome to scan, then invalidate all library-shaped providers at
-  /// several points while the server indexes the new file. The scan endpoint
-  /// acknowledges the request before indexing is complete, so one delayed
-  /// invalidation is racy and can leave the UI permanently stale.
+  /// Ask Navidrome to scan, wait until it finishes indexing, then refresh
+  /// every library-shaped provider once. The scan endpoint acknowledges the
+  /// request before indexing is done, so refreshing straight away races it;
+  /// refreshing on fixed timers refetched the whole library several times.
   Future<void> _refreshLibraryAfterDownload() async {
-    try {
-      await ref.read(subsonicClientProvider)?.startScan();
-    } catch (_) {
-      // The next scheduled refresh can still observe a server-side scan.
+    final client = ref.read(subsonicClientProvider);
+    if (client != null) {
+      await client.startScan();
+      // getScanStatus can lag startScan by a moment, so give it a beat, then
+      // wait the scan out (capped at ~1 minute).
+      await Future<void>.delayed(const Duration(seconds: 2));
+      for (var i = 0; i < 30 && mounted && await client.isScanning(); i++) {
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
     }
-
-    const refreshDelays = <Duration>[
-      Duration.zero,
-      Duration(seconds: 3),
-      Duration(seconds: 10),
-      Duration(seconds: 20),
-    ];
-    for (final delay in refreshDelays) {
-      if (!mounted) return;
-      if (delay > Duration.zero) await Future<void>.delayed(delay);
-      if (!mounted) return;
-      ref.invalidate(allSongsProvider);
-      ref.invalidate(allAlbumsProvider);
-      ref.invalidate(allArtistsProvider);
-      ref.invalidate(newestAlbumsProvider);
-      ref.invalidate(albumSongsProvider);
-      ref.invalidate(artistAlbumsProvider);
-      ref.invalidate(artistAllSongsProvider);
-      ref.invalidate(playlistsProvider);
-      ref.invalidate(playlistSongsProvider);
-    }
+    if (!mounted) return;
+    ref.invalidate(allSongsProvider);
+    ref.invalidate(allAlbumsProvider);
+    ref.invalidate(allArtistsProvider);
+    ref.invalidate(newestAlbumsProvider);
+    ref.invalidate(albumSongsProvider);
+    ref.invalidate(artistAlbumsProvider);
+    ref.invalidate(artistAllSongsProvider);
+    ref.invalidate(playlistsProvider);
+    ref.invalidate(playlistSongsProvider);
   }
 }
 
