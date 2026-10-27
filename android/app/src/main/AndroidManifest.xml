@@ -10,10 +10,17 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
 
+    <!-- Self-hosted Navidrome servers are often plain HTTP on a LAN, and
+         Android blocks cleartext by default, so ExoPlayer refused every such
+         stream. Android cannot limit cleartext to IP ranges, so the app
+         itself only accepts http:// for localhost, LAN and
+         Tailscale/WireGuard addresses (serverUrlError in
+         lib/core/api/companion_http.dart). -->
     <application
         android:label="melodize"
         android:name="${applicationName}"
         android:allowBackup="false"
+        android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"

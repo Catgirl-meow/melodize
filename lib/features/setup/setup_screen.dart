@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/api/companion_http.dart' show serverUrlError;
 import '../../core/api/subsonic_client.dart';
 import '../../core/db/database.dart';
 import '../../core/providers.dart';
@@ -114,6 +115,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                   decoration: InputDecoration(
                     labelText: 'Server URL',
                     hintText: 'https://music.example.com',
+                    errorMaxLines: 2,
                     prefixIcon: const Icon(Icons.dns_rounded),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                     filled: true,
@@ -124,13 +126,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                   validator: (v) {
                     final url = v?.trim() ?? '';
                     if (url.isEmpty) return 'Enter server URL';
-                    final uri = Uri.tryParse(url);
-                    if (uri == null ||
-                        !(uri.isScheme('http') || uri.isScheme('https')) ||
-                        uri.host.isEmpty) {
-                      return 'URL must start with http:// or https://';
-                    }
-                    return null;
+                    return serverUrlError(url);
                   },
                 ),
                 const SizedBox(height: 16),

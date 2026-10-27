@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/api/companion_http.dart' show serverUrlError;
 import '../../core/api/navidrome_native_client.dart';
 import '../../core/api/subsonic_client.dart' show SubsonicConfig;
 import '../../core/models/app_preferences.dart';
@@ -516,6 +517,9 @@ class _CompanionSettingsScreen extends ConsumerWidget {
                       helperText:
                           'Same URL as Navidrome, with no /companion suffix',
                       keyboardType: TextInputType.url,
+                      // Empty clears the companion URL.
+                      validator: (value) =>
+                          value.isEmpty ? null : serverUrlError(value),
                       description:
                           'If you use an nginx/Caddy mux, the companion usually shares the same base URL as your Navidrome server.',
                       onSaved: (value) {
@@ -633,6 +637,8 @@ class _TextSettingScreen extends StatefulWidget {
   final bool obscureText;
   final TextInputType? keyboardType;
   final ValueChanged<String> onSaved;
+  // Returns an error message for an unacceptable value, or null.
+  final String? Function(String value)? validator;
   final String? clearActionLabel;
   final VoidCallback? onClear;
   final Widget? footer;
@@ -646,6 +652,7 @@ class _TextSettingScreen extends StatefulWidget {
     this.description,
     this.obscureText = false,
     this.keyboardType,
+    this.validator,
     this.clearActionLabel,
     this.onClear,
     this.footer,
@@ -673,7 +680,10 @@ class _TextSettingScreenState extends State<_TextSettingScreen> {
     super.dispose();
   }
 
-  bool get _canSave => _controller.text.trim() != widget.initialValue.trim();
+  String? get _error => widget.validator?.call(_controller.text.trim());
+
+  bool get _canSave =>
+      _controller.text.trim() != widget.initialValue.trim() && _error == null;
 
   void _save() {
     widget.onSaved(_controller.text);
@@ -709,6 +719,8 @@ class _TextSettingScreenState extends State<_TextSettingScreen> {
               hintText: widget.hintText,
               helperText: widget.helperText,
               helperMaxLines: 2,
+              errorText: _error,
+              errorMaxLines: 2,
               border: const OutlineInputBorder(),
               filled: true,
               fillColor: scheme.surfaceContainerLow,
