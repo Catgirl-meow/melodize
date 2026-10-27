@@ -97,10 +97,14 @@ class _MelodizeAppState extends ConsumerState<MelodizeApp>
   ColorScheme? _lastDark;
   Brightness? _lastBrightness;
 
+  // Read once here: ref can no longer be used in dispose().
+  MelodizeAudioHandler? _handler;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _handler = ref.read(audioHandlerNotifierProvider);
   }
 
   @override
@@ -126,7 +130,7 @@ class _MelodizeAppState extends ConsumerState<MelodizeApp>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     if (Platform.isLinux && !_handlerDisposed) {
-      final handler = ref.read(audioHandlerNotifierProvider);
+      final handler = _handler;
       if (handler != null) {
         _handlerDisposed = true;
         unawaited(handler.dispose());

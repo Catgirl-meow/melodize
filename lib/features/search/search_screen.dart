@@ -84,7 +84,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final query = ref.watch(searchQueryProvider);
     final resultsAsync = ref.watch(searchResultsProvider);
     final deezerAsync = ref.watch(deezerSearchProvider);
-    final scheme = Theme.of(context).colorScheme;
     final isWide = MediaQuery.sizeOf(context).width >= 700;
 
     return Scaffold(

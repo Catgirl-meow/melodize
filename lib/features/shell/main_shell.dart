@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
-import '../../shared/theme/app_theme.dart';
 import '../../shared/utils/snack.dart';
 import '../home/home_screen.dart';
 import '../library/library_screen.dart';
@@ -197,10 +196,8 @@ class _MainShellState extends ConsumerState<MainShell>
     final floatingNav = ref.watch(
       preferencesNotifierProvider.select((p) => p.floatingNavBar),
     );
-    // Album-art accents belong to the player, not navigation chrome.
-    final accentColor = hasSong ? ref.watch(currentAccentColorProvider) : null;
 
-    final dockHeight = _kDockHeight;
+    const dockHeight = _kDockHeight;
     final safeBottom = MediaQuery.of(context).viewPadding.bottom;
     final dockBodyPad =
         floatingNav ? _kDockHeight + _kDockBottom + safeBottom : 0.0;
@@ -274,7 +271,6 @@ class _MainShellState extends ConsumerState<MainShell>
     // Navigation chrome uses stable Material 3 tonal colors, independent of
     // the currently playing album art.
     final navBg = scheme.surfaceContainer;
-    final navIndicator = scheme.secondaryContainer;
 
     final scaffold = Scaffold(
       // extendBodyBehindAppBar: body fills behind the status bar so the
@@ -465,29 +461,35 @@ class _FloatingNavItem extends StatelessWidget {
     // Guard against light accents — white text on a light pill is invisible.
     final activeColor = scheme.onSecondaryContainer;
 
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: label,
-      child: InkWell(
-        onTap: onTap,
-        splashFactory: NoSplash.splashFactory,
-        overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-        borderRadius: BorderRadius.circular(_kPillRadius),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeInOut,
-            decoration: BoxDecoration(
-              color: pillColor,
-              borderRadius: BorderRadius.circular(_kPillRadius),
-            ),
-            child: Center(
-              child: Icon(
-                selected ? selectedIcon : icon,
-                size: 26,
-                color: selected ? activeColor : scheme.onSurfaceVariant,
+    // Icon-only dock: the tooltip names the tab on hover (desktop) and long
+    // press (Android).
+    return Tooltip(
+      message: label,
+      excludeFromSemantics: true,
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: label,
+        child: InkWell(
+          onTap: onTap,
+          splashFactory: NoSplash.splashFactory,
+          overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+          borderRadius: BorderRadius.circular(_kPillRadius),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+              decoration: BoxDecoration(
+                color: pillColor,
+                borderRadius: BorderRadius.circular(_kPillRadius),
+              ),
+              child: Center(
+                child: Icon(
+                  selected ? selectedIcon : icon,
+                  size: 26,
+                  color: selected ? activeColor : scheme.onSurfaceVariant,
+                ),
               ),
             ),
           ),

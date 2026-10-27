@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/subsonic_client.dart';
 import '../../core/db/database.dart';
 import '../../core/providers.dart';
-import '../shell/main_shell.dart';
 
 class SetupScreen extends ConsumerStatefulWidget {
   const SetupScreen({super.key});
@@ -38,15 +37,13 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
 
     try {
       final config = SubsonicConfig(
-        serverUrl: _urlController.text.trimRight().replaceAll(RegExp(r'/$'), ''),
+        serverUrl: _urlController.text.trim().replaceAll(RegExp(r'/+$'), ''),
         username: _userController.text.trim(),
         password: _passController.text,
       );
 
-      final client = SubsonicClient(config);
-      final ok = await client.ping();
-
-      if (!ok) throw Exception('Server did not respond');
+      final problem = await SubsonicClient(config).checkConnection();
+      if (problem != null) throw Exception(problem);
 
       final db = ref.read(databaseProvider);
       await db.saveConfig(ServerConfigCompanion.insert(
@@ -55,14 +52,13 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
         password: config.password,
       ));
 
-      // Invalidate so MainShell picks up the freshly-saved config
+      // The startup router swaps this screen for MainShell once the config
+      // reloads. Pushing a MainShell route here as well stacked a second shell
+      // above the router, which then hid the setup screen after
+      // "Connect a different server".
       ref.invalidate(serverConfigProvider);
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const MainShell()),
-        );
-      }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString().replaceFirst('Exception: ', '');
       });
@@ -126,8 +122,14 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                   keyboardType: TextInputType.url,
                   autocorrect: false,
                   validator: (v) {
-                    if (v == null || v.isEmpty) return 'Enter server URL';
-                    if (!v.startsWith('http')) return 'URL must start with http:// or https://';
+                    final url = v?.trim() ?? '';
+                    if (url.isEmpty) return 'Enter server URL';
+                    final uri = Uri.tryParse(url);
+                    if (uri == null ||
+                        !(uri.isScheme('http') || uri.isScheme('https')) ||
+                        uri.host.isEmpty) {
+                      return 'URL must start with http:// or https://';
+                    }
                     return null;
                   },
                 ),

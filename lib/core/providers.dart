@@ -14,6 +14,7 @@ import 'package:palette_generator/palette_generator.dart';
 import 'package:path/path.dart' as p;
 import 'api/subsonic_client.dart';
 import 'api/navidrome_client.dart' show CompanionClient;
+import 'api/navidrome_native_client.dart';
 import 'api/deezer_client.dart';
 import 'api/lrclib_client.dart';
 import 'api/lyrics_ovh_client.dart';
@@ -376,8 +377,21 @@ Future<void> deleteSongFromServer(WidgetRef ref, Song song) async {
   // 1. Delete file on server
   await companion.deleteSong(song.id);
 
-  // 2. Trigger Navidrome library rescan (non-fatal if it fails)
-  ref.read(subsonicClientProvider)?.startScan();
+  // 2. Trigger a Navidrome rescan (non-fatal if it fails), then purge the
+  //    song from Navidrome's "missing files" list once the scan flags it,
+  //    otherwise it lingers there forever. Runs in the background.
+  final subsonic = ref.read(subsonicClientProvider);
+  final config = ref.read(serverConfigProvider).valueOrNull;
+  if (subsonic != null) {
+    unawaited(subsonic.startScan().then((_) {
+      if (config == null) return null;
+      return purgeDeletedSongs(
+        subsonic: subsonic,
+        native: NavidromeNativeClient(config),
+        songIds: [song.id],
+      );
+    }));
+  }
 
   // 3. Clean up local download file if present
   final db = ref.read(databaseProvider);
@@ -511,10 +525,14 @@ final allSongsProvider = StreamProvider<List<Song>>((ref) async* {
       final updatedSongs = updated.map(_rowToSong).toList();
 
       // If the server no longer returns pending-delete songs, clear them from the set.
+      // Only write when the set actually shrinks: this provider watches it,
+      // and a new-but-equal Set would rebuild it and refetch the whole
+      // library in a loop for as long as the server still returns the song.
       if (deletedIds.isNotEmpty) {
-        ref
-            .read(_pendingDeleteIdsProvider.notifier)
-            .update((s) => s.intersection(freshIds));
+        final stillPending = deletedIds.intersection(freshIds);
+        if (stillPending.length != deletedIds.length) {
+          ref.read(_pendingDeleteIdsProvider.notifier).state = stillPending;
+        }
       }
       yield filter(updatedSongs);
     } catch (_) {

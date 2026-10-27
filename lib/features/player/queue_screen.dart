@@ -16,9 +16,20 @@ class QueueScreen extends ConsumerStatefulWidget {
 class _QueueScreenState extends ConsumerState<QueueScreen> {
   bool _playedExpanded = false;
 
+  // Rows swiped away whose removal the handler hasn't published yet. Flutter
+  // requires a dismissed Dismissible to leave the tree on the next frame, but
+  // removeFromQueue is async, so these render as empty space until the next
+  // queue snapshot arrives.
+  final _dismissedKeys = <String>{};
+  Object? _dismissedForSnapshot;
+
   @override
   Widget build(BuildContext context) {
     final snapshot = ref.watch(queueSnapshotStreamProvider).valueOrNull;
+    if (!identical(snapshot, _dismissedForSnapshot)) {
+      _dismissedKeys.clear();
+      _dismissedForSnapshot = snapshot;
+    }
     final songs = snapshot?.songs ?? const [];
     final currentIndex = snapshot?.currentIndex ?? 0;
     final mode = snapshot?.mode ?? PlaybackMode.normal;
@@ -175,13 +186,25 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                                     delegate: SliverChildBuilderDelegate(
                                       (context, index) {
                                         final song = upNext[index];
+                                        // Keyed by song, not slot: after a
+                                        // swipe the next song moves into this
+                                        // slot and must not inherit the
+                                        // dismissed state.
+                                        final rowKey =
+                                            'upnext_${song.id}_${baseIndex + index}';
+                                        if (_dismissedKeys.contains(rowKey)) {
+                                          return const SizedBox.shrink();
+                                        }
                                         return RepaintBoundary(
                                           child: Dismissible(
-                                            key: ValueKey(
-                                                'upnext_${baseIndex + index}'),
+                                            key: ValueKey(rowKey),
                                             direction: DismissDirection.endToStart,
-                                            onDismissed: (_) => handler
-                                                ?.removeFromQueue(baseIndex + index),
+                                            onDismissed: (_) {
+                                              setState(() =>
+                                                  _dismissedKeys.add(rowKey));
+                                              handler?.removeFromQueue(
+                                                  baseIndex + index);
+                                            },
                                             background: Container(
                                               alignment: Alignment.centerRight,
                                               padding: const EdgeInsets.only(right: 20),
@@ -545,10 +568,8 @@ class _UpNextItem extends StatelessWidget {
   final PlannedTransition? transition;
   final VoidCallback onTap;
   final VoidCallback onRemove;
-  final bool dragHandle;
 
   const _UpNextItem({
-    super.key,
     required this.song,
     required this.queueIndex,
     required this.number,
@@ -558,7 +579,6 @@ class _UpNextItem extends StatelessWidget {
     this.transition,
     required this.onTap,
     required this.onRemove,
-    this.dragHandle = false,
   });
 
   @override
@@ -620,18 +640,6 @@ class _UpNextItem extends StatelessWidget {
                 visualDensity: VisualDensity.compact,
                 color: scheme.onSurfaceVariant,
               ),
-              if (dragHandle)
-                ReorderableDragStartListener(
-                  index: number - 1,
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 4, right: 8),
-                    child: Icon(
-                      Icons.drag_handle_rounded,
-                      size: 20,
-                      color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
-                    ),
-                  ),
-                ),
             ],
           ),
           onTap: onTap,
