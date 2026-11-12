@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/subsonic_client.dart' show ServerReachability;
 import '../../core/models/album.dart';
+import '../../core/models/playlist.dart';
 import '../../core/models/recommendations_state.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
@@ -13,6 +14,7 @@ import '../../shared/utils/snack.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/offline_banner.dart';
 import '../../shared/widgets/error_notice.dart';
+import '../../shared/widgets/playlist_cover.dart';
 import '../library/album_detail_screen.dart';
 import '../library/playlist_detail_screen.dart';
 import '../settings/settings_screen.dart';
@@ -64,8 +66,13 @@ String _reachabilityMessage(ServerReachability r) {
   }
 }
 
-const _kCardExtent = 138.0;
 const _kCardImageSize = 130.0;
+// CarouselView applies its `padding` to every item, not just the first, so
+// each item carries the 16 px left inset as well as the card's own 4 px on
+// either side. The extent has to include both, or the cover comes out
+// 114 px wide and 130 px tall and the art is cropped at the sides.
+const _kCarouselItemInset = 16.0;
+const _kCardExtent = _kCardImageSize + 8 + _kCarouselItemInset;
 
 // Card titles get two lines (long album and playlist names were cut to a
 // few characters on one line) and a one-line subtitle. The carousel's
@@ -372,7 +379,7 @@ class HomeScreen extends ConsumerWidget {
         itemExtent: _kCardExtent,
         itemSnapping: true,
         shrinkExtent: 40,
-        padding: const EdgeInsets.only(left: 16),
+        padding: const EdgeInsets.only(left: _kCarouselItemInset),
         backgroundColor: Colors.transparent,
         elevation: 0,
         shape: const RoundedRectangleBorder(),
@@ -649,7 +656,7 @@ class _AlbumCard extends ConsumerWidget {
 // ---------------------------------------------------------------------------
 
 class _PlaylistCard extends ConsumerWidget {
-  final dynamic playlist;
+  final Playlist playlist;
   const _PlaylistCard({required this.playlist});
 
   @override
@@ -666,22 +673,25 @@ class _PlaylistCard extends ConsumerWidget {
           SizedBox(
             height: _kCardImageSize,
             width: double.infinity,
-            child: CoverArtImage(
-              coverArtId: playlist.coverArt as String?,
+            child: PlaylistCover(
+              playlist: playlist,
               size: _kCardImageSize,
               borderRadius: 12,
             ),
           ),
           const SizedBox(height: 8),
-          Text(playlist.name as String,
+          Text(playlist.name,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                   fontSize: _kCardTitleSize,
                   height: _kCardLineHeight,
                   fontWeight: FontWeight.w600)),
-          Text('${playlist.songCount} songs',
+          Text(
+              '${playlist.songCount} '
+              '${playlist.songCount == 1 ? 'song' : 'songs'}',
               maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                   fontSize: _kCardSubtitleSize,
                   height: _kCardLineHeight,

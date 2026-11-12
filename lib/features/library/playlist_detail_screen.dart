@@ -6,6 +6,7 @@ import '../../core/providers.dart';
 import '../../shared/widgets/error_notice.dart';
 import '../../shared/widgets/detail_actions.dart';
 import '../../shared/widgets/detail_header.dart';
+import '../../shared/widgets/playlist_cover.dart';
 import '../../shared/widgets/song_tile.dart';
 
 class PlaylistDetailScreen extends ConsumerWidget {
@@ -24,7 +25,13 @@ class PlaylistDetailScreen extends ConsumerWidget {
             title: playlist.name,
             subtitle: '${playlist.songCount} '
                 '${playlist.songCount == 1 ? 'song' : 'songs'}',
-            coverArtId: playlist.coverArt,
+            // Same app-built cover as the home card, not Navidrome's image.
+            cover: PlaylistCover(
+              playlist: playlist,
+              size: double.infinity,
+              borderRadius: 0,
+              placeholderIcon: false,
+            ),
             expandedHeight: 260,
           ),
           SliverToBoxAdapter(

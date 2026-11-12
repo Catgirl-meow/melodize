@@ -31,6 +31,7 @@ import 'errors/app_errors.dart';
 import 'models/app_preferences.dart';
 import 'models/song.dart';
 import 'models/album.dart';
+import 'models/playlist.dart';
 import 'models/artist.dart';
 import 'models/lyrics_result.dart';
 import 'models/search_results.dart';
@@ -894,9 +895,9 @@ final artistAllSongsProvider =
 });
 
 // --- Playlists ---
-final playlistsProvider = FutureProvider((ref) async {
+final playlistsProvider = FutureProvider<List<Playlist>>((ref) async {
   final client = ref.watch(subsonicClientProvider);
-  if (client == null) return [];
+  if (client == null) return const [];
   return await client.getPlaylists();
 });
 
