@@ -7,6 +7,7 @@ import '../../core/models/album.dart';
 import '../../core/models/recommendations_state.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
+import '../../shared/theme/app_theme.dart';
 import '../../shared/utils/download_polling_mixin.dart';
 import '../../shared/utils/snack.dart';
 import '../../shared/widgets/cover_art_image.dart';
@@ -131,10 +132,7 @@ class HomeScreen extends ConsumerWidget {
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                   child: Text(
                     _greeting(username),
-                    style: Theme.of(context)
-                        .textTheme
-                        .headlineMedium
-                        ?.copyWith(fontWeight: FontWeight.bold),
+                    style: AppTheme.pageTitleStyle(context),
                   ),
                 ),
               ),
@@ -966,8 +964,7 @@ class _RecsInlineError extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: Text(message,
-                  style: TextStyle(
-                      fontSize: 13, color: scheme.onErrorContainer)),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onErrorContainer)),
             ),
             TextButton(
               style: TextButton.styleFrom(
@@ -1014,9 +1011,7 @@ class _DeezerExpiredBanner extends StatelessWidget {
                               color: scheme.onErrorContainer)),
                       Text(
                           'Paste a fresh ARL in Settings to re-enable server downloads.',
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: scheme.onErrorContainer)),
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onErrorContainer)),
                     ],
                   ),
                 ),
@@ -1052,8 +1047,7 @@ class _DeezerUnreachableBanner extends StatelessWidget {
               Expanded(
                 child: Text(
                   'Can\'t reach Deezer to verify your session — server downloads may still work.',
-                  style: TextStyle(
-                      fontSize: 12, color: scheme.onSurfaceVariant),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
                 ),
               ),
             ],
@@ -1087,7 +1081,7 @@ class _RecsEmptyHint extends StatelessWidget {
               child: Text(
                 'Play a few songs — recommendations appear after some listening history.',
                 style:
-                    TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+                    Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
               ),
             ),
           ],

@@ -33,7 +33,7 @@ class DownloadsScreen extends ConsumerWidget {
     return Scaffold(
       body: CustomScrollView(
         slivers: [
-          const SliverAppBar(
+          const SliverAppBar.medium(
             pinned: true,
             title: Text('Downloads'),
           ),
@@ -81,9 +81,7 @@ class DownloadsScreen extends ConsumerWidget {
                         const SizedBox(height: 4),
                         Text(
                           'Tap ··· on any song to download it',
-                          style: TextStyle(
-                              color: scheme.onSurfaceVariant,
-                              fontSize: 13),
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
                         ),
                       ],
                     ),
@@ -150,8 +148,7 @@ class _ActiveTile extends ConsumerWidget {
           Text(item.song.artist,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  color: scheme.onSurfaceVariant, fontSize: 12)),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
           if (item.status != 'queued') ...[
             const SizedBox(height: 4),
             LinearProgressIndicator(

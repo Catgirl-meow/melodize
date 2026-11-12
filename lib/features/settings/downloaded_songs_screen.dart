@@ -242,156 +242,162 @@ class _DownloadedSongsScreenState extends ConsumerState<DownloadedSongsScreen> {
     final activeDownloads = ref.read(downloadNotifierProvider);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Downloaded Songs'),
-        backgroundColor: scheme.surface,
-        surfaceTintColor: Colors.transparent,
-      ),
-      body: songsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('$e')),
-        data: (songs) {
-          final hasAnyContent = songs.isNotEmpty || activeIds.isNotEmpty;
-          if (!hasAnyContent) {
-            return _EmptyDownloadsState(
-              scheme: scheme,
+      body: NestedScrollView(
+        headerSliverBuilder: (_, __) => [
+          SliverAppBar.medium(
+            title: const Text('Downloaded songs'),
+            pinned: true,
+            backgroundColor: scheme.surface,
+            surfaceTintColor: Colors.transparent,
+          ),
+        ],
+        body: songsAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => Center(child: Text('$e')),
+          data: (songs) {
+            final hasAnyContent = songs.isNotEmpty || activeIds.isNotEmpty;
+            if (!hasAnyContent) {
+              return _EmptyDownloadsState(
+                scheme: scheme,
+              );
+            }
+
+            final filteredSongs = _sortDownloadedSongs(
+              songs.where((song) {
+                return _matchesSongQuery(song, _query) &&
+                    _matchesSongFilter(song, _filter);
+              }),
+              _sort,
+              _ascending,
             );
-          }
 
-          final filteredSongs = _sortDownloadedSongs(
-            songs.where((song) {
-              return _matchesSongQuery(song, _query) &&
-                  _matchesSongFilter(song, _filter);
-            }),
-            _sort,
-            _ascending,
-          );
+            final filteredActiveIds = activeIds.where((id) {
+              final item = activeDownloads[id];
+              if (item == null) return false;
+              return _matchesSongQuery(item.song, _query) &&
+                  _matchesSongFilter(item.song, _filter);
+            }).toList();
 
-          final filteredActiveIds = activeIds.where((id) {
-            final item = activeDownloads[id];
-            if (item == null) return false;
-            return _matchesSongQuery(item.song, _query) &&
-                _matchesSongFilter(item.song, _filter);
-          }).toList();
+            final hasMatches =
+                filteredSongs.isNotEmpty || filteredActiveIds.isNotEmpty;
 
-          final hasMatches =
-              filteredSongs.isNotEmpty || filteredActiveIds.isNotEmpty;
-
-          return CustomScrollView(
-            slivers: [
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                sliver: SliverToBoxAdapter(
-                  child: _FilterPanel(
-                    query: _query,
-                    controller: _searchController,
-                    selectedFilter: _filter,
-                    sort: _sort,
-                    ascending: _ascending,
-                    hasActiveFilters: _hasActiveFilters,
-                    onQueryChanged: (value) {
-                      setState(() {
-                        _query = value;
-                      });
-                    },
-                    onClearQuery: () {
-                      _searchController.clear();
-                      setState(() {
-                        _query = '';
-                      });
-                    },
-                    onFilterSelected: (filter) {
-                      setState(() {
-                        _filter = filter;
-                      });
-                    },
-                    onSortPressed: () => _showSortSheet(context),
-                    onClearPressed: _clearFilters,
+            return CustomScrollView(
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  sliver: SliverToBoxAdapter(
+                    child: _FilterPanel(
+                      query: _query,
+                      controller: _searchController,
+                      selectedFilter: _filter,
+                      sort: _sort,
+                      ascending: _ascending,
+                      hasActiveFilters: _hasActiveFilters,
+                      onQueryChanged: (value) {
+                        setState(() {
+                          _query = value;
+                        });
+                      },
+                      onClearQuery: () {
+                        _searchController.clear();
+                        setState(() {
+                          _query = '';
+                        });
+                      },
+                      onFilterSelected: (filter) {
+                        setState(() {
+                          _filter = filter;
+                        });
+                      },
+                      onSortPressed: () => _showSortSheet(context),
+                      onClearPressed: _clearFilters,
+                    ),
                   ),
                 ),
-              ),
-              if (!hasMatches)
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _NoMatchesState(
-                    scheme: scheme,
-                    onClear: _clearFilters,
-                  ),
-                )
-              else ...[
-                if (filteredActiveIds.isNotEmpty) ...[
-                  SliverToBoxAdapter(
-                    child: _SectionHeader(
-                      icon: Icons.downloading_rounded,
-                      title: 'Downloading now',
-                      subtitle:
-                          '${filteredActiveIds.length} active download${filteredActiveIds.length == 1 ? '' : 's'}',
+                if (!hasMatches)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _NoMatchesState(
+                      scheme: scheme,
+                      onClear: _clearFilters,
                     ),
-                  ),
-                  SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (_, i) =>
-                          _ActiveDownloadTile(songId: filteredActiveIds[i]),
-                      childCount: filteredActiveIds.length,
-                    ),
-                  ),
-                ],
-                if (filteredSongs.isNotEmpty) ...[
-                  SliverToBoxAdapter(
-                    child: _SectionHeader(
-                      icon: Icons.download_done_rounded,
-                      title: 'Saved on this device',
-                      subtitle: _hasActiveFilters
-                          ? '${filteredSongs.length} of ${songs.length} songs'
-                          : '${songs.length} song${songs.length == 1 ? '' : 's'}',
-                      trailing: TextButton.icon(
-                        icon:
-                            const Icon(Icons.delete_outline_rounded, size: 18),
-                        label: const Text('Delete all'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: scheme.error,
-                        ),
-                        onPressed: () => _confirmDeleteAll(context, ref, songs),
+                  )
+                else ...[
+                  if (filteredActiveIds.isNotEmpty) ...[
+                    SliverToBoxAdapter(
+                      child: _SectionHeader(
+                        icon: Icons.downloading_rounded,
+                        title: 'Downloading now',
+                        subtitle:
+                            '${filteredActiveIds.length} active download${filteredActiveIds.length == 1 ? '' : 's'}',
                       ),
                     ),
-                  ),
-                  SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (_, i) => SongTile(
-                        song: filteredSongs[i],
-                        showAlbum: true,
-                        onTap: () => ref
-                            .read(audioHandlerNotifierProvider)
-                            ?.loadQueue(filteredSongs, startIndex: i),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.download_done_rounded,
-                              size: 16,
-                              color: scheme.primary,
-                            ),
-                            IconButton(
-                              icon: const Icon(
-                                Icons.delete_outline_rounded,
-                                size: 20,
+                    SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (_, i) =>
+                            _ActiveDownloadTile(songId: filteredActiveIds[i]),
+                        childCount: filteredActiveIds.length,
+                      ),
+                    ),
+                  ],
+                  if (filteredSongs.isNotEmpty) ...[
+                    SliverToBoxAdapter(
+                      child: _SectionHeader(
+                        icon: Icons.download_done_rounded,
+                        title: 'Saved on this device',
+                        subtitle: _hasActiveFilters
+                            ? '${filteredSongs.length} of ${songs.length} songs'
+                            : '${songs.length} song${songs.length == 1 ? '' : 's'}',
+                        trailing: TextButton.icon(
+                          icon: const Icon(Icons.delete_outline_rounded,
+                              size: 18),
+                          label: const Text('Delete all'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: scheme.error,
+                          ),
+                          onPressed: () =>
+                              _confirmDeleteAll(context, ref, songs),
+                        ),
+                      ),
+                    ),
+                    SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (_, i) => SongTile(
+                          song: filteredSongs[i],
+                          showAlbum: true,
+                          onTap: () => ref
+                              .read(audioHandlerNotifierProvider)
+                              ?.loadQueue(filteredSongs, startIndex: i),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.download_done_rounded,
+                                size: 16,
+                                color: scheme.primary,
                               ),
-                              visualDensity: VisualDensity.compact,
-                              onPressed: () =>
-                                  _deleteSong(context, ref, filteredSongs[i]),
-                            ),
-                          ],
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.delete_outline_rounded,
+                                  size: 20,
+                                ),
+                                visualDensity: VisualDensity.compact,
+                                onPressed: () =>
+                                    _deleteSong(context, ref, filteredSongs[i]),
+                              ),
+                            ],
+                          ),
                         ),
+                        childCount: filteredSongs.length,
                       ),
-                      childCount: filteredSongs.length,
                     ),
-                  ),
+                  ],
+                  const SliverToBoxAdapter(child: SizedBox(height: 16)),
                 ],
-                const SliverToBoxAdapter(child: SizedBox(height: 16)),
               ],
-            ],
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }
@@ -577,10 +583,7 @@ class _SectionHeader extends StatelessWidget {
                 ),
                 Text(
                   subtitle,
-                  style: TextStyle(
-                    color: scheme.onSurfaceVariant,
-                    fontSize: 12,
-                  ),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
                 ),
               ],
             ),
@@ -611,12 +614,12 @@ class _EmptyDownloadsState extends StatelessWidget {
           const SizedBox(height: 16),
           Text(
             'No downloaded songs',
-            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 16),
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: 8),
           Text(
             'Tap the download icon on any song to save it offline.',
-            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
             textAlign: TextAlign.center,
           ),
         ],
@@ -697,7 +700,7 @@ class _ActiveDownloadTile extends ConsumerWidget {
             item.song.artist,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: 4),
           if (item.status != 'queued')

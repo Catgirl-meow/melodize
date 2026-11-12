@@ -96,7 +96,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
         '';
     final scheme = Theme.of(context).colorScheme;
     final isDark = scheme.brightness == Brightness.dark;
-    final bgBase = isDark ? Colors.black : Colors.white;
+    // The page tone without a cover is the app's surface, so opening Now
+    // Playing from the mini player doesn't jump to pure black or white.
+    final bgBase = scheme.surface;
 
     final rawAccent = ref.watch(currentAccentColorProvider);
     final fg =
@@ -231,6 +233,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
       context: context,
       isScrollControlled: true,
       enableDrag: false, // _SlideDismiss owns the drag
+      showDragHandle: false, // QueueScreen draws its own
       // Zero reverse duration — the sheet is already off-screen via Transform.
       sheetAnimationStyle: const AnimationStyle(reverseDuration: Duration.zero),
       backgroundColor: Colors.transparent,
@@ -253,6 +256,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
       barrierColor: Colors.transparent,
       backgroundColor: Colors.transparent,
       enableDrag: false,
+      showDragHandle: false,
       sheetAnimationStyle: const AnimationStyle(reverseDuration: Duration.zero),
       builder: (_) {
         final scheme = Theme.of(context).colorScheme;
@@ -514,8 +518,7 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
                         Text(song.artist,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                fontSize: 12, color: scheme.onSurfaceVariant)),
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
                       ],
                     ),
                   ),
@@ -665,7 +668,7 @@ class _PlayerPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    final artSize = math.min(size.width * 0.8, size.height * 0.40);
+    final artSize = math.min(size.width - 48, size.height * 0.42);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -678,7 +681,7 @@ class _PlayerPage extends StatelessWidget {
                 artSize: artSize,
                 localPath: song.localPath),
           ),
-          const Spacer(flex: 2),
+          const Spacer(flex: 1),
           _SongInfoRow(song: song, fgAccent: fgAccent),
           const SizedBox(height: 16),
           const RepaintBoundary(child: _SeekSlider()),
@@ -814,12 +817,12 @@ class _SongInfoRow extends StatelessWidget {
             decoration: BoxDecoration(
               color: fgAccent.withValues(alpha: 0.12),
               border: Border.all(color: fgAccent.withValues(alpha: 0.4)),
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
               song.suffix!.toUpperCase(),
-              style: TextStyle(
-                  color: fgAccent, fontSize: 10, fontWeight: FontWeight.bold),
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: fgAccent, fontWeight: FontWeight.bold),
             ),
           ),
       ],
@@ -891,10 +894,10 @@ class _SeekSliderState extends ConsumerState<_SeekSlider> {
             children: [
               Text(_fmt(position),
                   style:
-                      TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
+                      Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
               Text(_fmt(duration ?? Duration.zero),
                   style:
-                      TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
+                      Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
             ],
           ),
         ),

@@ -189,7 +189,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                         Expanded(
                           child: Text(
                             _error!,
-                            style: TextStyle(color: scheme.onErrorContainer, fontSize: 13),
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onErrorContainer),
                           ),
                         ),
                       ],

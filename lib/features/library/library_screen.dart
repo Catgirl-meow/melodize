@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/album.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
+import '../../shared/theme/app_theme.dart';
+import '../../shared/widgets/album_grid_tile.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/offline_banner.dart';
 import '../../shared/widgets/song_tile.dart';
@@ -114,7 +116,9 @@ class LibraryScreen extends ConsumerWidget {
       length: 3,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Library'),
+          title: Text('Library', style: AppTheme.pageTitleStyle(context)),
+          titleSpacing: 16,
+          toolbarHeight: AppTheme.pageTitleBarHeight,
           automaticallyImplyLeading: false,
           scrolledUnderElevation: 0,
           bottom: const TabBar(
@@ -232,7 +236,6 @@ class _SongsTabState extends ConsumerState<_SongsTab>
     );
 
     final songsAsync = ref.watch(allSongsProvider);
-    final scheme = Theme.of(context).colorScheme;
 
     return songsAsync.when(
       // Keep the existing list visible during reload (e.g. after delete) so
@@ -250,33 +253,11 @@ class _SongsTabState extends ConsumerState<_SongsTab>
         return CustomScrollView(
           slivers: [
             SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 10, 8, 4),
-                child: Row(
-                  children: [
-                    Text(
-                      '${songs.length} songs',
-                      style: TextStyle(
-                          color: scheme.onSurfaceVariant, fontSize: 13),
-                    ),
-                    const Spacer(),
-                    TextButton.icon(
-                      onPressed: () => _showSortSheet(context, sort, ascending),
-                      icon: Icon(
-                        ascending
-                            ? Icons.arrow_upward_rounded
-                            : Icons.arrow_downward_rounded,
-                        size: 16,
-                      ),
-                      label: Text(_songSortLabel(sort)),
-                      style: TextButton.styleFrom(
-                        foregroundColor: scheme.primary,
-                        textStyle: const TextStyle(fontSize: 13),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ),
-                  ],
-                ),
+              child: _SortBar(
+                count: '${songs.length} songs',
+                label: _songSortLabel(sort),
+                ascending: ascending,
+                onPressed: () => _showSortSheet(context, sort, ascending),
               ),
             ),
             SliverList(
@@ -393,7 +374,6 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
     );
 
     final albumsAsync = ref.watch(allAlbumsProvider);
-    final scheme = Theme.of(context).colorScheme;
 
     return albumsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
@@ -404,33 +384,11 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
         return CustomScrollView(
           slivers: [
             SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 10, 8, 4),
-                child: Row(
-                  children: [
-                    Text(
-                      '${albums.length} albums',
-                      style: TextStyle(
-                          color: scheme.onSurfaceVariant, fontSize: 13),
-                    ),
-                    const Spacer(),
-                    TextButton.icon(
-                      onPressed: () => _showSortSheet(context, sort, ascending),
-                      icon: Icon(
-                        ascending
-                            ? Icons.arrow_upward_rounded
-                            : Icons.arrow_downward_rounded,
-                        size: 16,
-                      ),
-                      label: Text(_albumSortLabel(sort)),
-                      style: TextButton.styleFrom(
-                        foregroundColor: scheme.primary,
-                        textStyle: const TextStyle(fontSize: 13),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ),
-                  ],
-                ),
+              child: _SortBar(
+                count: '${albums.length} albums',
+                label: _albumSortLabel(sort),
+                ascending: ascending,
+                onPressed: () => _showSortSheet(context, sort, ascending),
               ),
             ),
             SliverPadding(
@@ -440,80 +398,27 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
               // text scale so large system fonts don't overflow the tile.
               sliver: SliverLayoutBuilder(builder: (context, constraints) {
               final tileWidth = (constraints.crossAxisExtent - 8) / 2;
-              final scaler = MediaQuery.textScalerOf(context);
-              final tileExtent = tileWidth +
-                  6 +
-                  scaler.scale(13) * _kGridLineHeight * 2 +
-                  scaler.scale(12) * _kGridLineHeight +
-                  scaler.scale(11) * _kGridLineHeight +
-                  6;
+              final tileExtent = AlbumGridTile.extent(context, tileWidth);
               return SliverGrid(
                 delegate: SliverChildBuilderDelegate(
                   (_, i) {
                     final album = albums[i];
                     return RepaintBoundary(
-                      child: Material(
-                        color: Colors.transparent,
-                        borderRadius: BorderRadius.circular(12),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(12),
-                          onTap: () => Navigator.of(context, rootNavigator: true).push(
-                            MaterialPageRoute(
-                              builder: (_) => AlbumDetailScreen(album: album),
-                            ),
+                      child: AlbumGridTile(
+                        coverArtId: album.coverArt,
+                        title: album.name,
+                        subtitle: album.year != null
+                            ? '${album.artist} · ${album.year}'
+                            : album.artist,
+                        caption:
+                            '${album.songCount} ${album.songCount == 1 ? 'song' : 'songs'}',
+                        onTap: () =>
+                            Navigator.of(context, rootNavigator: true).push(
+                          MaterialPageRoute(
+                            builder: (_) => AlbumDetailScreen(album: album),
                           ),
-                          child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            AspectRatio(
-                              aspectRatio: 1,
-                              child: CoverArtImage(
-                                coverArtId: album.coverArt,
-                                size: double.infinity,
-                                borderRadius: 12,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 4),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(album.name,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          height: _kGridLineHeight,
-                                          fontSize: 13)),
-                                  Text(
-                                    album.year != null
-                                        ? '${album.artist} · ${album.year}'
-                                        : album.artist,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                        fontSize: 12,
-                                        height: _kGridLineHeight,
-                                        color: scheme.onSurfaceVariant),
-                                  ),
-                                  Text(
-                                    '${album.songCount} ${album.songCount == 1 ? 'song' : 'songs'}',
-                                    maxLines: 1,
-                                    style: TextStyle(
-                                        fontSize: 11,
-                                        height: _kGridLineHeight,
-                                        color: scheme.onSurfaceVariant),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                          ],
                         ),
                       ),
-                    ),
                     );
                   },
                   childCount: albums.length,
@@ -539,7 +444,6 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
   }
 }
 
-const _kGridLineHeight = 1.3;
 
 // ---------------------------------------------------------------------------
 // Artist sorting
@@ -661,32 +565,11 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab>
         return CustomScrollView(
           slivers: [
             SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 10, 8, 4),
-                child: Row(
-                  children: [
-                    Text(
-                      '${artists.length} artists',
-                      style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
-                    ),
-                    const Spacer(),
-                    TextButton.icon(
-                      onPressed: () => _showSortSheet(context, sort, ascending),
-                      icon: Icon(
-                        ascending
-                            ? Icons.arrow_upward_rounded
-                            : Icons.arrow_downward_rounded,
-                        size: 16,
-                      ),
-                      label: Text(_artistSortLabel(sort)),
-                      style: TextButton.styleFrom(
-                        foregroundColor: scheme.primary,
-                        textStyle: const TextStyle(fontSize: 13),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ),
-                  ],
-                ),
+              child: _SortBar(
+                count: '${artists.length} artists',
+                label: _artistSortLabel(sort),
+                ascending: ascending,
+                onPressed: () => _showSortSheet(context, sort, ascending),
               ),
             ),
             SliverList(
@@ -730,3 +613,45 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab>
   }
 }
 
+
+/// "13 albums ......  ↑ Name" row at the top of each Library tab.
+class _SortBar extends StatelessWidget {
+  final String count;
+  final String label;
+  final bool ascending;
+  final VoidCallback onPressed;
+
+  const _SortBar({
+    required this.count,
+    required this.label,
+    required this.ascending,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
+      child: Row(
+        children: [
+          Text(count,
+              style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant)),
+          const Spacer(),
+          TextButton.icon(
+            onPressed: onPressed,
+            icon: Icon(
+              ascending
+                  ? Icons.arrow_upward_rounded
+                  : Icons.arrow_downward_rounded,
+              size: 18,
+            ),
+            label: Text(label),
+            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+          ),
+        ],
+      ),
+    );
+  }
+}

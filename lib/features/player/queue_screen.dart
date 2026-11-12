@@ -261,11 +261,18 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                                   ),
                                 )
                         else
-                          const SliverToBoxAdapter(
+                          SliverToBoxAdapter(
                             child: Padding(
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 12),
-                              child: Text('Nothing up next'),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 8),
+                              child: Text(
+                                'Nothing up next',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(
+                                        color: scheme.onSurfaceVariant),
+                              ),
                             ),
                           ),
 
@@ -398,7 +405,7 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
       child: Row(
         children: [
           Expanded(
@@ -409,25 +416,16 @@ class _SectionHeader extends StatelessWidget {
                 children: [
                   Text(
                     title,
-                    style: textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
+                    style: textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
                       color: scheme.onSurface,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 7, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      '$count',
-                      style: textTheme.labelSmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                      ),
+                  Text(
+                    '$count',
+                    style: textTheme.titleMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
                     ),
                   ),
                   if (onTap != null) ...[

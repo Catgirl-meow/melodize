@@ -6,8 +6,10 @@ import '../../core/providers.dart';
 import '../../core/utils/platform_dirs.dart';
 import '../../shared/utils/snack.dart';
 import '../../shared/utils/song_actions.dart';
-import '../../shared/widgets/cover_art_image.dart';
+import '../../shared/widgets/album_grid_tile.dart';
+import '../../shared/widgets/detail_actions.dart';
 import '../../shared/widgets/detail_header.dart';
+import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/deezer_track_tile.dart';
 import '../../shared/widgets/song_tile.dart';
 import 'album_detail_screen.dart';
@@ -63,47 +65,17 @@ class ArtistDetailScreen extends ConsumerWidget {
 
           // ── Action row ───────────────────────────────────────────────────
           SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  FilledButton.icon(
-                    icon: const Icon(Icons.play_arrow_rounded),
-                    label: const Text('Play all'),
-                    onPressed: allSongs != null && allSongs.isNotEmpty
-                        ? () => playAll()
-                        : null,
-                  ),
-                  FilledButton.tonal(
-                    onPressed: allSongs != null && allSongs.isNotEmpty
-                        ? () => playAll(shuffle: true)
-                        : null,
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.shuffle_rounded, size: 18),
-                        SizedBox(width: 8),
-                        Text('Shuffle'),
-                      ],
-                    ),
-                  ),
-                  OutlinedButton.icon(
-                    icon: allSongsAsync.isLoading
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child:
-                                CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.download_rounded, size: 18),
-                    label: const Text('Download all'),
-                    onPressed: allSongs != null && allSongs.isNotEmpty
-                        ? downloadAll
-                        : null,
-                  ),
-                ],
-              ),
+            child: DetailActions(
+              onPlay: allSongs != null && allSongs.isNotEmpty
+                  ? () => playAll()
+                  : null,
+              onShuffle: allSongs != null && allSongs.isNotEmpty
+                  ? () => playAll(shuffle: true)
+                  : null,
+              onDownload: allSongs != null && allSongs.isNotEmpty
+                  ? downloadAll
+                  : null,
+              downloadBusy: allSongsAsync.isLoading,
             ),
           ),
 
@@ -111,7 +83,7 @@ class ArtistDetailScreen extends ConsumerWidget {
           if (topSongsAsync.isLoading)
             const SliverToBoxAdapter(child: SizedBox.shrink()),
           if (!topSongsAsync.isLoading && topSongs.isNotEmpty) ...[
-            const SliverToBoxAdapter(child: _SectionHeader('Top songs')),
+            const SliverToBoxAdapter(child: SectionHeader('Top songs')),
             SliverList(
               delegate: SliverChildBuilderDelegate(
                 (_, i) => SongTile(
@@ -134,9 +106,9 @@ class ArtistDetailScreen extends ConsumerWidget {
             SliverMainAxisGroup(
               slivers: [
                 SliverToBoxAdapter(
-                  child: _SectionHeader(
+                  child: SectionHeader(
                     'On Deezer',
-                    trailing: '${deezerTracks.length}',
+                    count: '${deezerTracks.length}',
                     icon: Icons.headphones_rounded,
                   ),
                 ),
@@ -151,9 +123,9 @@ class ArtistDetailScreen extends ConsumerWidget {
 
           // ── Albums ───────────────────────────────────────────────────────
           SliverToBoxAdapter(
-            child: _SectionHeader(
+            child: SectionHeader(
               'Albums',
-              trailing: albums.isNotEmpty ? '${albums.length}' : null,
+              count: albums.isNotEmpty ? '${albums.length}' : null,
             ),
           ),
           albumsAsync.when(
@@ -180,15 +152,12 @@ class ArtistDetailScreen extends ConsumerWidget {
                     sliver: SliverLayoutBuilder(
                       builder: (context, constraints) {
                         final tileWidth = (constraints.crossAxisExtent - 8) / 2;
-                        final scaler = MediaQuery.textScalerOf(context);
-                        final text = scaler.scale(13) * _kCardLineHeight * 2 +
-                            scaler.scale(12) * _kCardLineHeight;
                         return SliverGrid(
                           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: 2,
-                            mainAxisExtent:
-                                // +4: slack for font metrics rounding.
-                                tileWidth + 14 + (text > 40 ? text : 40),
+                            mainAxisExtent: AlbumGridTile.extent(
+                                context, tileWidth,
+                                detailLines: 1),
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
                           ),
@@ -207,7 +176,7 @@ class ArtistDetailScreen extends ConsumerWidget {
           // ── All Songs ────────────────────────────────────────────────────
           allSongsAsync.when(
             loading: () => const SliverToBoxAdapter(
-              child: _SectionHeader('Songs', trailing: '…'),
+              child: SectionHeader('Songs', count: '…'),
             ),
             error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
             data: (songs) => songs.isEmpty
@@ -215,9 +184,9 @@ class ArtistDetailScreen extends ConsumerWidget {
                 : SliverMainAxisGroup(
                     slivers: [
                       SliverToBoxAdapter(
-                        child: _SectionHeader(
+                        child: SectionHeader(
                           'Songs',
-                          trailing: '${songs.length}',
+                          count: '${songs.length}',
                         ),
                       ),
                       SliverList(
@@ -259,70 +228,22 @@ class _AlbumCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
-    return Card.filled(
-      clipBehavior: Clip.antiAlias,
-      margin: EdgeInsets.zero,
-      child: InkWell(
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => AlbumDetailScreen(album: album)),
+    return AlbumGridTile(
+      coverArtId: album.coverArt,
+      title: album.name,
+      subtitle: album.year != null ? '${album.year}' : null,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => AlbumDetailScreen(album: album)),
+      ),
+      trailing: IconButton(
+        icon: const Icon(Icons.download_rounded, size: 20),
+        tooltip: 'Download album',
+        visualDensity: VisualDensity.compact,
+        style: IconButton.styleFrom(
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            AspectRatio(
-              aspectRatio: 1,
-              child: CoverArtImage(
-                coverArtId: album.coverArt,
-                size: double.infinity,
-                borderRadius: 0,
-                fit: BoxFit.cover,
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 6, 4, 4),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          album.name,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              height: _kCardLineHeight,
-                              fontSize: 13),
-                        ),
-                        if (album.year != null)
-                          Text(
-                            '${album.year}',
-                            style: TextStyle(
-                                fontSize: 12,
-                                height: _kCardLineHeight,
-                                color: scheme.onSurfaceVariant),
-                          ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.download_rounded, size: 20),
-                    tooltip: 'Download album',
-                    style: IconButton.styleFrom(
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    onPressed: () => downloadAlbum(context, ref, album),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+        onPressed: () => downloadAlbum(context, ref, album),
       ),
     );
   }
@@ -330,41 +251,3 @@ class _AlbumCard extends ConsumerWidget {
 
 // ---------------------------------------------------------------------------
 
-const _kCardLineHeight = 1.3;
-
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  final String? trailing;
-  final IconData? icon;
-  const _SectionHeader(this.title, {this.trailing, this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 6),
-      child: Row(
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 18, color: scheme.primary),
-            const SizedBox(width: 6),
-          ],
-          Text(
-            title,
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          if (trailing != null) ...[
-            const SizedBox(width: 8),
-            Text(
-              trailing!,
-              style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}

@@ -114,15 +114,13 @@ class _ClassicMiniPlayer extends ConsumerWidget {
                             Text(song.title,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
+                                style: Theme.of(context).textTheme.titleSmall?.copyWith(
                                     fontWeight: FontWeight.w600,
-                                    fontSize: 14,
                                     color: scheme.onSurface)),
                             Text(song.artist,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                    fontSize: 12,
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                     color: scheme.onSurfaceVariant)),
                           ],
                         ),
