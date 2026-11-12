@@ -154,6 +154,11 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                 TextFormField(
                   controller: _passController,
                   obscureText: _obscurePass,
+                  // Enter in the last field connects (desktop expectation).
+                  textInputAction: TextInputAction.done,
+                  onFieldSubmitted: (_) {
+                    if (!_loading) _connect();
+                  },
                   decoration: InputDecoration(
                     labelText: 'Password',
                     prefixIcon: const Icon(Icons.lock_rounded),

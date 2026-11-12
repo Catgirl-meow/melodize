@@ -17,6 +17,10 @@ const _kDockBottom = 12.0;
 const _kDockHorizontal = 16.0;
 const _kDockRadius = 24.0;
 const _kPillRadius = 16.0;
+// Mini player footprint, including its own bottom gap
+// (floating: 56 card + 8 gap, classic: 72 bar).
+const _kFloatingMiniPlayerHeight = 64.0;
+const _kClassicMiniPlayerHeight = 72.0;
 
 class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
@@ -29,6 +33,10 @@ class _MainShellState extends ConsumerState<MainShell>
     with SingleTickerProviderStateMixin {
   int _selectedIndex = 0;
   late final AnimationController _playerAnim;
+  // The shell's own messenger. MainShell's context sits *above* it, so
+  // ScaffoldMessenger.of(context) would find the app's root messenger, which
+  // has no Scaffold while the shell is showing, and every snack was dropped.
+  final _messengerKey = GlobalKey<ScaffoldMessengerState>();
 
   static const _icons = [
     Icons.home_outlined,
@@ -144,9 +152,11 @@ class _MainShellState extends ConsumerState<MainShell>
   // scaffold list is empty (e.g. during shell rebuild). Losing the snack
   // is fine; crashing the UI is not.
   void _safeSnack(String msg, {bool isError = false, double? bottomOffset}) {
+    final messenger = _messengerKey.currentState;
+    if (messenger == null) return;
     try {
       showStyledSnack(context, msg,
-          isError: isError, bottomOffset: bottomOffset);
+          isError: isError, bottomOffset: bottomOffset, messenger: messenger);
     } catch (_) {}
   }
 
@@ -197,7 +207,6 @@ class _MainShellState extends ConsumerState<MainShell>
       preferencesNotifierProvider.select((p) => p.floatingNavBar),
     );
 
-    const dockHeight = _kDockHeight;
     final safeBottom = MediaQuery.of(context).viewPadding.bottom;
     final dockBodyPad =
         floatingNav ? _kDockHeight + _kDockBottom + safeBottom : 0.0;
@@ -208,13 +217,26 @@ class _MainShellState extends ConsumerState<MainShell>
     final miniPlayerBottom =
         (dockBodyPad - keyboardInset).clamp(0.0, dockBodyPad);
 
-    // Full clearance needed to position a snackbar above the dock + mini player.
-    // Used for ref.listen callbacks whose BuildContext sits outside the inner
-    // MediaQuery override, so they can't rely on padding.bottom auto-resolution.
-    final snackBottom = (hasSong ? 72.0 : 0.0) +
-        (floatingNav
-            ? dockHeight + _kDockBottom + safeBottom
-            : 62.0 + safeBottom);
+    // Height of the shell's overlays (dock + mini player) above the bottom of
+    // the Scaffold body. Pages get it as MediaQuery padding.bottom so their
+    // last list item can scroll clear of the overlays, and snackbars sit just
+    // above the mini player instead of underneath it. In classic mode the
+    // NavigationBar is a real bottomNavigationBar, so the body already ends
+    // above it and only the mini player overlaps.
+    final miniPlayerHeight = !hasSong
+        ? 0.0
+        : floatingNav
+            ? _kFloatingMiniPlayerHeight
+            : _kClassicMiniPlayerHeight;
+    final overlayClearance =
+        (floatingNav ? miniPlayerBottom : 0.0) + miniPlayerHeight;
+
+    // Same height measured from where the Scaffold puts floating snackbars,
+    // which is already above the system navigation inset in floating mode
+    // and above the NavigationBar in classic mode.
+    final snackBottom = floatingNav
+        ? (overlayClearance - safeBottom).clamp(0.0, double.infinity)
+        : overlayClearance;
 
     // Collapse player when the queue runs out.
     ref.listen(currentSongStreamProvider, (prev, next) {
@@ -247,7 +269,7 @@ class _MainShellState extends ConsumerState<MainShell>
           final prevItem = prev[entry.key];
           if (prevItem?.status != 'done' && entry.value.status == 'done') {
             _safeSnack('"${entry.value.song.title}" downloaded',
-                bottomOffset: snackBottom + 12);
+                bottomOffset: snackBottom + kSnackGap);
           }
           // Surface on state transition into 'error' AND on errorMessage
           // change while already in 'error' (handles same-song re-failure
@@ -262,7 +284,8 @@ class _MainShellState extends ConsumerState<MainShell>
             final msg = errMsg != null
                 ? _friendlyLocalDownloadError(errMsg)
                 : '"${entry.value.song.title}" failed to download — try again';
-            _safeSnack(msg, isError: true, bottomOffset: snackBottom + 12);
+            _safeSnack(msg,
+                isError: true, bottomOffset: snackBottom + kSnackGap);
           }
         }
       });
@@ -316,23 +339,34 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
       body: Stack(
         children: [
-          // No shell-level MediaQuery bottom padding — content scrolls behind
-          // the overlays so the 20px overlay margins reveal list items rather
-          // than a painted background dead zone.
+          // Content scrolls *behind* the overlays (no painted dead zone), but
+          // pages see the overlay height as padding.bottom so the end of
+          // every list can still scroll into view above the mini player.
+          //
+          // The view insets are removed because this Scaffold already shrank
+          // the body for the keyboard; the pages' own Scaffolds would
+          // otherwise shrink a second time, squashing Search results into a
+          // sliver when the keyboard is open.
           MediaQuery(
             data: MediaQuery.of(context).copyWith(
               padding: MediaQuery.of(context).padding.copyWith(
-                    bottom: MediaQuery.of(context).padding.bottom,
+                    bottom: overlayClearance,
+                  ),
+              viewInsets: MediaQuery.of(context).viewInsets.copyWith(
+                    bottom: 0,
                   ),
             ),
-            child: IndexedStack(
-              index: _selectedIndex,
-              children: const [
-                RepaintBoundary(child: HomeScreen()),
-                RepaintBoundary(child: LibraryScreen()),
-                RepaintBoundary(child: SearchScreen()),
-                RepaintBoundary(child: SettingsScreen()),
-              ],
+            child: SnackInset(
+              bottom: snackBottom,
+              child: IndexedStack(
+                index: _selectedIndex,
+                children: const [
+                  RepaintBoundary(child: HomeScreen()),
+                  RepaintBoundary(child: LibraryScreen()),
+                  RepaintBoundary(child: SearchScreen()),
+                  RepaintBoundary(child: SettingsScreen()),
+                ],
+              ),
             ),
           ),
 
@@ -361,6 +395,7 @@ class _MainShellState extends ConsumerState<MainShell>
     );
 
     return ScaffoldMessenger(
+        key: _messengerKey,
         child: Stack(
       children: [
         scaffold,
@@ -419,10 +454,20 @@ class _MainShellState extends ConsumerState<MainShell>
               data: MediaQuery.of(context).copyWith(
                 padding: MediaQuery.of(context).viewPadding,
               ),
+              // Own messenger + transparent Scaffold: snacks raised from the
+              // player show on the player. Through the shell's messenger they
+              // landed on the shell Scaffold *behind* the player and popped
+              // up over the list only after the player was closed.
               child: RepaintBoundary(
-                child: NowPlayingScreen(
-                  controller: _playerAnim,
-                  onClose: _closePlayer,
+                child: ScaffoldMessenger(
+                  child: Scaffold(
+                    backgroundColor: Colors.transparent,
+                    resizeToAvoidBottomInset: false,
+                    body: NowPlayingScreen(
+                      controller: _playerAnim,
+                      onClose: _closePlayer,
+                    ),
+                  ),
                 ),
               ),
             ),

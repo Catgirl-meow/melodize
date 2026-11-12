@@ -111,6 +111,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                       ),
                   ],
                   onChanged: _onSearchChanged,
+                  // Drop focus on any tap elsewhere. Otherwise the field
+                  // keeps focus after the keyboard is hidden, and closing a
+                  // result's menu sheet hands focus back to it, popping the
+                  // keyboard up over the results again.
+                  onTapOutside: (_) => _focusNode.unfocus(),
                   onSubmitted: (_) {
                     _publishQuery();
                     _focusNode.unfocus();
@@ -166,29 +171,45 @@ class _FilterBar extends StatelessWidget {
       _SearchFilter.artists: 'Artists',
       _SearchFilter.deezer: 'Deezer',
     };
-    final segments = <ButtonSegment<_SearchFilter>>[
-      for (final entry in labels.entries)
-        ButtonSegment<_SearchFilter>(
-          value: entry.key,
-          label: Text(entry.value),
-          icon: Icon(_filterIcon(entry.key)),
-        ),
-    ];
+    final scheme = Theme.of(context).colorScheme;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: SingleChildScrollView(
+    // Filter chips scroll horizontally. The 16 px side inset is padding
+    // *inside* the scroll view, so on a phone the row runs to the screen
+    // edge and a partly visible chip reads as "scroll for more". (It used to
+    // be a six-segment SegmentedButton wrapped in outer padding, which was
+    // wider than a phone and got clipped 16 px short of the edge, mid-word.)
+    return SizedBox(
+      height: isWide ? 48 : 44,
+      child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        child: SegmentedButton<_SearchFilter>(
-          segments: segments,
-          selected: {filter},
-          onSelectionChanged: (selection) => onChanged(selection.first),
-          showSelectedIcon: false,
-          style: SegmentedButton.styleFrom(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+        itemCount: labels.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, i) {
+          final entry = labels.entries.elementAt(i);
+          final selected = entry.key == filter;
+          return ChoiceChip(
+            label: Text(entry.value),
+            avatar: Icon(
+              _filterIcon(entry.key),
+              size: 18,
+              color: selected
+                  ? scheme.onSecondaryContainer
+                  : scheme.onSurfaceVariant,
+            ),
+            showCheckmark: false,
+            selected: selected,
+            selectedColor: scheme.secondaryContainer,
+            labelStyle: TextStyle(
+              color: selected
+                  ? scheme.onSecondaryContainer
+                  : scheme.onSurfaceVariant,
+            ),
             visualDensity:
                 isWide ? VisualDensity.standard : VisualDensity.compact,
-          ),
-        ),
+            onSelected: (_) => onChanged(entry.key),
+          );
+        },
       ),
     );
   }
@@ -315,7 +336,8 @@ class _SearchResults extends StatelessWidget {
             constraints: const BoxConstraints(maxWidth: 960),
             child: ListView(
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: const EdgeInsets.only(bottom: 24),
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.paddingOf(context).bottom + 24),
               children: sections,
             ),
           ),
