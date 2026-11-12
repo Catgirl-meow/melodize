@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import '../../core/models/song.dart';
 import '../../core/models/lyrics_result.dart';
+import '../../core/errors/app_errors.dart';
 import '../../core/providers.dart';
 import '../../core/audio/shuffle_mode.dart';
 import '../../core/utils/platform_info.dart';
@@ -1344,15 +1345,32 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
     return lyricsAsync.when(
       loading: () => Center(child: CircularProgressIndicator(color: fg)),
       error: (e, _) => Center(
-          child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.error_outline_rounded,
-              size: 40, color: fg.withValues(alpha: 0.5)),
-          const SizedBox(height: 10),
-          Text('Could not load lyrics',
-              style: TextStyle(color: fg.withValues(alpha: 0.7))),
-        ],
+          child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.error_outline_rounded,
+                size: 40, color: fg.withValues(alpha: 0.5)),
+            const SizedBox(height: 10),
+            Text('Could not load lyrics',
+                style: TextStyle(color: fg.withValues(alpha: 0.7))),
+            const SizedBox(height: 4),
+            Text(describeError(e),
+                textAlign: TextAlign.center,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: fg.withValues(alpha: 0.6))),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              style: TextButton.styleFrom(foregroundColor: fg),
+              onPressed: () => ref.invalidate(lyricsProvider(query)),
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
       )),
       data: (result) {
         if (result == null) {

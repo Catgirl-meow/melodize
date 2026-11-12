@@ -104,6 +104,20 @@ class DeezerClient {
     ));
   }
 
+  // GET a public-API path. Deezer reports failures such as quota limits as
+  // HTTP 200 with an `error` object; that is turned into an exception here
+  // so it can't pass as "no results".
+  Future<Map<String, dynamic>?> _getJson(String path) async {
+    final resp = await _dio.get(path);
+    final data = resp.data;
+    if (data is! Map<String, dynamic>) return null;
+    final error = data['error'];
+    if (error is Map) {
+      throw Exception('Deezer: ${error['message'] ?? error['type'] ?? error}');
+    }
+    return data;
+  }
+
   // Resolve a Deezer artist ID. Two-pass: /search/artist first, then
   // /search fallback with strict fuzzy name-matching only.
   Future<int?> searchBestArtist({
@@ -118,29 +132,29 @@ class DeezerClient {
       return h == seedNorm || h.contains(seedNorm) || seedNorm.contains(h);
     }
 
-    try {
-      // Pass 1: artist-name search — no popularity bias.
-      final q1 = Uri.encodeQueryComponent(artistName);
-      final r1 = await _dio.get('/search/artist?q=$q1&limit=8');
-      for (final a in (r1.data?['data'] as List? ?? [])) {
-        final id = (a as Map<String, dynamic>)['id'] as int?;
-        if (id != null && matches(a['name'] as String?)) return id;
-      }
+    // Pass 1: artist-name search — no popularity bias.
+    final q1 = Uri.encodeQueryComponent(artistName);
+    final r1 = await _getJson('/search/artist?q=$q1&limit=8');
+    for (final a in (r1?['data'] as List? ?? [])) {
+      final id = (a as Map<String, dynamic>)['id'] as int?;
+      if (id != null && matches(a['name'] as String?)) return id;
+    }
 
-      // Pass 2: track search fallback — strict name-match only, no fallback ID.
-      final qParts = <String>[
-        if (trackTitle != null && trackTitle.isNotEmpty) trackTitle,
-        artistName,
-      ];
-      final q2 = Uri.encodeQueryComponent(qParts.join(' '));
-      final r2 = await _dio.get('/search?q=$q2&limit=8');
-      for (final t in (r2.data?['data'] as List? ?? [])) {
-        final artistObj =
-            (t as Map<String, dynamic>)['artist'] as Map<String, dynamic>?;
-        final id = artistObj?['id'] as int?;
-        if (id != null && matches(artistObj?['name'] as String?)) return id;
-      }
-    } catch (_) {}
+    // Pass 2: track search fallback — strict name-match only, no fallback ID.
+    final qParts = <String>[
+      if (trackTitle != null && trackTitle.isNotEmpty) trackTitle,
+      artistName,
+    ];
+    final q2 = Uri.encodeQueryComponent(qParts.join(' '));
+    final r2 = await _getJson('/search?q=$q2&limit=8');
+    for (final t in (r2?['data'] as List? ?? [])) {
+      final artistObj =
+          (t as Map<String, dynamic>)['artist'] as Map<String, dynamic>?;
+      final id = artistObj?['id'] as int?;
+      if (id != null && matches(artistObj?['name'] as String?)) return id;
+    }
+    // Network errors propagate: "Deezer is unreachable" and "Deezer has no
+    // such artist" (null) are different answers.
     return null;
   }
 
@@ -150,18 +164,14 @@ class DeezerClient {
     int artistId, {
     int limit = 10,
   }) async {
-    try {
-      final resp = await _dio.get('/artist/$artistId/radio?limit=$limit');
-      final tracks = (resp.data as Map<String, dynamic>?)?['data'] as List?;
-      if (tracks == null) return [];
-      return tracks
-          .map(
-              (t) => RecommendedTrack.fromDeezerJson(t as Map<String, dynamic>))
-          .where((t) => t.previewUrl != null)
-          .toList();
-    } catch (_) {
-      return [];
-    }
+    final resp = await _getJson('/artist/$artistId/radio?limit=$limit');
+    final tracks = resp?['data'] as List?;
+    if (tracks == null) return [];
+    return tracks
+        .map(
+            (t) => RecommendedTrack.fromDeezerJson(t as Map<String, dynamic>))
+        .where((t) => t.previewUrl != null)
+        .toList();
   }
 
   // Fetch an artist's top tracks. Only returns tracks with a preview URL.
@@ -169,18 +179,14 @@ class DeezerClient {
     int artistId, {
     int limit = 15,
   }) async {
-    try {
-      final resp = await _dio.get('/artist/$artistId/top?limit=$limit');
-      final tracks = (resp.data as Map<String, dynamic>?)?['data'] as List?;
-      if (tracks == null) return [];
-      return tracks
-          .map(
-              (t) => RecommendedTrack.fromDeezerJson(t as Map<String, dynamic>))
-          .where((t) => t.previewUrl != null && t.previewUrl!.isNotEmpty)
-          .toList();
-    } catch (_) {
-      return [];
-    }
+    final resp = await _getJson('/artist/$artistId/top?limit=$limit');
+    final tracks = resp?['data'] as List?;
+    if (tracks == null) return [];
+    return tracks
+        .map(
+            (t) => RecommendedTrack.fromDeezerJson(t as Map<String, dynamic>))
+        .where((t) => t.previewUrl != null && t.previewUrl!.isNotEmpty)
+        .toList();
   }
 
   // Validate an ARL cookie against Deezer's gw-light endpoint.
@@ -252,18 +258,13 @@ class DeezerClient {
   // Deezer catalog search.
   Future<List<RecommendedTrack>> search(String query, {int limit = 12}) async {
     if (query.trim().isEmpty) return [];
-    try {
-      final q = Uri.encodeQueryComponent(query.trim());
-      final resp = await _dio.get('/search?q=$q&limit=$limit');
-      final data = resp.data as Map<String, dynamic>?;
-      final tracks = data?['data'] as List? ?? [];
-      return tracks
-          .map(
-              (t) => RecommendedTrack.fromDeezerJson(t as Map<String, dynamic>))
-          .where((t) => t.previewUrl != null)
-          .toList();
-    } catch (_) {
-      return [];
-    }
+    final q = Uri.encodeQueryComponent(query.trim());
+    final data = await _getJson('/search?q=$q&limit=$limit');
+    final tracks = data?['data'] as List? ?? [];
+    return tracks
+        .map(
+            (t) => RecommendedTrack.fromDeezerJson(t as Map<String, dynamic>))
+        .where((t) => t.previewUrl != null)
+        .toList();
   }
 }

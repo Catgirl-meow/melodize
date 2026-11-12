@@ -88,10 +88,21 @@ class SubsonicClient {
       '/rest/$endpoint',
       queryParameters: queryParams,
     );
-    final data = response.data is String
-        ? jsonDecode(response.data as String)
-        : response.data;
-    final subsonic = data['subsonic-response'] as Map<String, dynamic>;
+    Object? data = response.data;
+    if (data is String) {
+      try {
+        data = jsonDecode(data);
+      } on FormatException {
+        data = null;
+      }
+    }
+    final subsonic = data is Map ? data['subsonic-response'] : null;
+    if (subsonic is! Map<String, dynamic>) {
+      // A reverse proxy login page, a wrong URL, etc. Say so instead of
+      // failing with a cast error.
+      throw const FormatException(
+          'The server did not return a Subsonic response — check the address');
+    }
     if (subsonic['status'] != 'ok') {
       throw Exception(
           'Subsonic error: ${subsonic['error']?['message'] ?? 'Unknown'}');
@@ -147,15 +158,11 @@ class SubsonicClient {
   }
 
   Future<List<Song>> getSimilarSongs(String songId, {int count = 20}) async {
-    try {
-      final resp = await _get('getSimilarSongs', {'id': songId, 'count': count});
-      final songs = resp['similarSongs']?['song'] as List? ?? [];
-      return songs
-          .map((s) => Song.fromSubsonicJson(s as Map<String, dynamic>))
-          .toList();
-    } catch (_) {
-      return [];
-    }
+    final resp = await _get('getSimilarSongs', {'id': songId, 'count': count});
+    final songs = resp['similarSongs']?['song'] as List? ?? [];
+    return songs
+        .map((s) => Song.fromSubsonicJson(s as Map<String, dynamic>))
+        .toList();
   }
 
   // --- Albums ---
@@ -190,15 +197,11 @@ class SubsonicClient {
   }
 
   Future<List<Song>> getTopSongs(String artistName, {int count = 10}) async {
-    try {
-      final resp = await _get('getTopSongs', {'artist': artistName, 'count': count});
-      final songs = resp['topSongs']?['song'] as List? ?? [];
-      return songs
-          .map((s) => Song.fromSubsonicJson(s as Map<String, dynamic>))
-          .toList();
-    } catch (_) {
-      return [];
-    }
+    final resp = await _get('getTopSongs', {'artist': artistName, 'count': count});
+    final songs = resp['topSongs']?['song'] as List? ?? [];
+    return songs
+        .map((s) => Song.fromSubsonicJson(s as Map<String, dynamic>))
+        .toList();
   }
 
   // --- Artists ---
