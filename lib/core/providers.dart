@@ -1172,6 +1172,9 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
   int _sessionFailed = 0;
   bool _sessionErrorShown = false;
   int _noticeSeq = 0;
+  // Set while the notifier is torn down: its cancels are not user cancels,
+  // so queue rows are kept for the next start to resume.
+  bool _disposing = false;
 
   DownloadNotifier(this._db, this._ref) : super({}) {
     _online = _ref.read(isOnlineProvider).valueOrNull ?? true;
@@ -1180,6 +1183,7 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
 
   @override
   void dispose() {
+    _disposing = true;
     for (final token in _active.values) {
       token.cancel('disposed');
     }
@@ -1396,9 +1400,22 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
         },
       );
 
-      // 3. Lyrics for offline viewing. Optional: most tracks have none, and
+      // 3. Register as soon as the file is in place, before anything that
+      //    can be cancelled: a cancel or app exit from here on must not leave
+      //    a complete file that is neither downloaded nor resumable. The previous file (e.g. a FLAC replaced by a lower
+      //    quality MP3) is removed only after the new one is in place.
+      final previous = (await _db.getSongById(song.id))?.localPath;
+      await _db.upsertSong(_songToCompanion(song));
+      await _db.markDownloaded(song.id, audioPath);
+      await _db.updateDownloadStatus(song.id, 'done');
+      if (previous != null && previous != audioPath) {
+        final old = File(previous);
+        if (await old.exists()) await old.delete();
+      }
+
+      // 4. Lyrics for offline viewing. Optional: most tracks have none, and
       //    the helper never throws. Bounded so a slow provider can't hold a
-      //    download slot.
+      //    download slot; a cancel here just stops the lookup.
       await _fetchLyrics(
         db: _db,
         q: (
@@ -1410,21 +1427,6 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
         ),
         cancelToken: token,
       ).timeout(const Duration(seconds: 20), onTimeout: () => null);
-      if (token.isCancelled) {
-        throw DioException.requestCancelled(
-            requestOptions: RequestOptions(), reason: 'user');
-      }
-
-      // 4. Register. The previous file (e.g. a FLAC replaced by a lower
-      //    quality MP3) is removed only after the new one is in place.
-      final previous = (await _db.getSongById(song.id))?.localPath;
-      await _db.upsertSong(_songToCompanion(song));
-      await _db.markDownloaded(song.id, audioPath);
-      await _db.updateDownloadStatus(song.id, 'done');
-      if (previous != null && previous != audioPath) {
-        final old = File(previous);
-        if (await old.exists()) await old.delete();
-      }
 
       _sessionDone++;
       if (!mounted) return;
@@ -1435,7 +1437,10 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
     } catch (e) {
       final cancelled = e is DioException && e.type == DioExceptionType.cancel;
       if (cancelled) {
-        await _db.deleteDownloads([song.id]).catchError((_) {});
+        // An app shutdown keeps the row ('downloading') so it resumes.
+        if (!_disposing) {
+          await _db.deleteDownloads([song.id]).catchError((_) {});
+        }
         if (!mounted) return;
         state = Map<String, DownloadItem>.from(state)..remove(song.id);
         return;

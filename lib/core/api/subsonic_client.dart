@@ -297,7 +297,12 @@ class SubsonicClient {
     final endpoint =
         quality == 'lossless' ? '/rest/download' : '/rest/stream';
     final params = <String, dynamic>{..._authParams(), 'id': song.id};
-    if (quality != 'lossless') params['maxBitRate'] = quality;
+    if (quality != 'lossless') {
+      params['maxBitRate'] = quality;
+      // Navidrome's default downsampling format is Opus-in-Ogg, which
+      // AVFoundation can't play. Ask for MP3 on Apple platforms.
+      if (Platform.isMacOS || Platform.isIOS) params['format'] = 'mp3';
+    }
 
     String? contentType;
     String? partPath;
@@ -306,10 +311,15 @@ class SubsonicClient {
         endpoint,
         (Headers headers) {
           contentType = headers.value(Headers.contentTypeHeader);
-          final ext = audioExtensionFor(
-            contentType: contentType,
-            fallbackSuffix: quality == 'lossless' ? song.suffix : null,
-          );
+          // /rest/download serves the original file, so its own suffix is
+          // the truth (Navidrome labels .opus as the generic audio/ogg). A
+          // transcode is named by what the server actually sent.
+          final original = song.suffix?.trim().toLowerCase();
+          final ext = quality == 'lossless' &&
+                  original != null &&
+                  original.isNotEmpty
+              ? original
+              : audioExtensionFor(contentType: contentType);
           return partPath = partPathFor('$basePath.$ext');
         },
         queryParameters: params,

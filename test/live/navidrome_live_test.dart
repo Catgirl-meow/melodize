@@ -101,10 +101,10 @@ void main() {
       final s = songs.firstWhere((s) => s.title == 'One Second');
       final dir = await Directory.systemTemp.createTemp('melodize_live');
       try {
-        final path = '${dir.path}/${s.id}.${s.suffix}';
         var lastReceived = 0;
-        await client.downloadSong(s, path,
+        final path = await client.downloadSong(s, '${dir.path}/${s.id}',
             onProgress: (received, _) => lastReceived = received);
+        expect(path, '${dir.path}/${s.id}.${s.suffix}');
         final f = File(path);
         expect(await f.length(), s.size);
         expect(lastReceived, s.size);
