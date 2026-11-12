@@ -141,14 +141,14 @@ class _MoreButton extends ConsumerWidget {
                       children: [
                         Text(
                           song.title,
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                               fontSize: 14, fontWeight: FontWeight.w600),
                         ),
                         Text(
                           song.artist,
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                               fontSize: 12, color: scheme.onSurfaceVariant),

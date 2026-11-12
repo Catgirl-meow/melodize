@@ -26,6 +26,10 @@ class CoverArtImage extends ConsumerWidget {
   final double borderRadius;
   final BoxFit fit;
 
+  /// Draw the music-note icon on the placeholder. Off for page headers,
+  /// where the name text sits on top of the cover area.
+  final bool placeholderIcon;
+
   const CoverArtImage({
     super.key,
     required this.coverArtId,
@@ -34,6 +38,7 @@ class CoverArtImage extends ConsumerWidget {
     required this.size,
     this.borderRadius = 8,
     this.fit = BoxFit.cover,
+    this.placeholderIcon = true,
   });
 
   @override
@@ -92,9 +97,11 @@ class CoverArtImage extends ConsumerWidget {
         width: size,
         height: size,
         color: scheme.surfaceContainerHigh,
-        child: Icon(
+        child: !placeholderIcon ? null : Icon(
           Icons.music_note_rounded,
-          size: size * 0.4,
+          // Grids pass size: double.infinity to fill their box; an
+          // infinite icon size throws, so fall back to a fixed one there.
+          size: size.isFinite ? size * 0.4 : 72,
           color: scheme.onSurfaceVariant,
         ),
       );

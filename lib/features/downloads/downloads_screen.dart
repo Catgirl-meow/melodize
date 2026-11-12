@@ -142,11 +142,14 @@ class _ActiveTile extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     return ListTile(
       leading: CoverArtImage(coverArtId: item.song.coverArt, size: 48),
-      title: Text(item.song.title),
+      title: Text(item.song.title,
+          maxLines: 2, overflow: TextOverflow.ellipsis),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(item.song.artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                   color: scheme.onSurfaceVariant, fontSize: 12)),
           if (item.status != 'queued') ...[

@@ -435,7 +435,19 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
             ),
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              sliver: SliverGrid(
+              // Square covers plus room for a two-line album name, so long
+              // names wrap instead of being cut to one line. Sized from the
+              // text scale so large system fonts don't overflow the tile.
+              sliver: SliverLayoutBuilder(builder: (context, constraints) {
+              final tileWidth = (constraints.crossAxisExtent - 8) / 2;
+              final scaler = MediaQuery.textScalerOf(context);
+              final tileExtent = tileWidth +
+                  6 +
+                  scaler.scale(13) * _kGridLineHeight * 2 +
+                  scaler.scale(12) * _kGridLineHeight +
+                  scaler.scale(11) * _kGridLineHeight +
+                  6;
+              return SliverGrid(
                 delegate: SliverChildBuilderDelegate(
                   (_, i) {
                     final album = albums[i];
@@ -453,7 +465,8 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
                           child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Expanded(
+                            AspectRatio(
+                              aspectRatio: 1,
                               child: CoverArtImage(
                                 coverArtId: album.coverArt,
                                 size: double.infinity,
@@ -468,10 +481,11 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(album.name,
-                                      maxLines: 1,
+                                      maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
                                           fontWeight: FontWeight.w600,
+                                          height: _kGridLineHeight,
                                           fontSize: 13)),
                                   Text(
                                     album.year != null
@@ -481,12 +495,15 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
                                         fontSize: 12,
+                                        height: _kGridLineHeight,
                                         color: scheme.onSurfaceVariant),
                                   ),
                                   Text(
                                     '${album.songCount} ${album.songCount == 1 ? 'song' : 'songs'}',
+                                    maxLines: 1,
                                     style: TextStyle(
                                         fontSize: 11,
+                                        height: _kGridLineHeight,
                                         color: scheme.onSurfaceVariant),
                                   ),
                                 ],
@@ -501,13 +518,14 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
                   },
                   childCount: albums.length,
                 ),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 2,
-                  childAspectRatio: 0.70,
+                  mainAxisExtent: tileExtent,
                   crossAxisSpacing: 8,
                   mainAxisSpacing: 8,
                 ),
-              ),
+              );
+              }),
             ),
             // Clear the shell's mini player + dock at the end of the list.
             SliverPadding(
@@ -520,6 +538,8 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
     );
   }
 }
+
+const _kGridLineHeight = 1.3;
 
 // ---------------------------------------------------------------------------
 // Artist sorting

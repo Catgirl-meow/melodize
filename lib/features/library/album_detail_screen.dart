@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/album.dart';
 import '../../core/providers.dart';
 import '../../shared/utils/song_actions.dart';
-import '../../shared/widgets/cover_art_image.dart';
+import '../../shared/widgets/detail_header.dart';
 import '../../shared/widgets/song_tile.dart';
 
 class AlbumDetailScreen extends ConsumerWidget {
@@ -13,57 +13,16 @@ class AlbumDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final songsAsync = ref.watch(albumSongsProvider(album.id));
-    final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       body: CustomScrollView(
         slivers: [
-          SliverAppBar(
-            expandedHeight: 280,
-            pinned: true,
-            flexibleSpace: FlexibleSpaceBar(
-              background: Stack(
-                fit: StackFit.expand,
-                children: [
-                  CoverArtImage(
-                    coverArtId: album.coverArt,
-                    size: double.infinity,
-                    borderRadius: 0,
-                    fit: BoxFit.cover,
-                  ),
-                  Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.transparent,
-                          scheme.surface.withValues(alpha: 0.9),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              titlePadding: const EdgeInsets.fromLTRB(16, 0, 16, 64),
-              title: Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.end,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(album.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 20)),
-                  Text(album.artist,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 14, color: scheme.onSurfaceVariant)),
-                ],
-              ),
-            ),
+          DetailHeader(
+            title: album.name,
+            subtitle: album.year != null
+                ? '${album.artist} · ${album.year}'
+                : album.artist,
+            coverArtId: album.coverArt,
           ),
           // Play all + Download album buttons
           SliverToBoxAdapter(

@@ -7,6 +7,7 @@ import '../../core/utils/platform_dirs.dart';
 import '../../shared/utils/snack.dart';
 import '../../shared/utils/song_actions.dart';
 import '../../shared/widgets/cover_art_image.dart';
+import '../../shared/widgets/detail_header.dart';
 import '../../shared/widgets/deezer_track_tile.dart';
 import '../../shared/widgets/song_tile.dart';
 import 'album_detail_screen.dart';
@@ -17,7 +18,6 @@ class ArtistDetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
     final albumsAsync = ref.watch(artistAlbumsProvider(artist.id));
     final topSongsAsync = ref.watch(artistTopSongsProvider(artist.name));
     final allSongsAsync = ref.watch(artistAllSongsProvider(artist.id));
@@ -54,59 +54,11 @@ class ArtistDetailScreen extends ConsumerWidget {
       body: CustomScrollView(
         slivers: [
           // ── Collapsing artist header ─────────────────────────────────────
-          SliverAppBar(
-            expandedHeight: 280,
-            pinned: true,
+          DetailHeader(
+            title: artist.name,
+            subtitle: _statsLabel(artist.albumCount, allSongs?.length),
+            coverArtId: artist.coverArt,
             stretch: true,
-            flexibleSpace: FlexibleSpaceBar(
-              stretchModes: const [
-                StretchMode.zoomBackground,
-                StretchMode.blurBackground,
-              ],
-              background: Stack(
-                fit: StackFit.expand,
-                children: [
-                  CoverArtImage(
-                    coverArtId: artist.coverArt,
-                    size: double.infinity,
-                    borderRadius: 0,
-                    fit: BoxFit.cover,
-                  ),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.transparent,
-                          scheme.surface.withValues(alpha: 0.92),
-                        ],
-                        stops: const [0.4, 1.0],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              titlePadding: const EdgeInsets.fromLTRB(16, 0, 16, 56),
-              title: Column(
-                mainAxisAlignment: MainAxisAlignment.end,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    artist.name,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 22),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    _statsLabel(artist.albumCount, allSongs?.length),
-                    style:
-                        TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
-                  ),
-                ],
-              ),
-            ),
           ),
 
           // ── Action row ───────────────────────────────────────────────────
@@ -223,20 +175,31 @@ class ArtistDetailScreen extends ConsumerWidget {
                   )
                 : SliverPadding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
-                    sliver: SliverGrid(
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        childAspectRatio: 0.70,
-                        crossAxisSpacing: 8,
-                        mainAxisSpacing: 8,
-                      ),
-                      delegate: SliverChildBuilderDelegate(
-                        (_, i) => RepaintBoundary(
-                          child: _AlbumCard(album: albums[i]),
-                        ),
-                        childCount: albums.length,
-                      ),
+                    // Square covers plus room for a two-line album name,
+                    // sized from the text scale (see _AlbumCard).
+                    sliver: SliverLayoutBuilder(
+                      builder: (context, constraints) {
+                        final tileWidth = (constraints.crossAxisExtent - 8) / 2;
+                        final scaler = MediaQuery.textScalerOf(context);
+                        final text = scaler.scale(13) * _kCardLineHeight * 2 +
+                            scaler.scale(12) * _kCardLineHeight;
+                        return SliverGrid(
+                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            mainAxisExtent:
+                                // +4: slack for font metrics rounding.
+                                tileWidth + 14 + (text > 40 ? text : 40),
+                            crossAxisSpacing: 8,
+                            mainAxisSpacing: 8,
+                          ),
+                          delegate: SliverChildBuilderDelegate(
+                            (_, i) => RepaintBoundary(
+                              child: _AlbumCard(album: albums[i]),
+                            ),
+                            childCount: albums.length,
+                          ),
+                        );
+                      },
                     ),
                   ),
           ),
@@ -308,7 +271,8 @@ class _AlbumCard extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
+            AspectRatio(
+              aspectRatio: 1,
               child: CoverArtImage(
                 coverArtId: album.coverArt,
                 size: double.infinity,
@@ -328,16 +292,19 @@ class _AlbumCard extends ConsumerWidget {
                       children: [
                         Text(
                           album.name,
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                              fontWeight: FontWeight.w600, fontSize: 13),
+                              fontWeight: FontWeight.w600,
+                              height: _kCardLineHeight,
+                              fontSize: 13),
                         ),
                         if (album.year != null)
                           Text(
                             '${album.year}',
                             style: TextStyle(
                                 fontSize: 12,
+                                height: _kCardLineHeight,
                                 color: scheme.onSurfaceVariant),
                           ),
                       ],
@@ -362,6 +329,8 @@ class _AlbumCard extends ConsumerWidget {
 }
 
 // ---------------------------------------------------------------------------
+
+const _kCardLineHeight = 1.3;
 
 class _SectionHeader extends StatelessWidget {
   final String title;

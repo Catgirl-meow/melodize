@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/playlist.dart';
 import '../../core/audio/shuffle_mode.dart';
 import '../../core/providers.dart';
-import '../../shared/widgets/cover_art_image.dart';
+import '../../shared/widgets/detail_header.dart';
 import '../../shared/widgets/song_tile.dart';
 
 class PlaylistDetailScreen extends ConsumerWidget {
@@ -13,52 +13,16 @@ class PlaylistDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final songsAsync = ref.watch(playlistSongsProvider(playlist.id));
-    final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       body: CustomScrollView(
         slivers: [
-          SliverAppBar(
+          DetailHeader(
+            title: playlist.name,
+            subtitle: '${playlist.songCount} '
+                '${playlist.songCount == 1 ? 'song' : 'songs'}',
+            coverArtId: playlist.coverArt,
             expandedHeight: 260,
-            pinned: true,
-            flexibleSpace: FlexibleSpaceBar(
-              background: Stack(
-                fit: StackFit.expand,
-                children: [
-                  CoverArtImage(
-                    coverArtId: playlist.coverArt,
-                    size: double.infinity,
-                    borderRadius: 0,
-                    fit: BoxFit.cover,
-                  ),
-                  Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.transparent,
-                          scheme.surface.withValues(alpha: 0.9),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              titlePadding: const EdgeInsets.fromLTRB(16, 0, 16, 60),
-              title: Column(
-                mainAxisAlignment: MainAxisAlignment.end,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(playlist.name,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 20)),
-                  Text('${playlist.songCount} songs',
-                      style: TextStyle(
-                          fontSize: 13, color: scheme.onSurfaceVariant)),
-                ],
-              ),
-            ),
           ),
           SliverToBoxAdapter(
             child: Padding(

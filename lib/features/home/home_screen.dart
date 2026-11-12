@@ -64,7 +64,23 @@ String _reachabilityMessage(ServerReachability r) {
 
 const _kCardExtent = 138.0;
 const _kCardImageSize = 130.0;
-const _kCarouselHeight = 176.0;
+
+// Card titles get two lines (long album and playlist names were cut to a
+// few characters on one line) and a one-line subtitle. The carousel's
+// height follows the text scale, so large system fonts don't clip the
+// subtitle. Card text uses an explicit line height to keep this exact.
+const _kCardLineHeight = 1.3;
+const _kCardTitleSize = 13.0;
+const _kCardSubtitleSize = 12.0;
+
+double _carouselHeight(BuildContext context) {
+  final scaler = MediaQuery.textScalerOf(context);
+  return _kCardImageSize +
+      8 +
+      scaler.scale(_kCardTitleSize) * _kCardLineHeight * 2 +
+      scaler.scale(_kCardSubtitleSize) * _kCardLineHeight +
+      2;
+}
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -165,7 +181,7 @@ class HomeScreen extends ConsumerWidget {
                     child: _Section(
                       title: 'Playlists',
                       child: SizedBox(
-                        height: _kCarouselHeight,
+                        height: _carouselHeight(context),
                         child: _buildCarousel(
                           context: context,
                           onItemTap: (i) => Navigator.push(
@@ -204,7 +220,7 @@ class HomeScreen extends ConsumerWidget {
                     child: _Section(
                       title: 'Recently Added',
                       child: SizedBox(
-                        height: _kCarouselHeight,
+                        height: _carouselHeight(context),
                         child: _buildCarousel(
                           context: context,
                           onItemTap: (i) => Navigator.push(
@@ -264,7 +280,7 @@ class HomeScreen extends ConsumerWidget {
                   child: _Section(
                     title: 'Discover',
                     child: SizedBox(
-                      height: _kCarouselHeight,
+                      height: _carouselHeight(context),
                       child: _buildCarousel(
                         context: context,
                         onItemTap: (i) => _playSongs(ref, songs, i),
@@ -298,7 +314,7 @@ class HomeScreen extends ConsumerWidget {
                     child: _Section(
                       title: 'Recently Played',
                       child: SizedBox(
-                        height: _kCarouselHeight,
+                        height: _carouselHeight(context),
                         child: _buildCarousel(
                           context: context,
                           onItemTap: (i) => _playSongs(ref, songs, i),
@@ -435,7 +451,7 @@ class HomeScreen extends ConsumerWidget {
                     onPressed: refresh,
                   ),
                   child: SizedBox(
-                    height: _kCarouselHeight,
+                    height: _carouselHeight(context),
                     child: _buildCarousel(
                       context: context,
                       onItemTap: (i) => ref
@@ -540,13 +556,19 @@ class _SongCard extends ConsumerWidget {
           ),
           const SizedBox(height: 8),
           Text(song.title,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              style: const TextStyle(
+                  fontSize: _kCardTitleSize,
+                  height: _kCardLineHeight,
+                  fontWeight: FontWeight.w600)),
           Text(song.artist,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+              style: TextStyle(
+                  fontSize: _kCardSubtitleSize,
+                  height: _kCardLineHeight,
+                  color: scheme.onSurfaceVariant)),
         ],
       ),
     );
@@ -582,13 +604,19 @@ class _AlbumCard extends ConsumerWidget {
           ),
           const SizedBox(height: 8),
           Text(album.name,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              style: const TextStyle(
+                  fontSize: _kCardTitleSize,
+                  height: _kCardLineHeight,
+                  fontWeight: FontWeight.w600)),
           Text(album.artist,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+              style: TextStyle(
+                  fontSize: _kCardSubtitleSize,
+                  height: _kCardLineHeight,
+                  color: scheme.onSurfaceVariant)),
         ],
       ),
     );
@@ -629,13 +657,20 @@ class _PlaylistCard extends ConsumerWidget {
               borderRadius: 12,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Text(playlist.name as String,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              style: const TextStyle(
+                  fontSize: _kCardTitleSize,
+                  height: _kCardLineHeight,
+                  fontWeight: FontWeight.w600)),
           Text('${playlist.songCount} songs',
-              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+              maxLines: 1,
+              style: TextStyle(
+                  fontSize: _kCardSubtitleSize,
+                  height: _kCardLineHeight,
+                  color: scheme.onSurfaceVariant)),
         ],
       ),
     );
@@ -744,11 +779,11 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(widget.song.title,
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(ctx).textTheme.titleSmall),
                         Text(widget.song.artist,
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
                                   color: scheme.onSurfaceVariant,
@@ -876,13 +911,19 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
           ),
           const SizedBox(height: 8),
           Text(widget.song.title,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              style: const TextStyle(
+                  fontSize: _kCardTitleSize,
+                  height: _kCardLineHeight,
+                  fontWeight: FontWeight.w600)),
           Text(widget.song.artist,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+              style: TextStyle(
+                  fontSize: _kCardSubtitleSize,
+                  height: _kCardLineHeight,
+                  color: scheme.onSurfaceVariant)),
         ],
       ),
     );
