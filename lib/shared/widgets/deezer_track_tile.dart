@@ -85,7 +85,7 @@ class _DeezerTrackTileState extends ConsumerState<DeezerTrackTile>
             : widget.track.artist,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
       ),
       onTap: _playPreview,
       trailing: Row(

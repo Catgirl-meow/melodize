@@ -22,10 +22,7 @@ playback rework, the queue rewrite) is in git history and the release notes.
 
 | Item | Effort | Notes |
 |---|---|---|
-| Hard-coded detail headers | trivial | Album and playlist titles use `fontSize: 20`, the artist header `fontSize: 22`. Use `titleLarge` / `headlineSmall` with bold weight. |
-| Quality badge radius | trivial | `_QualityBadge` in `song_tile.dart` uses radius 4; everything around it uses 8. |
-| Section spacing | small | Sort-row padding differs between Library tabs (`16,16,16,8` vs `16,10,8,4`), and the header-to-content gap is 12 px on Home and 4 px in Library. Pick one rhythm (M3E says 16). |
-| Medium collapsing app bars | small | Downloads, Downloaded songs and the Settings sub-pages still use a plain `AppBar`. Library and Home keep theirs (see [design.md](design.md#app-bars)). |
+| Remaining raw font sizes | small | Home cards (`_kCardTitleSize`), tiny badges (9 px) and a few banners still set `fontSize:` directly; the layout math depends on them, so move them to text styles together with that math. |
 
 ## Features
 

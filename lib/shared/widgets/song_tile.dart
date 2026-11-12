@@ -11,12 +11,16 @@ class SongTile extends ConsumerWidget {
   final bool showAlbum;
   final Widget? trailing;
 
+  /// Replaces the cover thumbnail (album pages show the track number).
+  final Widget? leading;
+
   const SongTile({
     super.key,
     required this.song,
     this.onTap,
     this.showAlbum = false,
     this.trailing,
+    this.leading,
   });
 
   @override
@@ -34,7 +38,9 @@ class SongTile extends ConsumerWidget {
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-      leading: CoverArtImage(coverArtId: song.coverArt, localPath: song.localPath, size: 48),
+      leading: leading ??
+          CoverArtImage(
+              coverArtId: song.coverArt, localPath: song.localPath, size: 48),
       title: Text(
         song.title,
         maxLines: 1,
@@ -48,7 +54,10 @@ class SongTile extends ConsumerWidget {
         showAlbum ? '${song.artist} · ${song.album}' : song.artist,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+        style: Theme.of(context)
+            .textTheme
+            .bodySmall
+            ?.copyWith(color: scheme.onSurfaceVariant),
       ),
       trailing: trailing ??
           Row(
@@ -78,10 +87,10 @@ class _QualityBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
         color: scheme.secondaryContainer,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
         label,
@@ -143,15 +152,16 @@ class _MoreButton extends ConsumerWidget {
                           song.title,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.w600),
+                          style: Theme.of(context).textTheme.titleSmall,
                         ),
                         Text(
                           song.artist,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: 12, color: scheme.onSurfaceVariant),
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: scheme.onSurfaceVariant),
                         ),
                       ],
                     ),

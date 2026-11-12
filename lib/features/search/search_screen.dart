@@ -10,6 +10,7 @@ import '../../core/models/search_results.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/widgets/cover_art_image.dart';
+import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/deezer_track_tile.dart';
 import '../../shared/widgets/offline_banner.dart';
 import '../../shared/widgets/song_tile.dart';
@@ -295,25 +296,29 @@ class _SearchResults extends StatelessWidget {
         final sections = <Widget>[];
         if (showSongs && results.songs.isNotEmpty) {
           sections.add(_AnimatedSection(
-            label: 'Songs · ${results.songs.length}',
+            label: 'Songs',
+            count: results.songs.length,
             child: _SongResults(songs: results.songs),
           ));
         }
         if (showArtists && results.artists.isNotEmpty) {
           sections.add(_AnimatedSection(
-            label: 'Artists · ${results.artists.length}',
+            label: 'Artists',
+            count: results.artists.length,
             child: _ArtistResults(artists: results.artists),
           ));
         }
         if (showAlbums && results.albums.isNotEmpty) {
           sections.add(_AnimatedSection(
-            label: 'Albums · ${results.albums.length}',
+            label: 'Albums',
+            count: results.albums.length,
             child: _AlbumResults(albums: results.albums),
           ));
         }
         if (showDeezer && deezerTracks.isNotEmpty) {
           sections.add(_AnimatedSection(
-            label: 'From Deezer · ${deezerTracks.length}',
+            label: 'From Deezer',
+            count: deezerTracks.length,
             child: _DeezerResults(tracks: deezerTracks),
           ));
         }
@@ -464,13 +469,18 @@ class _DeezerResults extends StatelessWidget {
 
 class _AnimatedSection extends StatelessWidget {
   final String label;
+  final int count;
   final Widget child;
-  const _AnimatedSection({required this.label, required this.child});
+  const _AnimatedSection(
+      {required this.label, required this.count, required this.child});
 
   @override
   Widget build(BuildContext context) {
     final disableAnimations = MediaQuery.disableAnimationsOf(context);
-    final section = _Section(label: label, child: child);
+    final section = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [SectionHeader(label, count: '$count'), child],
+    );
     if (disableAnimations) return section;
     return TweenAnimationBuilder<double>(
       key: ValueKey(label),
@@ -485,30 +495,6 @@ class _AnimatedSection extends StatelessWidget {
         ),
       ),
       child: section,
-    );
-  }
-}
-
-class _Section extends StatelessWidget {
-  final String label;
-  final Widget child;
-  const _Section({required this.label, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Text(label,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: scheme.onSurface,
-                  )),
-        ),
-        child,
-      ],
     );
   }
 }

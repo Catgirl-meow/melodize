@@ -24,6 +24,15 @@ class AppTheme {
     );
   }
 
+  /// Title of a top-level tab (Home greeting, Library, Settings).
+  static TextStyle? pageTitleStyle(BuildContext context) => Theme.of(context)
+      .textTheme
+      .headlineMedium
+      ?.copyWith(fontWeight: FontWeight.bold);
+
+  /// Toolbar height for the top-level tabs' title bars.
+  static const double pageTitleBarHeight = 64;
+
   /// Frosted-glass background color shared by the floating dock and mini player.
   static Color dockBackground(Color? accentColor, ColorScheme scheme) {
     if (accentColor != null) {
@@ -38,76 +47,67 @@ class AppTheme {
         : scheme.surfaceContainerHighest.withValues(alpha: 0.94);
   }
 
-  static ThemeData dark(ColorScheme? dynamicScheme) {
-    final scheme = dynamicScheme ??
-        ColorScheme.fromSeed(
-          seedColor: const Color(0xFF6750A4),
-          brightness: Brightness.dark,
-          dynamicSchemeVariant: DynamicSchemeVariant.expressive,
-        );
-
-    return ThemeData(
-      useMaterial3: true,
-      colorScheme: scheme.harmonized(),
-      brightness: Brightness.dark,
-      fontFamily: 'Roboto',
-      navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: scheme.surface,
-        indicatorColor: scheme.secondaryContainer,
-        labelTextStyle: WidgetStateProperty.all(
-          TextStyle(fontSize: 12, color: scheme.onSurface),
-        ),
-      ),
-      cardTheme: CardThemeData(
-        elevation: 0,
-        color: scheme.surfaceContainerHigh,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-      ),
-      appBarTheme: AppBarTheme(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        systemOverlayStyle: systemOverlayFor(scheme.brightness),
-      ),
-      sliderTheme: SliderThemeData(
-        thumbColor: scheme.primary,
-        activeTrackColor: scheme.primary,
-        inactiveTrackColor: scheme.surfaceContainerHighest,
-        overlayShape: SliderComponentShape.noOverlay,
-        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-        trackHeight: 3,
-      ),
-      snackBarTheme: SnackBarThemeData(
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: scheme.inverseSurface,
-        contentTextStyle: TextStyle(color: scheme.onInverseSurface),
-        actionTextColor: scheme.inversePrimary,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
+  /// A complete M3 scheme for [brightness].
+  ///
+  /// Android's wallpaper scheme (dynamic_color) only fills the original M3
+  /// roles; the surface-container tones are left at `surface`, so cards,
+  /// grouped settings tiles and cover placeholders vanished into the page.
+  /// Keep the system colors and fill just those tones from a scheme seeded
+  /// with the same primary (tonal spot, the variant Android itself uses).
+  static ColorScheme schemeFor(Brightness brightness, ColorScheme? dynamic) {
+    if (dynamic == null) {
+      return ColorScheme.fromSeed(
+        seedColor: const Color(0xFF6750A4),
+        brightness: brightness,
+        dynamicSchemeVariant: DynamicSchemeVariant.expressive,
+      );
+    }
+    final full = ColorScheme.fromSeed(
+      seedColor: dynamic.primary,
+      brightness: brightness,
     );
+    return dynamic.copyWith(
+      surface: full.surface,
+      surfaceDim: full.surfaceDim,
+      surfaceBright: full.surfaceBright,
+      surfaceContainerLowest: full.surfaceContainerLowest,
+      surfaceContainerLow: full.surfaceContainerLow,
+      surfaceContainer: full.surfaceContainer,
+      surfaceContainerHigh: full.surfaceContainerHigh,
+      surfaceContainerHighest: full.surfaceContainerHighest,
+      onSurface: full.onSurface,
+      onSurfaceVariant: full.onSurfaceVariant,
+      outlineVariant: full.outlineVariant,
+    ).harmonized();
   }
 
-  static ThemeData light(ColorScheme? dynamicScheme) {
-    final scheme = dynamicScheme ??
-        ColorScheme.fromSeed(
-          seedColor: const Color(0xFF6750A4),
-          brightness: Brightness.light,
-          dynamicSchemeVariant: DynamicSchemeVariant.expressive,
-        );
+  static ThemeData dark(ColorScheme? dynamicScheme) =>
+      _build(schemeFor(Brightness.dark, dynamicScheme));
 
-    return ThemeData(
+  static ThemeData light(ColorScheme? dynamicScheme) =>
+      _build(schemeFor(Brightness.light, dynamicScheme));
+
+  static ThemeData _build(ColorScheme scheme) {
+    final base = ThemeData(
       useMaterial3: true,
-      colorScheme: scheme.harmonized(),
-      brightness: Brightness.light,
+      colorScheme: scheme,
+      brightness: scheme.brightness,
       fontFamily: 'Roboto',
+    );
+    final text = base.textTheme;
+    return base.copyWith(
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: scheme.surface,
+        backgroundColor: scheme.surfaceContainer,
         indicatorColor: scheme.secondaryContainer,
-        labelTextStyle: WidgetStateProperty.all(
-          TextStyle(fontSize: 12, color: scheme.onSurface),
-        ),
+        labelTextStyle: WidgetStateProperty.resolveWith((states) =>
+            text.labelMedium?.copyWith(
+              color: states.contains(WidgetState.selected)
+                  ? scheme.onSurface
+                  : scheme.onSurfaceVariant,
+              fontWeight: states.contains(WidgetState.selected)
+                  ? FontWeight.w700
+                  : FontWeight.w500,
+            )),
       ),
       cardTheme: CardThemeData(
         elevation: 0,
@@ -122,6 +122,22 @@ class AppTheme {
         scrolledUnderElevation: 0,
         systemOverlayStyle: systemOverlayFor(scheme.brightness),
       ),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: scheme.surfaceContainerLow,
+        modalBackgroundColor: scheme.surfaceContainerLow,
+        showDragHandle: true,
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: scheme.surfaceContainerHigh,
+      ),
+      dividerTheme: DividerThemeData(
+        color: scheme.outlineVariant,
+        space: 1,
+        thickness: 1,
+      ),
+      chipTheme: ChipThemeData(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
       sliderTheme: SliderThemeData(
         thumbColor: scheme.primary,
         activeTrackColor: scheme.primary,
@@ -133,7 +149,8 @@ class AppTheme {
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         backgroundColor: scheme.inverseSurface,
-        contentTextStyle: TextStyle(color: scheme.onInverseSurface),
+        contentTextStyle:
+            text.bodyMedium?.copyWith(color: scheme.onInverseSurface),
         actionTextColor: scheme.inversePrimary,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),

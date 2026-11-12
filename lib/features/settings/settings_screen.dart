@@ -6,6 +6,7 @@ import '../../core/api/subsonic_client.dart' show SubsonicConfig;
 import '../../core/models/app_preferences.dart';
 import '../../core/providers.dart';
 import '../../core/utils/platform_dirs.dart';
+import '../../shared/theme/app_theme.dart';
 import '../../widgets/grouped_list_tile.dart';
 import 'downloaded_songs_screen.dart';
 
@@ -976,27 +977,47 @@ class _SettingsPageScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // Top-level Settings tab: the same bold page title as Home and Library.
+    // Sub-pages: an M3 medium app bar that collapses on scroll.
+    final appBar = automaticallyImplyLeading
+        ? SliverAppBar.medium(
+            title: Text(title),
+            pinned: true,
+            backgroundColor: scheme.surface,
+            surfaceTintColor: Colors.transparent,
+            actions: actions,
+          )
+        : SliverAppBar(
+            title: Text(title, style: AppTheme.pageTitleStyle(context)),
+            titleSpacing: 16,
+            toolbarHeight: AppTheme.pageTitleBarHeight,
+            pinned: true,
+            automaticallyImplyLeading: false,
+            backgroundColor: scheme.surface,
+            surfaceTintColor: Colors.transparent,
+            actions: actions,
+          );
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(title),
-        automaticallyImplyLeading: automaticallyImplyLeading,
-        backgroundColor: scheme.surface,
-        surfaceTintColor: Colors.transparent,
-        scrolledUnderElevation: 0,
-        actions: actions,
-      ),
-      body: Align(
-        alignment: Alignment.topCenter,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
-          child: ListView(
-            children: [
-              ...children,
-              SizedBox(height: MediaQuery.paddingOf(context).bottom + 16),
-            ],
+      body: CustomScrollView(
+        slivers: [
+          appBar,
+          SliverToBoxAdapter(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 720),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ...children,
+                    SizedBox(height: MediaQuery.paddingOf(context).bottom + 16),
+                  ],
+                ),
+              ),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -1072,7 +1093,7 @@ class _Step extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: Text(text, style: const TextStyle(fontSize: 13)),
+            child: Text(text, style: Theme.of(context).textTheme.bodySmall),
           ),
         ],
       ),

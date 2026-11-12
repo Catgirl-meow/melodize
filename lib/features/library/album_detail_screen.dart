@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/album.dart';
+import '../../core/audio/shuffle_mode.dart';
 import '../../core/providers.dart';
 import '../../shared/utils/song_actions.dart';
+import '../../shared/widgets/detail_actions.dart';
 import '../../shared/widgets/detail_header.dart';
 import '../../shared/widgets/song_tile.dart';
 
@@ -13,6 +15,7 @@ class AlbumDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final songsAsync = ref.watch(albumSongsProvider(album.id));
+    final songs = songsAsync.valueOrNull;
 
     return Scaffold(
       body: CustomScrollView(
@@ -24,37 +27,25 @@ class AlbumDetailScreen extends ConsumerWidget {
                 : album.artist,
             coverArtId: album.coverArt,
           ),
-          // Play all + Download album buttons
           SliverToBoxAdapter(
-            child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: songsAsync.when(
-                data: (songs) => Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton.icon(
-                        icon: const Icon(Icons.play_arrow_rounded),
-                        label: Text('Play all · ${songs.length} songs'),
-                        onPressed: () {
-                          ref
-                              .read(audioHandlerNotifierProvider)
-                              ?.loadQueue(songs);
-                          Navigator.pop(context);
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton.outlined(
-                      icon: const Icon(Icons.download_rounded),
-                      tooltip: 'Download album',
-                      onPressed: () => downloadAlbum(context, ref, album),
-                    ),
-                  ],
-                ),
-                loading: () => const SizedBox.shrink(),
-                error: (_, __) => const SizedBox.shrink(),
-              ),
+            child: DetailActions(
+              onPlay: songs == null || songs.isEmpty
+                  ? null
+                  : () {
+                      ref.read(audioHandlerNotifierProvider)?.loadQueue(songs);
+                      Navigator.pop(context);
+                    },
+              onShuffle: songs == null || songs.isEmpty
+                  ? null
+                  : () async {
+                      final h = ref.read(audioHandlerNotifierProvider);
+                      if (h == null) return;
+                      await h.applyShuffleMode(ShuffleMode.shuffle);
+                      await h.loadQueue(songs);
+                      if (context.mounted) Navigator.pop(context);
+                    },
+              onDownload: () => downloadAlbum(context, ref, album),
+              downloadTooltip: 'Download album',
             ),
           ),
           // Songs
@@ -74,24 +65,7 @@ class AlbumDetailScreen extends ConsumerWidget {
                         .read(audioHandlerNotifierProvider)
                         ?.loadQueue(songs, startIndex: i);
                   },
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (songs[i].track != null)
-                        SizedBox(
-                          width: 28,
-                          child: Text(
-                            '${songs[i].track}',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurfaceVariant,
-                                fontSize: 13),
-                          ),
-                        ),
-                    ],
-                  ),
+                  leading: _TrackNumber(songs[i].track),
                 ),
                 childCount: songs.length,
               ),
@@ -102,6 +76,30 @@ class AlbumDetailScreen extends ConsumerWidget {
                 bottom: MediaQuery.paddingOf(context).bottom + 16),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Track number in the cover slot: every row on an album page has the same
+/// cover, so the number is the useful part.
+class _TrackNumber extends StatelessWidget {
+  final int? track;
+  const _TrackNumber(this.track);
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 48,
+      height: 48,
+      child: Center(
+        child: Text(
+          track?.toString() ?? '–',
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+        ),
       ),
     );
   }
