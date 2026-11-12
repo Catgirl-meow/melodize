@@ -45,6 +45,41 @@ void main() {
     });
   });
 
+  group('serverUrlError', () {
+    test('accepts https anywhere and http on private hosts', () {
+      for (final u in [
+        'https://music.example.com',
+        'https://8.8.8.8:4533',
+        'http://localhost:4533',
+        'http://192.168.2.2:4533/',
+        'http://10.0.2.2:4534',
+        'http://100.101.102.103:4533',
+        'http://[fd00::5]:4533',
+        'http://nas.lan',
+        '  http://192.168.1.10:4533  ',
+      ]) {
+        expect(serverUrlError(u), isNull, reason: u);
+      }
+    });
+
+    test('rejects http on public hosts', () {
+      for (final u in [
+        'http://music.example.com',
+        'http://8.8.8.8:4533',
+        'http://music.catg1rl.com',
+      ]) {
+        expect(serverUrlError(u), contains('https://'), reason: u);
+      }
+    });
+
+    test('rejects other schemes and missing hosts', () {
+      for (final u in ['ftp://example', 'example.com', 'http://', '']) {
+        expect(serverUrlError(u), 'URL must start with http:// or https://',
+            reason: u);
+      }
+    });
+  });
+
   group('CompanionAudioApi.resolveUrl', () {
     final api = CompanionAudioApi(
         baseUrl: 'https://192.168.2.22:8765/', apiKey: 'k');
