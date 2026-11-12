@@ -60,7 +60,9 @@ String _reachabilityMessage(ServerReachability r) {
     case ServerReachability.reachable:
       return '';
   }
-}const _kCardExtent = 138.0;
+}
+
+const _kCardExtent = 138.0;
 const _kCardImageSize = 130.0;
 const _kCarouselHeight = 176.0;
 
@@ -484,7 +486,9 @@ class _Section extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 24, 8, 12),
+          // 16 on both sides: the trailing refresh button is a filled tonal
+          // circle, so its visible edge has to line up with the content.
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
           child: Row(
             children: [
               Expanded(
@@ -522,8 +526,12 @@ class _SongCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AspectRatio(
-            aspectRatio: 1,
+          // Fixed height, not AspectRatio(1): CarouselView squeezes the
+          // item at the edge, and a square cover would shrink with it and
+          // lift that card's title above its neighbours'.
+          SizedBox(
+            height: _kCardImageSize,
+            width: double.infinity,
             child: CoverArtImage(
               coverArtId: song.coverArt,
               size: _kCardImageSize,
@@ -560,8 +568,12 @@ class _AlbumCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AspectRatio(
-            aspectRatio: 1,
+          // Fixed height, not AspectRatio(1): CarouselView squeezes the
+          // item at the edge, and a square cover would shrink with it and
+          // lift that card's title above its neighbours'.
+          SizedBox(
+            height: _kCardImageSize,
+            width: double.infinity,
             child: CoverArtImage(
               coverArtId: album.coverArt,
               size: _kCardImageSize,
@@ -605,8 +617,12 @@ class _PlaylistCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AspectRatio(
-            aspectRatio: 1,
+          // Fixed height, not AspectRatio(1): CarouselView squeezes the
+          // item at the edge, and a square cover would shrink with it and
+          // lift that card's title above its neighbours'.
+          SizedBox(
+            height: _kCardImageSize,
+            width: double.infinity,
             child: CoverArtImage(
               coverArtId: playlist.coverArt as String?,
               size: _kCardImageSize,

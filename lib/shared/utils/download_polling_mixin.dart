@@ -13,8 +13,9 @@ mixin DownloadPollingMixin<T extends ConsumerStatefulWidget>
   int _consecutiveErrors = 0;
   bool _connectionLostSnackShown = false;
 
-  /// Bottom margin for snackbars. Override when the widget lives outside
-  /// the shell's MediaQuery (e.g. NowPlaying overlay).
+  /// Bottom margin for snackbars; null uses showStyledSnack's default
+  /// (above the mini player inside the shell, above the system bar
+  /// elsewhere).
   double? get snackBottomOffset => null;
 
   @override

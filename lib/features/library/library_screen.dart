@@ -293,6 +293,11 @@ class _SongsTabState extends ConsumerState<_SongsTab>
                 childCount: songs.length,
               ),
             ),
+            // Clear the shell's mini player + dock at the end of the list.
+            SliverPadding(
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.paddingOf(context).bottom + 16),
+            ),
           ],
         );
       },
@@ -504,6 +509,11 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
                 ),
               ),
             ),
+            // Clear the shell's mini player + dock at the end of the list.
+            SliverPadding(
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.paddingOf(context).bottom + 16),
+            ),
           ],
         );
       },
@@ -687,6 +697,11 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab>
                 },
                 childCount: artists.length,
               ),
+            ),
+            // Clear the shell's mini player + dock at the end of the list.
+            SliverPadding(
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.paddingOf(context).bottom + 16),
             ),
           ],
         );

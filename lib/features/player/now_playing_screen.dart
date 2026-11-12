@@ -12,6 +12,7 @@ import '../../core/models/lyrics_result.dart';
 import '../../core/providers.dart';
 import '../../core/audio/shuffle_mode.dart';
 import '../../core/utils/platform_info.dart';
+import '../../shared/theme/app_theme.dart';
 import '../../shared/utils/download_polling_mixin.dart';
 import '../../shared/utils/snack.dart';
 import '../../shared/utils/song_actions.dart';
@@ -118,7 +119,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
       ),
       // Material(transparency) provides the Material ancestor Slider needs.
       child: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+        value: AppTheme.systemOverlayFor(scheme.brightness),
         child: Material(
           type: MaterialType.transparency,
           child: Stack(
@@ -439,9 +440,6 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
   Song get song => widget.song;
 
   @override
-  double? get snackBottomOffset => _snackBottom();
-
-  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
@@ -585,24 +583,10 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
     );
   }
 
-  // Compute snack offset above mini player + dock (player is outside shell MediaQuery).
-  double _snackBottom() {
-    final floatingNav = ref.read(
-      preferencesNotifierProvider.select((p) => p.floatingNavBar),
-    );
-    final safeBottom = MediaQuery.of(context).viewPadding.bottom;
-    const kDockHeight = 52.0;
-    const kDockBottom = 8.0;
-    final dockPad = floatingNav
-        ? kDockHeight + kDockBottom + safeBottom
-        : 62.0 + safeBottom;
-    const miniPlayerHeight = 72.0;
-    return dockPad + miniPlayerHeight + 12;
-  }
-
+  // Shows on the player's own messenger (see MainShell), above the
+  // system navigation bar.
   void _snack(String msg, {bool isError = false}) =>
-      showStyledSnack(context, msg,
-          isError: isError, bottomOffset: _snackBottom());
+      showStyledSnack(context, msg, isError: isError);
 
   void _moreLikeThis() {
     ref.read(recommendationsSeedOverrideProvider.notifier).state = (

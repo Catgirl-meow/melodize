@@ -1,7 +1,29 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 
 class AppTheme {
+  /// System bar style for a page of the given [brightness]: transparent bars
+  /// (edge-to-edge) with icons that contrast with the page.
+  ///
+  /// AppBars must get this explicitly. Our AppBars are transparent, and for a
+  /// transparent background Flutter estimates a *dark* color and switches the
+  /// status bar to white icons, which vanish on the light theme.
+  static SystemUiOverlayStyle systemOverlayFor(Brightness brightness) {
+    final dark = brightness == Brightness.dark;
+    return SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: dark ? Brightness.light : Brightness.dark,
+      // iOS/macOS naming: the brightness of the bar background.
+      statusBarBrightness: brightness,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarDividerColor: Colors.transparent,
+      systemNavigationBarIconBrightness:
+          dark ? Brightness.light : Brightness.dark,
+      systemNavigationBarContrastEnforced: false,
+    );
+  }
+
   /// Frosted-glass background color shared by the floating dock and mini player.
   static Color dockBackground(Color? accentColor, ColorScheme scheme) {
     if (accentColor != null) {
@@ -43,10 +65,11 @@ class AppTheme {
           borderRadius: BorderRadius.circular(16),
         ),
       ),
-      appBarTheme: const AppBarTheme(
+      appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
+        systemOverlayStyle: systemOverlayFor(scheme.brightness),
       ),
       sliderTheme: SliderThemeData(
         thumbColor: scheme.primary,
@@ -93,10 +116,11 @@ class AppTheme {
           borderRadius: BorderRadius.circular(16),
         ),
       ),
-      appBarTheme: const AppBarTheme(
+      appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
+        systemOverlayStyle: systemOverlayFor(scheme.brightness),
       ),
       sliderTheme: SliderThemeData(
         thumbColor: scheme.primary,

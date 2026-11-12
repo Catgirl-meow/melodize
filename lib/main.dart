@@ -95,7 +95,6 @@ class _MelodizeAppState extends ConsumerState<MelodizeApp>
   ThemeData? _cachedDark;
   ColorScheme? _lastLight;
   ColorScheme? _lastDark;
-  Brightness? _lastBrightness;
 
   // Read once here: ref can no longer be used in dispose().
   MelodizeAudioHandler? _handler;
@@ -143,26 +142,6 @@ class _MelodizeAppState extends ConsumerState<MelodizeApp>
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
 
-    // Derive effective brightness for status-bar icon color
-    final brightness = themeMode == ThemeMode.system
-        ? PlatformDispatcher.instance.platformBrightness
-        : themeMode == ThemeMode.light
-            ? Brightness.light
-            : Brightness.dark;
-
-    if (isMobilePlatform && brightness != _lastBrightness) {
-      _lastBrightness = brightness;
-      SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
-        statusBarIconBrightness:
-            brightness == Brightness.dark ? Brightness.light : Brightness.dark,
-        statusBarBrightness:
-            brightness == Brightness.dark ? Brightness.dark : Brightness.light,
-        systemNavigationBarColor: Colors.transparent,
-        systemNavigationBarDividerColor: Colors.transparent,
-      ));
-    }
-
     return DynamicColorBuilder(
       builder: (lightScheme, darkScheme) {
         if (lightScheme != _lastLight || _cachedLight == null) {
@@ -180,6 +159,13 @@ class _MelodizeAppState extends ConsumerState<MelodizeApp>
           darkTheme: _cachedDark!,
           themeMode: themeMode,
           scrollBehavior: const _AppScrollBehavior(),
+          // System bar icons follow the *resolved* theme, so they also flip
+          // when "System default" follows a device theme change. AppBars
+          // and the Now Playing screen set their own region on top of this.
+          builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+            value: AppTheme.systemOverlayFor(Theme.of(context).brightness),
+            child: child!,
+          ),
           home: const _StartupRouter(),
         );
       },

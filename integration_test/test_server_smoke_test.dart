@@ -63,13 +63,14 @@ void main() {
     await pumpUntil(tester, find.byType(MainShell));
     expect(find.byType(SetupScreen), findsNothing);
 
-    // Library lists songs with odd names.
+    // Library lists songs. Sorted by name, "Electro" is on the first screen
+    // ("Rock" is further down and never gets built).
     await tester.tap(find.byTooltip('Library'));
     await pumpUntil(tester, find.text('Songs'));
-    await pumpUntil(tester, find.textContaining('Rock'));
+    await pumpUntil(tester, find.textContaining('Electro'));
 
     // Play a song and skip through a few quickly.
-    await tester.tap(find.textContaining('Rock').first);
+    await tester.tap(find.textContaining('Electro').first);
     await tester.pump(const Duration(seconds: 2));
     await pumpUntil(tester, find.byIcon(Icons.skip_next_rounded));
     for (var i = 0; i < 3; i++) {

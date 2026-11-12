@@ -138,6 +138,10 @@ class AlbumDetailScreen extends ConsumerWidget {
               ),
             ),
           ),
+          SliverPadding(
+            padding: EdgeInsets.only(
+                bottom: MediaQuery.paddingOf(context).bottom + 16),
+          ),
         ],
       ),
     );
