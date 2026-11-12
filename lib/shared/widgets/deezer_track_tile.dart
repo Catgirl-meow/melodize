@@ -71,7 +71,11 @@ class _DeezerTrackTileState extends ConsumerState<DeezerTrackTile>
       size: 48,
     );
 
+    // Same geometry and type scale as SongTile, so Deezer rows line up with
+    // library rows in mixed search results. Compact icon buttons leave the
+    // title more room before it is cut off.
     return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
       leading: leading,
       title: Text(widget.track.title,
           maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -81,7 +85,7 @@ class _DeezerTrackTileState extends ConsumerState<DeezerTrackTile>
             : widget.track.artist,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(color: scheme.onSurfaceVariant),
+        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
       ),
       onTap: _playPreview,
       trailing: Row(
@@ -90,12 +94,14 @@ class _DeezerTrackTileState extends ConsumerState<DeezerTrackTile>
           IconButton(
             icon: const Icon(Icons.play_circle_outline_rounded),
             tooltip: 'Play 30s preview',
+            visualDensity: VisualDensity.compact,
             onPressed: _playPreview,
           ),
           if (canSave)
             IconButton(
               icon: const Icon(Icons.download_for_offline_rounded),
               tooltip: 'Save to Navidrome server',
+              visualDensity: VisualDensity.compact,
               onPressed: _saveToServer,
             ),
         ],

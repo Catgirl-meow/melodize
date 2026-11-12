@@ -43,15 +43,16 @@ void showStyledSnack(BuildContext context, String message,
         content: Text(
           message,
           style: TextStyle(
-            color: isError ? scheme.onErrorContainer : Colors.white,
+            color: isError ? scheme.onErrorContainer : scheme.onInverseSurface,
           ),
         ),
         behavior: SnackBarBehavior.floating,
         margin: EdgeInsets.fromLTRB(
             _kSnackSideInset, 0, _kSnackSideInset, bottom),
-        // Dark surface regardless of wallpaper-derived dynamic colors.
+        // Inverse surface (M3 snackbar role): dark on the light theme, light
+        // on the dark one. A fixed #2C2C2E all but vanished on dark pages.
         backgroundColor:
-            isError ? scheme.errorContainer : const Color(0xFF2C2C2E),
+            isError ? scheme.errorContainer : scheme.inverseSurface,
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
