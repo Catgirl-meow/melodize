@@ -13,6 +13,7 @@ import '../../shared/utils/download_polling_mixin.dart';
 import '../../shared/utils/snack.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/offline_banner.dart';
+import '../../shared/widgets/error_notice.dart';
 import '../../shared/widgets/playlist_cover.dart';
 import '../library/album_detail_screen.dart';
 import '../library/playlist_detail_screen.dart';
@@ -99,6 +100,7 @@ class HomeScreen extends ConsumerWidget {
     ref.invalidate(newestAlbumsProvider);
     ref.invalidate(randomSongsProvider);
     ref.invalidate(recentlyPlayedProvider);
+    ref.invalidate(playlistsProvider);
     ref.invalidate(allSongsProvider);
     ref.invalidate(serverReachableProvider);
     ref.invalidate(recommendationsProvider);
@@ -118,6 +120,22 @@ class HomeScreen extends ConsumerWidget {
         ServerReachability.reachable;
     final arlStatus = ref.watch(deezerArlStatusProvider).valueOrNull;
     final scheme = Theme.of(context).colorScheme;
+    // When the device is offline or the server unreachable, the banners at
+    // the top already explain why sections are missing; otherwise a failed
+    // section shows its own error instead of silently disappearing.
+    final serverDown =
+        !isOnline || reachability != ServerReachability.reachable;
+    Widget sectionError(String title, Object error, ProviderOrFamily p) =>
+        SliverToBoxAdapter(
+          child: serverDown
+              ? const SizedBox.shrink()
+              : ErrorNotice(
+                  title: title,
+                  error: error,
+                  compact: true,
+                  onRetry: () => ref.invalidate(p),
+                ),
+        );
 
     return SafeArea(
       top: false,
@@ -174,8 +192,8 @@ class HomeScreen extends ConsumerWidget {
               skipLoadingOnRefresh: true,
               loading: () =>
                   const SliverToBoxAdapter(child: SizedBox.shrink()),
-              error: (_, __) =>
-                  const SliverToBoxAdapter(child: SizedBox.shrink()),
+              error: (e, _) =>
+                  sectionError("Couldn't load playlists", e, playlistsProvider),
               data: (playlists) {
                 if (playlists.isEmpty) {
                   return const SliverToBoxAdapter(child: SizedBox.shrink());
@@ -213,8 +231,8 @@ class HomeScreen extends ConsumerWidget {
               skipError: true,
               loading: () =>
                   const SliverToBoxAdapter(child: SizedBox.shrink()),
-              error: (_, __) =>
-                  const SliverToBoxAdapter(child: SizedBox.shrink()),
+              error: (e, _) => sectionError(
+                  "Couldn't load recently added albums", e, newestAlbumsProvider),
               data: (albums) {
                 if (albums.isEmpty) {
                   return const SliverToBoxAdapter(child: SizedBox.shrink());
@@ -263,20 +281,11 @@ class HomeScreen extends ConsumerWidget {
                   child: Center(child: CircularProgressIndicator()),
                 ),
               ),
-              error: (_, __) => SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Center(
-                    child: Column(
-                      children: [
-                        Icon(Icons.wifi_off_rounded,
-                            size: 48, color: scheme.onSurfaceVariant),
-                        const SizedBox(height: 8),
-                        Text('Could not connect to server',
-                            style: Theme.of(context).textTheme.bodySmall),
-                      ],
-                    ),
-                  ),
+              error: (e, _) => SliverToBoxAdapter(
+                child: ErrorNotice(
+                  title: "Couldn't load songs from the server",
+                  error: e,
+                  onRetry: () => ref.invalidate(randomSongsProvider),
                 ),
               ),
               data: (songs) => SliverToBoxAdapter(
@@ -307,8 +316,16 @@ class HomeScreen extends ConsumerWidget {
               skipLoadingOnRefresh: true,
               loading: () =>
                   const SliverToBoxAdapter(child: SizedBox.shrink()),
-              error: (_, __) =>
-                  const SliverToBoxAdapter(child: SizedBox.shrink()),
+              // Local history: a failure here is a database problem, never
+              // a connectivity one, so it is always shown.
+              error: (e, _) => SliverToBoxAdapter(
+                child: ErrorNotice(
+                  title: "Couldn't read play history",
+                  error: e,
+                  compact: true,
+                  onRetry: () => ref.invalidate(recentlyPlayedProvider),
+                ),
+              ),
               data: (songs) {
                 if (songs.isEmpty) {
                   return const SliverToBoxAdapter(child: SizedBox.shrink());

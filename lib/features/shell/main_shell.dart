@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/errors/app_errors.dart';
 import '../../core/providers.dart';
 import '../../shared/utils/snack.dart';
 import '../home/home_screen.dart';
@@ -334,6 +335,19 @@ class _MainShellState extends ConsumerState<MainShell>
                 isError: true, bottomOffset: snackBottom + kSnackGap);
           }
         }
+      });
+    });
+
+    // Failures from outside any screen (playback, settings persistence,
+    // startup) are shown here instead of being swallowed. Long enough to
+    // read, since the message carries the actual cause.
+    ref.listen<AsyncValue<AppError>>(appErrorStreamProvider, (_, next) {
+      final error = next.valueOrNull;
+      if (error == null) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _safeSnack(error.message,
+            isError: true, bottomOffset: snackBottom + kSnackGap);
       });
     });
 

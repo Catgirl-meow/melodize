@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/playlist.dart';
 import '../../core/audio/shuffle_mode.dart';
 import '../../core/providers.dart';
+import '../../shared/widgets/error_notice.dart';
 import '../../shared/widgets/detail_actions.dart';
 import '../../shared/widgets/detail_header.dart';
 import '../../shared/widgets/playlist_cover.dart';
@@ -56,8 +57,14 @@ class PlaylistDetailScreen extends ConsumerWidget {
             loading: () => const SliverFillRemaining(
               child: Center(child: CircularProgressIndicator()),
             ),
-            error: (e, _) =>
-                SliverFillRemaining(child: Center(child: Text('$e'))),
+            error: (e, _) => SliverToBoxAdapter(
+              child: ErrorNotice(
+                title: "Couldn't load this playlist",
+                error: e,
+                onRetry: () =>
+                    ref.invalidate(playlistSongsProvider(playlist.id)),
+              ),
+            ),
             data: (songs) => SliverList(
               delegate: SliverChildBuilderDelegate(
                 (_, i) => SongTile(

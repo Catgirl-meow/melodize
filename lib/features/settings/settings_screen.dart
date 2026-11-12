@@ -5,6 +5,7 @@ import '../../core/api/companion_http.dart' show serverUrlError;
 import '../../core/api/navidrome_native_client.dart';
 import '../../core/api/subsonic_client.dart' show SubsonicConfig;
 import '../../core/models/app_preferences.dart';
+import '../../core/errors/app_errors.dart';
 import '../../core/providers.dart';
 import '../../core/utils/platform_dirs.dart';
 import '../../shared/theme/app_theme.dart';
@@ -372,7 +373,14 @@ class _DeezerSettingsScreen extends ConsumerWidget {
                 );
               },
               loading: () => const SizedBox.shrink(),
-              error: (_, __) => const SizedBox.shrink(),
+              error: (e, _) => _DeezerInfoCard(
+                icon: Icons.error_outline_rounded,
+                iconColor: scheme.error,
+                backgroundColor: scheme.errorContainer,
+                textColor: scheme.onErrorContainer,
+                title: "Couldn't check your Deezer subscription",
+                subtitle: describeError(e),
+              ),
             ),
           ),
         const _SectionHeader('Account'),
@@ -1209,7 +1217,11 @@ Future<void> _changeServer(BuildContext context, WidgetRef ref) async {
     if (await downloadsDir.exists()) {
       await downloadsDir.delete(recursive: true);
     }
-  } catch (_) {}
+  } catch (e) {
+    // Signing out still proceeds, but the user must know the downloaded
+    // files are still taking up space.
+    AppErrors.report("Couldn't delete downloaded files", e);
+  }
 
   await ref.read(databaseProvider).clearAllData();
 

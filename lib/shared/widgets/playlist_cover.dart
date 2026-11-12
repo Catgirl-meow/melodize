@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/errors/app_errors.dart';
 import '../../core/models/playlist.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
@@ -49,7 +50,21 @@ class PlaylistCover extends ConsumerWidget {
       // Plain tile while the songs load, so a playlist doesn't flash the
       // placeholder icon before its covers arrive.
       loading: () => _tile(scheme, icon: false),
-      error: (_, __) => _tile(scheme, icon: placeholderIcon),
+      // A failed load is shown as one, not as the "no artwork" placeholder.
+      // The playlist page shows the full error with a retry.
+      error: (e, _) => Tooltip(
+        message: describeError(e),
+        child: Container(
+          width: size,
+          height: size,
+          color: scheme.errorContainer,
+          child: Icon(
+            Icons.broken_image_outlined,
+            size: size.isFinite ? size * 0.4 : 72,
+            color: scheme.onErrorContainer,
+          ),
+        ),
+      ),
       data: (songs) {
         final covers = playlistCoverIds(songs);
         if (covers.isEmpty) return _tile(scheme, icon: placeholderIcon);

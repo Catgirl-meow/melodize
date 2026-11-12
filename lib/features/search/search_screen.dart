@@ -8,6 +8,7 @@ import '../../core/models/artist.dart';
 import '../../core/models/recommended_track.dart';
 import '../../core/models/search_results.dart';
 import '../../core/models/song.dart';
+import '../../core/errors/app_errors.dart';
 import '../../core/providers.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/section_header.dart';
@@ -252,7 +253,8 @@ class _SearchResults extends StatelessWidget {
   Widget build(BuildContext context) {
     return resultsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (_, __) => _SearchError(query: query, onRetry: onRetry),
+      error: (e, _) =>
+          _SearchError(query: query, error: e, onRetry: onRetry),
       data: (results) {
         final showLibrary = filter != _SearchFilter.deezer;
         final showDeezer =
@@ -290,7 +292,8 @@ class _SearchResults extends StatelessWidget {
           return _NoResults(query: query);
         }
         if (!hasVisibleResult && showDeezer && deezerError) {
-          return _SearchError(query: query, onRetry: onRetry);
+          return _SearchError(
+              query: query, error: deezerAsync.error, onRetry: onRetry);
         }
 
         final sections = <Widget>[];
@@ -329,9 +332,10 @@ class _SearchResults extends StatelessWidget {
           ));
         }
         if (showDeezer && deezerError && hasVisibleLibrary) {
-          sections.add(const _PartialError(
-            message:
-                'Deezer results are unavailable. Library results are still shown.',
+          sections.add(_PartialError(
+            message: 'Deezer results are unavailable '
+                '(${describeError(deezerAsync.error!)}). '
+                'Library results are still shown.',
           ));
         }
 
@@ -529,8 +533,10 @@ class _PartialError extends StatelessWidget {
 
 class _SearchError extends StatelessWidget {
   final String query;
+  final Object? error;
   final VoidCallback onRetry;
-  const _SearchError({required this.query, required this.onRetry});
+  const _SearchError(
+      {required this.query, required this.error, required this.onRetry});
 
   @override
   Widget build(BuildContext context) {
@@ -548,7 +554,7 @@ class _SearchError extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
-            Text('Check your connection and try again.',
+            Text(error == null ? 'Unknown error' : describeError(error!),
                 textAlign: TextAlign.center,
                 style: TextStyle(color: scheme.onSurfaceVariant)),
             const SizedBox(height: 12),
