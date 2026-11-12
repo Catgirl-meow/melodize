@@ -1353,6 +1353,7 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
   Future<void> _run(_DownloadTask task, CancelToken token) async {
     final song = task.song;
     _put(song, 'downloading', quality: task.quality);
+    String? coverWritten;
     try {
       final client = _ref.read(subsonicClientProvider);
       if (client == null) {
@@ -1380,6 +1381,7 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
                 'Cover art failed: ${friendlyDownloadError(e)}');
           }
           evictLocalCoverCache(coverPath);
+          coverWritten = coverPath;
         }
       }
 
@@ -1440,6 +1442,14 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
         // An app shutdown keeps the row ('downloading') so it resumes.
         if (!_disposing) {
           await _db.deleteDownloads([song.id]).catchError((_) {});
+          // A user cancel drops the cover this attempt fetched, unless the
+          // song was already downloaded (a forced re-download keeps its art).
+          final cover = coverWritten;
+          if (cover != null &&
+              !_ref.read(downloadedSongIdsProvider).contains(song.id)) {
+            await File(cover).delete().catchError((_) => File(cover));
+            evictLocalCoverCache(cover);
+          }
         }
         if (!mounted) return;
         state = Map<String, DownloadItem>.from(state)..remove(song.id);
