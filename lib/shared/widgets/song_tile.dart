@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
+import '../utils/snack.dart';
 import '../utils/song_actions.dart';
 import 'cover_art_image.dart';
 
@@ -35,12 +36,19 @@ class SongTile extends ConsumerWidget {
           downloadedSongIdsProvider.select((ids) => ids.contains(song.id)),
         ) ||
         song.isDownloaded;
+    // select: rebuilds only when this song enters/leaves the download queue.
+    final downloadStatus = ref.watch(
+      downloadNotifierProvider.select((m) => m[song.id]?.status),
+    );
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
       leading: leading ??
           CoverArtImage(
-              coverArtId: song.coverArt, localPath: song.localPath, size: 48),
+              coverArtId: song.coverArt,
+              localPath: song.localPath,
+              songId: song.id,
+              size: 48),
       title: Text(
         song.title,
         maxLines: 1,
@@ -70,6 +78,21 @@ class SongTile extends ConsumerWidget {
                   padding: const EdgeInsets.only(left: 4),
                   child: Icon(Icons.download_done_rounded,
                       size: 16, color: scheme.primary),
+                )
+              else if (downloadStatus == 'queued' ||
+                  downloadStatus == 'downloading')
+                const Padding(
+                  padding: EdgeInsets.only(left: 6),
+                  child: SizedBox.square(
+                    dimension: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              else if (downloadStatus == 'error')
+                Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Icon(Icons.error_outline_rounded,
+                      size: 16, color: scheme.error),
                 ),
               _MoreButton(song: song, isDownloaded: isDownloaded),
             ],
@@ -191,14 +214,33 @@ class _MoreButton extends ConsumerWidget {
               ListTile(
                 leading: const Icon(Icons.delete_outline_rounded),
                 title: const Text('Remove download'),
-                onTap: () {
-                  ref
-                      .read(downloadNotifierProvider.notifier)
-                      .removeDownload(song.id);
+                onTap: () async {
                   Navigator.pop(context);
+                  try {
+                    await ref
+                        .read(downloadNotifierProvider.notifier)
+                        .removeDownload(song.id);
+                  } catch (e) {
+                    if (context.mounted) {
+                      showStyledSnack(
+                          context, 'Could not delete the downloaded file: $e',
+                          isError: true);
+                    }
+                  }
                 },
               ),
-            if (!isDownloaded)
+            if (!isDownloaded &&
+                (ref.read(downloadNotifierProvider.notifier)
+                    .isDownloading(song.id)))
+              ListTile(
+                leading: const Icon(Icons.cancel_outlined),
+                title: const Text('Cancel download'),
+                onTap: () {
+                  ref.read(downloadNotifierProvider.notifier).cancel(song.id);
+                  Navigator.pop(context);
+                },
+              )
+            else if (!isDownloaded)
               ListTile(
                 leading: const Icon(Icons.download_rounded),
                 title: const Text('Download'),

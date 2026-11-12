@@ -3,7 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
-import '../../features/downloads/downloads_screen.dart';
+import '../../features/settings/downloaded_songs_screen.dart';
 
 /// Inline offline banner. Animates in/out as the device goes offline/online.
 /// Shows "Offline. Browse downloads" with "downloads" tappable as a link.
@@ -92,7 +92,7 @@ class _BannerRow extends StatelessWidget {
                 ..onTap = () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => const DownloadsScreen(),
+                        builder: (_) => const DownloadedSongsScreen(),
                       ),
                     ),
             ),

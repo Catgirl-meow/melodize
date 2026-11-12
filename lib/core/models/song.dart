@@ -80,7 +80,14 @@ class Song {
     );
   }
 
-  Song copyWith({bool? isDownloaded, String? localPath}) {
+  Song copyWith({bool? isDownloaded, String? localPath}) =>
+      _copy(isDownloaded ?? this.isDownloaded, localPath ?? this.localPath);
+
+  /// This song with its download state cleared ([copyWith] cannot null
+  /// [localPath]).
+  Song withoutDownload() => _copy(false, null);
+
+  Song _copy(bool isDownloaded, String? localPath) {
     return Song(
       id: id,
       title: title,
@@ -97,8 +104,8 @@ class Song {
       contentType: contentType,
       bitRate: bitRate,
       size: size,
-      isDownloaded: isDownloaded ?? this.isDownloaded,
-      localPath: localPath ?? this.localPath,
+      isDownloaded: isDownloaded,
+      localPath: localPath,
       created: created,
       externalStreamUrl: externalStreamUrl,
       externalCoverUrl: externalCoverUrl,

@@ -3,8 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/album.dart';
 import '../../core/models/artist.dart';
 import '../../core/providers.dart';
-import '../../core/utils/platform_dirs.dart';
-import '../../shared/utils/snack.dart';
 import '../../shared/utils/song_actions.dart';
 import '../../shared/widgets/album_grid_tile.dart';
 import '../../shared/widgets/detail_actions.dart';
@@ -33,16 +31,7 @@ class ArtistDetailScreen extends ConsumerWidget {
     Future<void> downloadAll() async {
       final songs = allSongsAsync.valueOrNull;
       if (songs == null || songs.isEmpty) return;
-      final dir = await getAppStorageDirectory();
-      final prefs = ref.read(preferencesNotifierProvider);
-      ref.read(downloadNotifierProvider.notifier).downloadBatch(
-        songs,
-        '${dir.path}/melodize_downloads',
-        prefs.downloadQuality,
-      );
-      if (context.mounted) {
-        showStyledSnack(context, 'Downloading ${songs.length} songs…');
-      }
+      await downloadSongs(context, ref, songs);
     }
 
     void playAll({bool shuffle = false}) {

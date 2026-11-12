@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/downloads/download_files.dart';
 import '../../core/api/navidrome_client.dart';
 import '../../core/providers.dart';
 import 'snack.dart';
@@ -148,4 +150,33 @@ String _friendlyDownloadError(String err) {
     return 'Download failed — no file was produced. The track may be unavailable.';
   }
   return 'Download failed: $err';
+}
+
+/// The real reason a companion download job could not be started, for the
+/// "Download could not start" snackbar. Uses the companion's own error text
+/// when it sent one, so the user sees what actually broke.
+String companionStartError(Object error) {
+  if (error is DioException && error.type == DioExceptionType.badResponse) {
+    final code = error.response?.statusCode;
+    final data = error.response?.data;
+    String? detail;
+    if (data is Map) {
+      final d = data['error'] ?? data['detail'] ?? data['message'];
+      if (d != null) detail = d.toString();
+    } else if (data is String && data.trim().isNotEmpty) {
+      detail = data.trim();
+    }
+    if (code == 401 || code == 403) {
+      return 'companion rejected the API key ($code) — check Settings';
+    }
+    if (detail != null) return _friendlyDownloadError(detail);
+    return 'companion returned HTTP $code';
+  }
+  if (error is DioException &&
+      (error.type == DioExceptionType.connectionError ||
+          error.type == DioExceptionType.connectionTimeout)) {
+    final host = error.requestOptions.uri.host;
+    return 'can’t reach the companion${host.isEmpty ? '' : ' at $host'}';
+  }
+  return friendlyDownloadError(error);
 }
