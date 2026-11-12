@@ -17,6 +17,7 @@ import '../../shared/utils/download_polling_mixin.dart';
 import '../../shared/utils/snack.dart';
 import '../../shared/utils/song_actions.dart';
 import '../../shared/widgets/cover_art_image.dart';
+import '../../shared/widgets/marquee_text.dart';
 import 'queue_screen.dart';
 
 // ---------------------------------------------------------------------------
@@ -506,12 +507,12 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(song.title,
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                                 fontSize: 14, fontWeight: FontWeight.w600)),
                         Text(song.artist,
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                                 fontSize: 12, color: scheme.onSurfaceVariant)),
@@ -787,19 +788,19 @@ class _SongInfoRow extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
+              // Long names scroll instead of being cut off; the key restarts
+              // the scroll from the beginning when the song changes.
+              MarqueeText(
                 song.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                key: ValueKey('title-${song.id}'),
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       color: scheme.onSurface,
                       fontWeight: FontWeight.bold,
                     ),
               ),
-              Text(
+              MarqueeText(
                 song.artist,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                key: ValueKey('artist-${song.id}'),
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: scheme.onSurface.withValues(alpha: 0.7),
                     ),

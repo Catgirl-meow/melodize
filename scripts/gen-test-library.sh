@@ -21,4 +21,13 @@ mk "Edge Cases" "long 9min" mp3 630 540 "Long Artist" "" "Longs" "Nine Minutes" 
 mk "Edge Cases" "hires 96k" flac 640 20 "HiRes Artist" "" "HiRes" "96kHz 24bit" 1 "Classical" 2023 -ar 96000 -sample_fmt s32
 mkdir -p "Weird ;&'#% Dir"; cp "Edge Cases/short 1s.mp3" "Weird ;&'#% Dir/file with #hash ?.mp3"
 mkdir -p "Delete Me"; for t in 1 2 3; do mk "Delete Me" "0$t - Deletable $t" mp3 $((800+t*10)) 15 "Deletable Artist" "Deletable Artist" "Disposable Album" "Deletable $t" $t "Test" 2024 -c:a libmp3lame; done
+# Long, realistic names (multi-word, so the UI can wrap) for the text-truncation checks.
+LA="The Extraordinarily Long-Named Philharmonic Orchestra of Unnecessarily Verbose Titles"
+LB="A Collection of Songs Whose Titles Are Far Too Long for Any Reasonable Screen (Deluxe 25th Anniversary Edition)"
+i=0; for ti in "This Is a Very Long Song Title That Should Wrap Gracefully (feat. Somebody With a Long Name) [Remastered 2024]" \
+  "Another Painfully Long Track Name, Part II: The Return of the Unbreakable Headline" \
+  "Short One" \
+  "Длинное русское название песни, которое не помещается в одну строку экрана"; do
+  i=$((i+1)); mk "Long Names/$LB" "0$i - Long $i" mp3 $((900+i*10)) 25 "$LA" "$LA" "$LB" "$ti" $i "Symphonic Progressive Post-Rock" 2024 -c:a libmp3lame
+done
 find . -type f | wc -l
