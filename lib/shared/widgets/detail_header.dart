@@ -12,6 +12,9 @@ class DetailHeader extends StatelessWidget {
   final String title;
   final String? subtitle;
   final String? coverArtId;
+
+  /// Replaces the [coverArtId] image, e.g. a playlist's [PlaylistCover].
+  final Widget? cover;
   final double expandedHeight;
   final bool stretch;
 
@@ -20,6 +23,7 @@ class DetailHeader extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.coverArtId,
+    this.cover,
     this.expandedHeight = 280,
     this.stretch = false,
   });
@@ -42,13 +46,14 @@ class DetailHeader extends StatelessWidget {
             background: Stack(
               fit: StackFit.expand,
               children: [
-                CoverArtImage(
-                  coverArtId: coverArtId,
-                  size: double.infinity,
-                  borderRadius: 0,
-                  fit: BoxFit.cover,
-                  placeholderIcon: false,
-                ),
+                cover ??
+                    CoverArtImage(
+                      coverArtId: coverArtId,
+                      size: double.infinity,
+                      borderRadius: 0,
+                      fit: BoxFit.cover,
+                      placeholderIcon: false,
+                    ),
                 DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
