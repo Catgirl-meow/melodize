@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/album.dart';
 import '../../core/audio/shuffle_mode.dart';
 import '../../core/providers.dart';
+import '../../shared/widgets/error_notice.dart';
 import '../../shared/utils/song_actions.dart';
 import '../../shared/widgets/detail_actions.dart';
 import '../../shared/widgets/detail_header.dart';
@@ -53,8 +54,12 @@ class AlbumDetailScreen extends ConsumerWidget {
             loading: () => const SliverFillRemaining(
               child: Center(child: CircularProgressIndicator()),
             ),
-            error: (e, _) => SliverFillRemaining(
-              child: Center(child: Text('$e')),
+            error: (e, _) => SliverToBoxAdapter(
+              child: ErrorNotice(
+                title: "Couldn't load this album's songs",
+                error: e,
+                onRetry: () => ref.invalidate(albumSongsProvider(album.id)),
+              ),
             ),
             data: (songs) => SliverList(
               delegate: SliverChildBuilderDelegate(

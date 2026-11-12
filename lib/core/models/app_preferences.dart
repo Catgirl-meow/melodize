@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import '../errors/app_errors.dart';
 import '../utils/platform_dirs.dart';
 import '../utils/platform_info.dart';
 
@@ -129,30 +130,51 @@ class AppPreferences {
     return File('${dir.path}/melodize_prefs.json');
   }
 
+  // A missing file is a first run and yields defaults. An unreadable one is
+  // not: it is moved aside (so the next save can't overwrite the only copy
+  // of the user's settings and API keys) and the failure is reported, so
+  // the user knows why their settings reset.
   static Future<AppPreferences> load() async {
+    final File f;
     try {
-      final f = await _file;
-      if (await f.exists()) {
-        return AppPreferences.fromJson(
-            jsonDecode(await f.readAsString()) as Map<String, dynamic>);
+      f = await _file;
+      if (!await f.exists()) return const AppPreferences();
+    } catch (e) {
+      AppErrors.report("Couldn't open the settings file", e);
+      return const AppPreferences();
+    }
+    try {
+      return AppPreferences.fromJson(
+          jsonDecode(await f.readAsString()) as Map<String, dynamic>);
+    } catch (e) {
+      final backup =
+          '${f.path}.unreadable-${DateTime.now().millisecondsSinceEpoch}';
+      var where = '';
+      try {
+        await f.rename(backup);
+        where = ' The old file was kept as $backup.';
+      } catch (_) {
+        // Reported below either way; the original file is still in place.
       }
-    } catch (_) {}
-    return const AppPreferences();
+      AppErrors.report(
+          'Settings could not be read and were reset to defaults.$where', e);
+      return const AppPreferences();
+    }
   }
 
   // Written to a temp file and renamed so a crash mid-write can't leave a
   // truncated file (load() would then silently reset every setting, including
   // the companion API key). The file holds secrets, so on desktop it is made
   // readable by the owner only.
+  //
+  // Throws on failure; PreferencesNotifier reports it to the user.
   Future<void> save() async {
-    try {
-      final f = await _file;
-      final tmp = File('${f.path}.tmp');
-      await tmp.writeAsString(jsonEncode(toJson()), flush: true);
-      if (isDesktopPlatform && !Platform.isWindows) {
-        await Process.run('chmod', ['600', tmp.path]);
-      }
-      await tmp.rename(f.path);
-    } catch (_) {}
+    final f = await _file;
+    final tmp = File('${f.path}.tmp');
+    await tmp.writeAsString(jsonEncode(toJson()), flush: true);
+    if (isDesktopPlatform && !Platform.isWindows) {
+      await Process.run('chmod', ['600', tmp.path]);
+    }
+    await tmp.rename(f.path);
   }
 }
