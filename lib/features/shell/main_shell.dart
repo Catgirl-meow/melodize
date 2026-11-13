@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/errors/app_errors.dart';
 import '../../core/providers.dart';
 import '../../shared/utils/snack.dart';
 import '../home/home_screen.dart';
@@ -17,6 +18,11 @@ const _kDockBottom = 12.0;
 const _kDockHorizontal = 16.0;
 const _kDockRadius = 24.0;
 const _kPillRadius = 16.0;
+const _kPillPadding = EdgeInsets.symmetric(horizontal: 8, vertical: 5);
+const _kPillSlideDuration = Duration(milliseconds: 320);
+// Starts moving on the tap and glides into place, without the near-jump of
+// emphasized decelerate over a short distance.
+const _kPillCurve = Curves.easeOutCubic;
 // Mini player footprint, including its own bottom gap
 // (floating: 56 card + 8 gap, classic: 72 bar).
 const _kFloatingMiniPlayerHeight = 64.0;
@@ -31,7 +37,11 @@ class MainShell extends ConsumerStatefulWidget {
 
 class _MainShellState extends ConsumerState<MainShell>
     with SingleTickerProviderStateMixin {
-  int _selectedIndex = 0;
+  // The selected tab lives in a notifier, not in this State: a setState here
+  // rebuilt the whole shell on every tab switch, including the (hidden) Now
+  // Playing screen and mini player, which made the first frames of the
+  // switch drop. Only the dock / NavigationBar and the IndexedStack listen.
+  final _tab = ValueNotifier<int>(0);
   late final AnimationController _playerAnim;
   // The shell's own messenger. MainShell's context sits *above* it, so
   // ScaffoldMessenger.of(context) would find the app's root messenger, which
@@ -66,6 +76,7 @@ class _MainShellState extends ConsumerState<MainShell>
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleNavKey);
     _playerAnim.dispose();
+    _tab.dispose();
     super.dispose();
   }
 
@@ -77,16 +88,16 @@ class _MainShellState extends ConsumerState<MainShell>
 
     switch (event.logicalKey) {
       case LogicalKeyboardKey.digit1:
-        setState(() => _selectedIndex = 0);
+        _tab.value = 0;
         return true;
       case LogicalKeyboardKey.digit2:
-        setState(() => _selectedIndex = 1);
+        _tab.value = 1;
         return true;
       case LogicalKeyboardKey.digit3:
-        setState(() => _selectedIndex = 2);
+        _tab.value = 2;
         return true;
       case LogicalKeyboardKey.digit4:
-        setState(() => _selectedIndex = 3);
+        _tab.value = 3;
         return true;
       case LogicalKeyboardKey.escape:
         if (_playerAnim.value > 0.01) {
@@ -148,20 +159,56 @@ class _MainShellState extends ConsumerState<MainShell>
         clipBehavior: Clip.antiAlias,
         child: SizedBox(
           height: _kDockHeight,
-          child: Row(
-            children: [
-              for (int i = 0; i < _labels.length; i++)
-                Expanded(
-                  child: _FloatingNavItem(
-                    icon: _icons[i],
-                    selectedIcon: _selectedIcons[i],
-                    label: _labels[i],
-                    selected: i == _selectedIndex,
-                    scheme: scheme,
-                    onTap: () => setState(() => _selectedIndex = i),
+          // One selection pill that slides to the selected tab. Each tab used
+          // to fade its own pill in and out, so on every switch two
+          // half-faded pills were on screen at once, and the fade went from
+          // Colors.transparent (transparent *black*), which darkened both
+          // pills mid-animation: the trail. The slow easeInOut start made the
+          // tap feel late on top of that.
+          child: ValueListenableBuilder<int>(
+            valueListenable: _tab,
+            builder: (_, selectedIndex, __) => Stack(
+              children: [
+                Positioned.fill(
+                  child: AnimatedAlign(
+                    alignment: Alignment(
+                      -1 + 2 * selectedIndex / (_labels.length - 1),
+                      0,
+                    ),
+                    duration: _kPillSlideDuration,
+                    curve: _kPillCurve,
+                    child: FractionallySizedBox(
+                      widthFactor: 1 / _labels.length,
+                      heightFactor: 1,
+                      child: Padding(
+                        padding: _kPillPadding,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: scheme.secondaryContainer,
+                            borderRadius: BorderRadius.circular(_kPillRadius),
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-            ],
+                Row(
+                  children: [
+                    for (int i = 0; i < _labels.length; i++)
+                      Expanded(
+                        child: _FloatingNavItem(
+                          icon: _icons[i],
+                          selectedIcon: _selectedIcons[i],
+                          label: _labels[i],
+                          selected: i == selectedIndex,
+                          scheme: scheme,
+                          onTap: () => _tab.value = i,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -243,6 +290,19 @@ class _MainShellState extends ConsumerState<MainShell>
       });
     });
 
+    // Failures from outside any screen (playback, settings persistence,
+    // startup) are shown here instead of being swallowed. Long enough to
+    // read, since the message carries the actual cause.
+    ref.listen<AsyncValue<AppError>>(appErrorStreamProvider, (_, next) {
+      final error = next.valueOrNull;
+      if (error == null) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _safeSnack(error.message,
+            isError: true, bottomOffset: snackBottom + kSnackGap);
+      });
+    });
+
     // Navigation chrome uses stable Material 3 tonal colors, independent of
     // the currently playing album art.
     final navBg = scheme.surfaceContainer;
@@ -259,35 +319,38 @@ class _MainShellState extends ConsumerState<MainShell>
       backgroundColor: scheme.surface,
       bottomNavigationBar: floatingNav
           ? null
-          : NavigationBar(
-              selectedIndex: _selectedIndex,
-              onDestinationSelected: (i) => setState(() => _selectedIndex = i),
-              backgroundColor: navBg,
-              indicatorColor: scheme.secondaryContainer,
-              elevation: 0,
-              height: 62,
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(Icons.home_outlined),
-                  selectedIcon: Icon(Icons.home_rounded),
-                  label: 'Home',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.library_music_outlined),
-                  selectedIcon: Icon(Icons.library_music_rounded),
-                  label: 'Library',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.search_rounded),
-                  selectedIcon: Icon(Icons.search_rounded),
-                  label: 'Search',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.settings_outlined),
-                  selectedIcon: Icon(Icons.settings_rounded),
-                  label: 'Settings',
-                ),
-              ],
+          : ValueListenableBuilder<int>(
+              valueListenable: _tab,
+              builder: (_, selectedIndex, __) => NavigationBar(
+                selectedIndex: selectedIndex,
+                onDestinationSelected: (i) => _tab.value = i,
+                backgroundColor: navBg,
+                indicatorColor: scheme.secondaryContainer,
+                elevation: 0,
+                height: 62,
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.home_outlined),
+                    selectedIcon: Icon(Icons.home_rounded),
+                    label: 'Home',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.library_music_outlined),
+                    selectedIcon: Icon(Icons.library_music_rounded),
+                    label: 'Library',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.search_rounded),
+                    selectedIcon: Icon(Icons.search_rounded),
+                    label: 'Search',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.settings_outlined),
+                    selectedIcon: Icon(Icons.settings_rounded),
+                    label: 'Settings',
+                  ),
+                ],
+              ),
             ),
       body: Stack(
         children: [
@@ -310,14 +373,17 @@ class _MainShellState extends ConsumerState<MainShell>
             ),
             child: SnackInset(
               bottom: snackBottom,
-              child: IndexedStack(
-                index: _selectedIndex,
-                children: const [
-                  RepaintBoundary(child: HomeScreen()),
-                  RepaintBoundary(child: LibraryScreen()),
-                  RepaintBoundary(child: SearchScreen()),
-                  RepaintBoundary(child: SettingsScreen()),
-                ],
+              child: ValueListenableBuilder<int>(
+                valueListenable: _tab,
+                builder: (_, selectedIndex, child) => IndexedStack(
+                  index: selectedIndex,
+                  children: const [
+                    RepaintBoundary(child: HomeScreen()),
+                    RepaintBoundary(child: LibraryScreen()),
+                    RepaintBoundary(child: SearchScreen()),
+                    RepaintBoundary(child: SettingsScreen()),
+                  ],
+                ),
               ),
             ),
           ),
@@ -450,13 +516,10 @@ class _FloatingNavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Selection pill colour: accent when available, else system secondary container.
-    final pillColor = selected ? scheme.secondaryContainer : Colors.transparent;
-
-    // Icon/label colour on the pill: white on accent (always dark dock bg),
-    // else the standard onSecondaryContainer token.
-    // Guard against light accents — white text on a light pill is invisible.
-    final activeColor = scheme.onSecondaryContainer;
+    // The pill itself is drawn once by the dock and slides between tabs;
+    // the item only swaps its icon and tints it.
+    final color =
+        selected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant;
 
     // Icon-only dock: the tooltip names the tab on hover (desktop) and long
     // press (Android).
@@ -473,19 +536,16 @@ class _FloatingNavItem extends StatelessWidget {
           overlayColor: const WidgetStatePropertyAll(Colors.transparent),
           borderRadius: BorderRadius.circular(_kPillRadius),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeInOut,
-              decoration: BoxDecoration(
-                color: pillColor,
-                borderRadius: BorderRadius.circular(_kPillRadius),
-              ),
-              child: Center(
-                child: Icon(
+            padding: _kPillPadding,
+            child: Center(
+              child: TweenAnimationBuilder<Color?>(
+                tween: ColorTween(end: color),
+                duration: _kPillSlideDuration,
+                curve: _kPillCurve,
+                builder: (_, c, __) => Icon(
                   selected ? selectedIcon : icon,
                   size: 26,
-                  color: selected ? activeColor : scheme.onSurfaceVariant,
+                  color: c,
                 ),
               ),
             ),

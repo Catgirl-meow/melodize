@@ -6,6 +6,7 @@ import '../../core/providers.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/album_grid_tile.dart';
 import '../../shared/widgets/cover_art_image.dart';
+import '../../shared/widgets/error_notice.dart';
 import '../../shared/widgets/offline_banner.dart';
 import '../../shared/widgets/song_tile.dart';
 import 'album_detail_screen.dart';
@@ -243,15 +244,35 @@ class _SongsTabState extends ConsumerState<_SongsTab>
       // is preserved.
       skipLoadingOnReload: true,
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('$e')),
+      error: (e, _) => ErrorNotice(
+        title: "Couldn't load songs",
+        error: e,
+        onRetry: () => ref.invalidate(allSongsProvider),
+      ),
       data: (rawSongs) {
+        // The list is the local cache; when the server refresh failed, say
+        // so rather than presenting a stale (or empty) list as the library.
+        // The offline banner already covers the device-offline case.
+        final syncError = ref.watch(librarySyncErrorProvider);
+        final online = ref.watch(isOnlineProvider).valueOrNull ?? true;
+        final staleNotice = syncError != null && online
+            ? ErrorNotice(
+                title: rawSongs.isEmpty
+                    ? "Couldn't load your library from the server"
+                    : "Couldn't refresh from the server — showing saved songs",
+                error: syncError,
+                compact: rawSongs.isNotEmpty,
+                onRetry: () => ref.invalidate(allSongsProvider),
+              )
+            : null;
         if (rawSongs.isEmpty) {
-          return const Center(child: Text('No songs found'));
+          return staleNotice ?? const Center(child: Text('No songs found'));
         }
         final downloadedIds = ref.watch(downloadedSongIdsProvider);
         final songs = _applySongSort(rawSongs, sort, ascending, downloadedIds);
         return CustomScrollView(
           slivers: [
+            if (staleNotice != null) SliverToBoxAdapter(child: staleNotice),
             SliverToBoxAdapter(
               child: _SortBar(
                 count: '${songs.length} songs',
@@ -377,7 +398,11 @@ class _AlbumsTabState extends ConsumerState<_AlbumsTab>
 
     return albumsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('$e')),
+      error: (e, _) => ErrorNotice(
+        title: "Couldn't load albums",
+        error: e,
+        onRetry: () => ref.invalidate(allAlbumsProvider),
+      ),
       data: (rawAlbums) {
         if (rawAlbums.isEmpty) return const Center(child: Text('No albums'));
         final albums = _applyAlbumSort(rawAlbums, sort, ascending);
@@ -550,7 +575,11 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab>
     final artistsAsync = ref.watch(allArtistsProvider);
     return artistsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('$e')),
+      error: (e, _) => ErrorNotice(
+        title: "Couldn't load artists",
+        error: e,
+        onRetry: () => ref.invalidate(allArtistsProvider),
+      ),
       data: (rawArtists) {
         if (rawArtists.isEmpty) return const Center(child: Text('No artists'));
         final artists = rawArtists.toList();

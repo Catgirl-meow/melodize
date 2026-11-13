@@ -11,6 +11,7 @@ import '../models/song.dart';
 import '../api/subsonic_client.dart';
 import '../api/companion_audio_api.dart';
 import '../downloads/download_files.dart';
+import '../errors/app_errors.dart';
 import '../linux/linux_mpris.dart';
 import '../utils/platform_info.dart';
 import 'fixed_shuffle_order.dart';
@@ -365,6 +366,13 @@ class MelodizeAudioHandler extends BaseAudioHandler {
           _isTransitionFading) {
         unawaited(_cancelCrossfade(resumeRendered: true));
       }
+    }, onError: (Object e, StackTrace _) {
+      // A track that can't be loaded or decoded (server down, 404, bad
+      // file). Without this the player just stops and nothing says why.
+      final title = currentSong?.title;
+      _reportPlayerError(
+          title == null ? "Couldn't play this track" : "Couldn't play \"$title\"",
+          e);
     });
 
     // Clear media item on idle/completed so OriginOS doesn't show stale info.
@@ -698,7 +706,11 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   // Queue management
 
   Future<void> loadQueue(List<Song> songs, {int startIndex = 0}) async {
-    if (_config == null || songs.isEmpty || _loading) return;
+    if (songs.isEmpty || _loading) return;
+    if (_config == null) {
+      AppErrors.report("Can't play: no music server is configured");
+      return;
+    }
     _recalcGeneration++;
     _recalcDebounceTimer?.cancel();
     _loading = true;
@@ -751,12 +763,13 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       // relatively expensive for large queues and must not delay Android's
       // first audio frame. The debounced recalculation runs on a later event
       // turn after the player has been handed back to the platform.
-      player.play().catchError((e) => debugPrint('loadQueue play: $e'));
+      player.play().catchError(
+          (Object e) => _reportPlayerError("Couldn't start playback", e));
       _loading = false;
       _recalculateShuffleOrder();
     } catch (e) {
-      debugPrint('loadQueue error: $e');
       _loading = false;
+      _reportPlayerError("Couldn't start playback", e);
     }
   }
 
@@ -987,7 +1000,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
                 '(source length ${_playlistSource.length})');
           }
         } catch (e) {
-          debugPrint('skipToNext seek error: $e');
+          _reportPlayerError("Couldn't skip to the next track", e);
         }
         _emitQueueSnapshot(immediate: true);
         Future.microtask(() => _seekingVirtual = false);
@@ -1005,7 +1018,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
           _queue.setCurrentIndex(targetIndex);
         }
       } catch (e) {
-        debugPrint('skipToNext wrap-around seek error: $e');
+        _reportPlayerError("Couldn't skip to the next track", e);
       }
       _emitQueueSnapshot(immediate: true);
       Future.microtask(() => _seekingVirtual = false);
@@ -1037,7 +1050,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
           _queue.setCurrentIndex(targetIndex);
         }
       } catch (e) {
-        debugPrint('skipToPrevious seek error: $e');
+        _reportPlayerError("Couldn't go to the previous track", e);
       }
       _emitQueueSnapshot(immediate: true);
       Future.microtask(() => _seekingVirtual = false);
@@ -2644,5 +2657,27 @@ Future<void> connectAudioService(MelodizeAudioHandler handler) async {
     );
   } catch (e, st) {
     debugPrint('AudioService.init failed: $e\n$st');
+    AppErrors.report(
+        'Media controls are unavailable (lock screen, notification, '
+        'media keys); playback still works in the app',
+        e);
   }
+}
+
+/// Reports a player failure to the user. just_audio's [PlayerException]
+/// carries the useful part (the platform's message) separately from a
+/// generic toString, so it is unwrapped. [PlayerInterruptedException] is not
+/// a failure: it means a newer load or stop replaced this one.
+void _reportPlayerError(String what, Object e) {
+  if (e is PlayerInterruptedException) {
+    debugPrint('$what: interrupted (${e.message})');
+    return;
+  }
+  if (e is PlayerException) {
+    final msg = e.message;
+    AppErrors.report(
+        what, Exception(msg == null || msg.isEmpty ? 'player error ${e.code}' : msg));
+    return;
+  }
+  AppErrors.report(what, e);
 }

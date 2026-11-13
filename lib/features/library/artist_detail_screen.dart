@@ -9,6 +9,7 @@ import '../../shared/widgets/detail_actions.dart';
 import '../../shared/widgets/detail_header.dart';
 import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/deezer_track_tile.dart';
+import '../../shared/widgets/error_notice.dart';
 import '../../shared/widgets/song_tile.dart';
 import 'album_detail_screen.dart';
 
@@ -71,6 +72,16 @@ class ArtistDetailScreen extends ConsumerWidget {
           // ── Top Songs ────────────────────────────────────────────────────
           if (topSongsAsync.isLoading)
             const SliverToBoxAdapter(child: SizedBox.shrink()),
+          if (topSongsAsync.hasError && !topSongsAsync.isLoading)
+            SliverToBoxAdapter(
+              child: ErrorNotice(
+                title: "Couldn't load top songs",
+                error: topSongsAsync.error,
+                compact: true,
+                onRetry: () =>
+                    ref.invalidate(artistTopSongsProvider(artist.name)),
+              ),
+            ),
           if (!topSongsAsync.isLoading && topSongs.isNotEmpty) ...[
             const SliverToBoxAdapter(child: SectionHeader('Top songs')),
             SliverList(
@@ -91,6 +102,16 @@ class ArtistDetailScreen extends ConsumerWidget {
           // Hidden while loading or when all tracks are already in the library.
           if (deezerAsync.isLoading)
             const SliverToBoxAdapter(child: SizedBox.shrink()),
+          if (deezerAsync.hasError && !deezerAsync.isLoading)
+            SliverToBoxAdapter(
+              child: ErrorNotice(
+                title: "Couldn't load this artist from Deezer",
+                error: deezerAsync.error,
+                compact: true,
+                onRetry: () =>
+                    ref.invalidate(deezerArtistTracksProvider(artist.name)),
+              ),
+            ),
           if (!deezerAsync.isLoading && deezerTracks.isNotEmpty)
             SliverMainAxisGroup(
               slivers: [
@@ -125,7 +146,11 @@ class ArtistDetailScreen extends ConsumerWidget {
               ),
             ),
             error: (e, _) => SliverToBoxAdapter(
-              child: Center(child: Text('$e')),
+              child: ErrorNotice(
+                title: "Couldn't load albums",
+                error: e,
+                onRetry: () => ref.invalidate(artistAlbumsProvider(artist.id)),
+              ),
             ),
             data: (albums) => albums.isEmpty
                 ? const SliverToBoxAdapter(
@@ -167,7 +192,15 @@ class ArtistDetailScreen extends ConsumerWidget {
             loading: () => const SliverToBoxAdapter(
               child: SectionHeader('Songs', count: '…'),
             ),
-            error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
+            error: (e, _) => SliverToBoxAdapter(
+              child: ErrorNotice(
+                title: "Couldn't load this artist's songs",
+                error: e,
+                compact: true,
+                onRetry: () =>
+                    ref.invalidate(artistAllSongsProvider(artist.id)),
+              ),
+            ),
             data: (songs) => songs.isEmpty
                 ? const SliverToBoxAdapter(child: SizedBox.shrink())
                 : SliverMainAxisGroup(

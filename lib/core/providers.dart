@@ -37,9 +37,11 @@ import 'db/database.dart';
 import 'downloads/download_files.dart';
 import 'utils/platform_dirs.dart';
 import 'downloads/local_cover_cache.dart';
+import 'errors/app_errors.dart';
 import 'models/app_preferences.dart';
 import 'models/song.dart';
 import 'models/album.dart';
+import 'models/playlist.dart';
 import 'models/artist.dart';
 import 'models/lyrics_result.dart';
 import 'models/search_results.dart';
@@ -368,13 +370,8 @@ final deezerAccountStatusProvider =
     preferencesNotifierProvider.select((p) => p.deezerArl),
   );
   if (arl.isEmpty) return const DeezerAccountStatus();
-  try {
-    return await DeezerClient.checkAccountStatus(arl);
-  } on DioException {
-    return const DeezerAccountStatus();
-  } catch (_) {
-    return const DeezerAccountStatus();
-  }
+  // Errors propagate: "couldn't check" must not look like "no subscription".
+  return DeezerClient.checkAccountStatus(arl);
 });
 
 Future<void> deleteSongFromServer(WidgetRef ref, Song song) async {
@@ -546,11 +543,21 @@ final allSongsProvider = StreamProvider<List<Song>>((ref) async* {
         }
       }
       yield filter(updatedSongs);
-    } catch (_) {
-      // Offline or server error — keep showing cached data, no rethrow
+      ref.read(librarySyncErrorProvider.notifier).state = null;
+    } catch (e) {
+      // Keep showing the cached library (that is what makes the app usable
+      // offline), but record the failure so the Library screen says the
+      // list is stale instead of passing it off as current.
+      debugPrint('Library refresh failed: $e');
+      ref.read(librarySyncErrorProvider.notifier).state = e;
     }
   }
 });
+
+/// Why the last library refresh from the server failed, or null when it
+/// succeeded. The library still shows the cached songs; the UI uses this to
+/// say that they may be out of date.
+final librarySyncErrorProvider = StateProvider<Object?>((_) => null);
 
 final randomSongsProvider = FutureProvider<List<Song>>((ref) async {
   final client = ref.watch(subsonicClientProvider);
@@ -680,9 +687,23 @@ final recommendationsProvider =
     return deezer.artistRadio(id, limit: 20);
   }
 
-  var results = await Future.wait(seeds.map(fanOut));
+  // One seed failing (e.g. an artist Deezer can't resolve) must not sink
+  // the whole list, so per-seed errors are collected rather than thrown.
+  // They decide the error message when nothing at all came back.
+  Object? lastError;
+  Future<List<RecommendedTrack>> guardedFanOut(RecommendationSeed seed) async {
+    try {
+      return await fanOut(seed);
+    } catch (e) {
+      lastError = e;
+      return const [];
+    }
+  }
+
+  var results = await Future.wait(seeds.map(guardedFanOut));
   if (results.every((r) => r.isEmpty)) {
-    results = await Future.wait(seeds.map(fanOut));
+    lastError = null;
+    results = await Future.wait(seeds.map(guardedFanOut));
   }
   final failedSeeds = results.where((r) => r.isEmpty).length;
 
@@ -693,8 +714,13 @@ final recommendationsProvider =
     }
   }
   if (byDeezerId.isEmpty) {
+    final error = lastError;
+    if (error != null) {
+      return RecsError('Could not reach Deezer: ${describeError(error)}');
+    }
     return const RecsError(
-        'Could not reach Deezer — check your internet connection and retry.');
+        'Deezer found no artist radio for your recent artists — play a few '
+        'other artists and retry.');
   }
 
   final discoveries = byDeezerId.values
@@ -825,57 +851,41 @@ final newestAlbumsProvider = FutureProvider<List<Album>>((ref) async {
 final allAlbumsProvider = FutureProvider<List<Album>>((ref) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return [];
-  try {
-    final all = <Album>[];
-    int offset = 0;
-    const size = 500;
-    while (true) {
-      final page = await client.getAlbums(size: size, offset: offset);
-      all.addAll(page);
-      if (page.length < size) break;
-      offset += size;
-    }
-    return all;
-  } catch (_) {
-    return [];
+  final all = <Album>[];
+  int offset = 0;
+  const size = 500;
+  while (true) {
+    final page = await client.getAlbums(size: size, offset: offset);
+    all.addAll(page);
+    if (page.length < size) break;
+    offset += size;
   }
+  return all;
 });
 
 final albumSongsProvider =
     FutureProvider.family<List<Song>, String>((ref, albumId) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return [];
-  try {
-    return await client.getAlbumSongs(albumId);
-  } catch (_) {
-    return [];
-  }
+  return await client.getAlbumSongs(albumId);
 });
 
 // --- Artists ---
 final allArtistsProvider = FutureProvider<List<Artist>>((ref) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return [];
-  try {
-    return await client.getArtists();
-  } catch (_) {
-    return [];
-  }
+  return await client.getArtists();
 });
 
 final artistAlbumsProvider =
     FutureProvider.family<List<Album>, String>((ref, artistId) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return [];
-  try {
-    return await client.getArtistAlbums(artistId);
-  } catch (_) {
-    return [];
-  }
+  return await client.getArtistAlbums(artistId);
 });
 
-// Top songs for an artist by name (Navidrome/Last.fm backed — may return [] on servers
-// without Last.fm integration; callers should handle empty gracefully).
+// Top songs for an artist by name (Navidrome/Last.fm backed). Servers without
+// Last.fm answer with an empty list; a failed request is an error.
 final artistTopSongsProvider =
     FutureProvider.family<List<Song>, String>((ref, artistName) async {
   final client = ref.watch(subsonicClientProvider);
@@ -888,39 +898,33 @@ final artistAllSongsProvider =
     FutureProvider.family<List<Song>, String>((ref, artistId) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return [];
-  try {
-    final albums = await client.getArtistAlbums(artistId);
-    final perAlbum =
-        await Future.wait(albums.map((a) => client.getAlbumSongs(a.id)));
-    return perAlbum.expand((songs) => songs).toList();
-  } catch (_) {
-    return [];
-  }
+  final albums = await client.getArtistAlbums(artistId);
+  final perAlbum =
+      await Future.wait(albums.map((a) => client.getAlbumSongs(a.id)));
+  return perAlbum.expand((songs) => songs).toList();
 });
 
 // --- Playlists ---
-final playlistsProvider = FutureProvider((ref) async {
+final playlistsProvider = FutureProvider<List<Playlist>>((ref) async {
   final client = ref.watch(subsonicClientProvider);
-  if (client == null) return [];
-  try {
-    return await client.getPlaylists();
-  } catch (_) {
-    return [];
-  }
+  if (client == null) return const [];
+  return await client.getPlaylists();
 });
 
 final playlistSongsProvider =
     FutureProvider.family<List<Song>, String>((ref, playlistId) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return [];
-  try {
-    return await client.getPlaylistSongs(playlistId);
-  } catch (_) {
-    return [];
-  }
+  return await client.getPlaylistSongs(playlistId);
 });
 
 // --- Search ---
+/// App-wide failures for the main shell to show. autoDispose on purpose:
+/// while no shell is listening (setup screen), [AppErrors] buffers instead
+/// of delivering into a provider nobody watches.
+final appErrorStreamProvider =
+    StreamProvider.autoDispose<AppError>((_) => AppErrors.stream);
+
 final searchQueryProvider = StateProvider<String>((_) => '');
 
 final searchResultsProvider = FutureProvider<SearchResults>((ref) async {
@@ -966,7 +970,8 @@ Future<void> _persistLyrics(
 
 /// Fetches lyrics with an LRCLIB → lyrics.ovh fallback. Shared by
 /// [lyricsProvider] and the download pre-cache so both paths follow the same
-/// cache/fallback rules. Never throws.
+/// cache/fallback rules. Throws when every provider failed for transport or
+/// server reasons (as opposed to "no lyrics for this track").
 ///
 /// Rules:
 ///  * an existing usable cache row wins immediately (offline availability);
@@ -1004,6 +1009,10 @@ Future<LyricsResult?> _fetchLyrics({
   LyricsResult? result;
   var lrcDefinitiveMiss = false;
   var fromOvh = false;
+  // Transport/server failures (not "no lyrics for this track"). When
+  // nothing was found and a provider failed, the answer is unknown, and the
+  // UI must say so rather than claim there are no lyrics.
+  Object? providerError;
   try {
     final lrc = await LrcLibClient().getLyrics(
       artist: q.artist,
@@ -1021,8 +1030,9 @@ Future<LyricsResult?> _fetchLyrics({
   } on DioException catch (e) {
     if (e.type == DioExceptionType.cancel) return null;
     // Other transport failures fall through to the plain-lyrics fallback.
-  } catch (_) {
-    // Fall through to the plain-lyrics fallback.
+    providerError = e;
+  } catch (e) {
+    providerError = e;
   }
 
   if (result == null) {
@@ -1038,12 +1048,16 @@ Future<LyricsResult?> _fetchLyrics({
       }
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) return null;
-    } catch (_) {
-      // Both providers failed; the UI shows the empty state.
+      providerError = e;
+    } catch (e) {
+      providerError = e;
     }
   }
 
-  if (result == null || !result.isUsable) return null;
+  if (result == null || !result.isUsable) {
+    if (providerError != null) throw providerError;
+    return null;
+  }
 
   if (fromOvh && !lrcDefinitiveMiss) return result; // display only
   await _persistLyrics(db, q.songId, result);
@@ -1083,7 +1097,12 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
 
   Future<void> update(AppPreferences prefs) async {
     state = prefs;
-    await prefs.save();
+    try {
+      await prefs.save();
+    } catch (e) {
+      // The change is live for this session but will be lost on restart.
+      AppErrors.report("Couldn't save settings", e);
+    }
   }
 }
 
@@ -1416,19 +1435,24 @@ class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
       }
 
       // 4. Lyrics for offline viewing. Optional: most tracks have none, and
-      //    the helper never throws. Bounded so a slow provider can't hold a
-      //    download slot; a cancel here just stops the lookup.
-      await _fetchLyrics(
-        db: _db,
-        q: (
-          songId: song.id,
-          artist: song.artist,
-          title: song.title,
-          album: song.album,
-          duration: song.duration ?? 0,
-        ),
-        cancelToken: token,
-      ).timeout(const Duration(seconds: 20), onTimeout: () => null);
+      //    Bounded so a slow provider can't hold a download slot; a cancel
+      //    here just stops the lookup. A provider outage must not undo a
+      //    finished download: the lyrics screen reports it when opened.
+      try {
+        await _fetchLyrics(
+          db: _db,
+          q: (
+            songId: song.id,
+            artist: song.artist,
+            title: song.title,
+            album: song.album,
+            duration: song.duration ?? 0,
+          ),
+          cancelToken: token,
+        ).timeout(const Duration(seconds: 20), onTimeout: () => null);
+      } catch (e) {
+        debugPrint('[Downloads] lyrics for ${song.id} not cached: $e');
+      }
 
       _sessionDone++;
       if (!mounted) return;

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/subsonic_client.dart' show ServerReachability;
 import '../../core/models/album.dart';
+import '../../core/models/playlist.dart';
 import '../../core/models/recommendations_state.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
@@ -12,6 +13,8 @@ import '../../shared/utils/download_polling_mixin.dart';
 import '../../shared/utils/snack.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/offline_banner.dart';
+import '../../shared/widgets/error_notice.dart';
+import '../../shared/widgets/playlist_cover.dart';
 import '../library/album_detail_screen.dart';
 import '../library/playlist_detail_screen.dart';
 import '../settings/settings_screen.dart';
@@ -63,8 +66,13 @@ String _reachabilityMessage(ServerReachability r) {
   }
 }
 
-const _kCardExtent = 138.0;
 const _kCardImageSize = 130.0;
+// CarouselView applies its `padding` to every item, not just the first, so
+// each item carries the 16 px left inset as well as the card's own 4 px on
+// either side. The extent has to include both, or the cover comes out
+// 114 px wide and 130 px tall and the art is cropped at the sides.
+const _kCarouselItemInset = 16.0;
+const _kCardExtent = _kCardImageSize + 8 + _kCarouselItemInset;
 
 // Card titles get two lines (long album and playlist names were cut to a
 // few characters on one line) and a one-line subtitle. The carousel's
@@ -92,6 +100,7 @@ class HomeScreen extends ConsumerWidget {
     ref.invalidate(newestAlbumsProvider);
     ref.invalidate(randomSongsProvider);
     ref.invalidate(recentlyPlayedProvider);
+    ref.invalidate(playlistsProvider);
     ref.invalidate(allSongsProvider);
     ref.invalidate(serverReachableProvider);
     ref.invalidate(recommendationsProvider);
@@ -111,6 +120,22 @@ class HomeScreen extends ConsumerWidget {
         ServerReachability.reachable;
     final arlStatus = ref.watch(deezerArlStatusProvider).valueOrNull;
     final scheme = Theme.of(context).colorScheme;
+    // When the device is offline or the server unreachable, the banners at
+    // the top already explain why sections are missing; otherwise a failed
+    // section shows its own error instead of silently disappearing.
+    final serverDown =
+        !isOnline || reachability != ServerReachability.reachable;
+    Widget sectionError(String title, Object error, ProviderOrFamily p) =>
+        SliverToBoxAdapter(
+          child: serverDown
+              ? const SizedBox.shrink()
+              : ErrorNotice(
+                  title: title,
+                  error: error,
+                  compact: true,
+                  onRetry: () => ref.invalidate(p),
+                ),
+        );
 
     return SafeArea(
       top: false,
@@ -167,8 +192,8 @@ class HomeScreen extends ConsumerWidget {
               skipLoadingOnRefresh: true,
               loading: () =>
                   const SliverToBoxAdapter(child: SizedBox.shrink()),
-              error: (_, __) =>
-                  const SliverToBoxAdapter(child: SizedBox.shrink()),
+              error: (e, _) =>
+                  sectionError("Couldn't load playlists", e, playlistsProvider),
               data: (playlists) {
                 if (playlists.isEmpty) {
                   return const SliverToBoxAdapter(child: SizedBox.shrink());
@@ -206,8 +231,8 @@ class HomeScreen extends ConsumerWidget {
               skipError: true,
               loading: () =>
                   const SliverToBoxAdapter(child: SizedBox.shrink()),
-              error: (_, __) =>
-                  const SliverToBoxAdapter(child: SizedBox.shrink()),
+              error: (e, _) => sectionError(
+                  "Couldn't load recently added albums", e, newestAlbumsProvider),
               data: (albums) {
                 if (albums.isEmpty) {
                   return const SliverToBoxAdapter(child: SizedBox.shrink());
@@ -256,20 +281,11 @@ class HomeScreen extends ConsumerWidget {
                   child: Center(child: CircularProgressIndicator()),
                 ),
               ),
-              error: (_, __) => SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Center(
-                    child: Column(
-                      children: [
-                        Icon(Icons.wifi_off_rounded,
-                            size: 48, color: scheme.onSurfaceVariant),
-                        const SizedBox(height: 8),
-                        Text('Could not connect to server',
-                            style: Theme.of(context).textTheme.bodySmall),
-                      ],
-                    ),
-                  ),
+              error: (e, _) => SliverToBoxAdapter(
+                child: ErrorNotice(
+                  title: "Couldn't load songs from the server",
+                  error: e,
+                  onRetry: () => ref.invalidate(randomSongsProvider),
                 ),
               ),
               data: (songs) => SliverToBoxAdapter(
@@ -300,8 +316,16 @@ class HomeScreen extends ConsumerWidget {
               skipLoadingOnRefresh: true,
               loading: () =>
                   const SliverToBoxAdapter(child: SizedBox.shrink()),
-              error: (_, __) =>
-                  const SliverToBoxAdapter(child: SizedBox.shrink()),
+              // Local history: a failure here is a database problem, never
+              // a connectivity one, so it is always shown.
+              error: (e, _) => SliverToBoxAdapter(
+                child: ErrorNotice(
+                  title: "Couldn't read play history",
+                  error: e,
+                  compact: true,
+                  onRetry: () => ref.invalidate(recentlyPlayedProvider),
+                ),
+              ),
               data: (songs) {
                 if (songs.isEmpty) {
                   return const SliverToBoxAdapter(child: SizedBox.shrink());
@@ -355,7 +379,7 @@ class HomeScreen extends ConsumerWidget {
         itemExtent: _kCardExtent,
         itemSnapping: true,
         shrinkExtent: 40,
-        padding: const EdgeInsets.only(left: 16),
+        padding: const EdgeInsets.only(left: _kCarouselItemInset),
         backgroundColor: Colors.transparent,
         elevation: 0,
         shape: const RoundedRectangleBorder(),
@@ -632,7 +656,7 @@ class _AlbumCard extends ConsumerWidget {
 // ---------------------------------------------------------------------------
 
 class _PlaylistCard extends ConsumerWidget {
-  final dynamic playlist;
+  final Playlist playlist;
   const _PlaylistCard({required this.playlist});
 
   @override
@@ -649,22 +673,25 @@ class _PlaylistCard extends ConsumerWidget {
           SizedBox(
             height: _kCardImageSize,
             width: double.infinity,
-            child: CoverArtImage(
-              coverArtId: playlist.coverArt as String?,
+            child: PlaylistCover(
+              playlist: playlist,
               size: _kCardImageSize,
               borderRadius: 12,
             ),
           ),
           const SizedBox(height: 8),
-          Text(playlist.name as String,
+          Text(playlist.name,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                   fontSize: _kCardTitleSize,
                   height: _kCardLineHeight,
                   fontWeight: FontWeight.w600)),
-          Text('${playlist.songCount} songs',
+          Text(
+              '${playlist.songCount} '
+              '${playlist.songCount == 1 ? 'song' : 'songs'}',
               maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                   fontSize: _kCardSubtitleSize,
                   height: _kCardLineHeight,
