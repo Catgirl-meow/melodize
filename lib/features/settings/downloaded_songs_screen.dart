@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
+import '../../shared/utils/snack.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/song_tile.dart';
 
@@ -31,7 +33,13 @@ IconData _downloadedSongSortIcon(_DownloadedSongSort sort) => switch (sort) {
     };
 
 bool _isLossless(Song song) {
-  final suffix = song.suffix?.toLowerCase();
+  // The saved file's extension is the truth: a lossy download of a FLAC
+  // original is an .mp3/.opus on disk while song.suffix still says flac.
+  final local = song.localPath;
+  final suffix = (local != null && p.extension(local).length > 1
+          ? p.extension(local).substring(1)
+          : song.suffix)
+      ?.toLowerCase();
   return switch (suffix) {
     'flac' || 'alac' || 'wav' || 'aiff' || 'ape' || 'dsf' || 'dff' => true,
     _ => false,
@@ -228,15 +236,20 @@ class _DownloadedSongsScreenState extends ConsumerState<DownloadedSongsScreen> {
 
     // Keep the structure stable while active downloads update. Individual
     // tiles still watch their own progress to avoid repainting the whole list.
+    // Includes failed downloads: they stay listed with their reason and a
+    // Retry action instead of silently disappearing.
     final activeIdsString = ref.watch(downloadNotifierProvider.select((m) {
       final ids = m.entries
-          .where((e) =>
-              e.value.status == 'downloading' || e.value.status == 'queued')
+          .where((e) => e.value.isActive || e.value.status == 'error')
           .map((e) => e.key)
           .toList()
         ..sort();
       return ids.join(',');
     }));
+    // Rebuild when a download fails (it stays in the id list above).
+    ref.watch(downloadNotifierProvider.select(
+        (m) => m.values.where((d) => d.status == 'error').length));
+    final storageBytes = ref.watch(downloadsStorageBytesProvider).valueOrNull;
     final activeIds =
         activeIdsString.isEmpty ? const <String>[] : activeIdsString.split(',');
     final activeDownloads = ref.read(downloadNotifierProvider);
@@ -280,6 +293,10 @@ class _DownloadedSongsScreenState extends ConsumerState<DownloadedSongsScreen> {
 
             final hasMatches =
                 filteredSongs.isNotEmpty || filteredActiveIds.isNotEmpty;
+            final filteredFailed = filteredActiveIds
+                .where((id) => activeDownloads[id]?.status == 'error')
+                .length;
+            final filteredRunning = filteredActiveIds.length - filteredFailed;
 
             return CustomScrollView(
               slivers: [
@@ -326,10 +343,16 @@ class _DownloadedSongsScreenState extends ConsumerState<DownloadedSongsScreen> {
                   if (filteredActiveIds.isNotEmpty) ...[
                     SliverToBoxAdapter(
                       child: _SectionHeader(
-                        icon: Icons.downloading_rounded,
-                        title: 'Downloading now',
+                        icon: filteredFailed > 0
+                            ? Icons.error_outline_rounded
+                            : Icons.downloading_rounded,
+                        title: 'Downloading',
                         subtitle:
-                            '${filteredActiveIds.length} active download${filteredActiveIds.length == 1 ? '' : 's'}',
+                            _activeSummary(filteredRunning, filteredFailed),
+                        trailing: _QueueMenu(
+                          hasActive: filteredRunning > 0,
+                          hasFailed: filteredFailed > 0,
+                        ),
                       ),
                     ),
                     SliverList(
@@ -345,9 +368,12 @@ class _DownloadedSongsScreenState extends ConsumerState<DownloadedSongsScreen> {
                       child: _SectionHeader(
                         icon: Icons.download_done_rounded,
                         title: 'Saved on this device',
-                        subtitle: _hasActiveFilters
-                            ? '${filteredSongs.length} of ${songs.length} songs'
-                            : '${songs.length} song${songs.length == 1 ? '' : 's'}',
+                        subtitle: [
+                          _hasActiveFilters
+                              ? '${filteredSongs.length} of ${songs.length} songs'
+                              : '${songs.length} song${songs.length == 1 ? '' : 's'}',
+                          if (storageBytes != null) _formatBytes(storageBytes),
+                        ].join(' · '),
                         trailing: TextButton.icon(
                           icon: const Icon(Icons.delete_outline_rounded,
                               size: 18),
@@ -424,8 +450,8 @@ class _DownloadedSongsScreenState extends ConsumerState<DownloadedSongsScreen> {
         ],
       ),
     );
-    if (confirmed != true) return;
-    await _removeDownload(ref, song);
+    if (confirmed != true || !context.mounted) return;
+    await _remove(context, ref, [song.id]);
   }
 
   Future<void> _confirmDeleteAll(
@@ -451,14 +477,20 @@ class _DownloadedSongsScreenState extends ConsumerState<DownloadedSongsScreen> {
         ],
       ),
     );
-    if (confirmed != true) return;
-    for (final song in songs) {
-      await _removeDownload(ref, song);
-    }
+    if (confirmed != true || !context.mounted) return;
+    await _remove(context, ref, [for (final s in songs) s.id]);
   }
 
-  Future<void> _removeDownload(WidgetRef ref, Song song) async {
-    await ref.read(downloadNotifierProvider.notifier).removeDownload(song.id);
+  Future<void> _remove(
+      BuildContext context, WidgetRef ref, List<String> ids) async {
+    try {
+      await ref.read(downloadNotifierProvider.notifier).removeDownloads(ids);
+    } catch (e) {
+      if (context.mounted) {
+        showStyledSnack(context, 'Could not delete a downloaded file: $e',
+            isError: true);
+      }
+    }
   }
 }
 
@@ -670,6 +702,66 @@ class _NoMatchesState extends StatelessWidget {
   }
 }
 
+String _activeSummary(int active, int failed) => [
+      if (active > 0) '$active in progress',
+      if (failed > 0) '$failed failed',
+    ].join(' · ');
+
+String _formatBytes(int bytes) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  var value = bytes.toDouble();
+  var unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return '${value.toStringAsFixed(value >= 100 || unit == 0 ? 0 : 1)} '
+      '${units[unit]}';
+}
+
+/// Queue-wide actions: retry or clear failures, cancel everything.
+class _QueueMenu extends ConsumerWidget {
+  final bool hasActive;
+  final bool hasFailed;
+  const _QueueMenu({required this.hasActive, required this.hasFailed});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final notifier = ref.read(downloadNotifierProvider.notifier);
+    return PopupMenuButton<VoidCallback>(
+      icon: const Icon(Icons.more_vert_rounded),
+      tooltip: 'Download queue actions',
+      onSelected: (action) => action(),
+      itemBuilder: (_) => [
+        if (hasFailed)
+          PopupMenuItem(
+            value: notifier.retryAllFailed,
+            child: const ListTile(
+              leading: Icon(Icons.refresh_rounded),
+              title: Text('Retry failed'),
+            ),
+          ),
+        if (hasFailed)
+          PopupMenuItem(
+            value: notifier.clearFailed,
+            child: const ListTile(
+              leading: Icon(Icons.clear_all_rounded),
+              title: Text('Clear failed'),
+            ),
+          ),
+        if (hasActive)
+          PopupMenuItem(
+            value: notifier.cancelAll,
+            child: const ListTile(
+              leading: Icon(Icons.cancel_outlined),
+              title: Text('Cancel all'),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 // Each tile only rebuilds when its own download's progress/status changes,
 // not when other songs' downloads update.
 class _ActiveDownloadTile extends ConsumerWidget {
@@ -682,11 +774,27 @@ class _ActiveDownloadTile extends ConsumerWidget {
       downloadNotifierProvider.select((m) => m[songId]),
     );
     if (item == null) return const SizedBox.shrink();
+    final online = ref.watch(isOnlineProvider).valueOrNull ?? true;
+    final notifier = ref.read(downloadNotifierProvider.notifier);
 
     final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final failed = item.status == 'error';
+    final queued = item.status == 'queued';
+
+    final String statusText;
+    if (failed) {
+      statusText = item.errorMessage ?? 'Download failed';
+    } else if (queued) {
+      statusText = online ? 'Queued' : 'Waiting for connection';
+    } else {
+      statusText = '${(item.progress * 100).round()}%';
+    }
+
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-      leading: CoverArtImage(coverArtId: item.song.coverArt, size: 48),
+      contentPadding: const EdgeInsets.only(left: 16, right: 4),
+      leading: CoverArtImage(
+          coverArtId: item.song.coverArt, songId: item.song.id, size: 48),
       title: Text(
         item.song.title,
         maxLines: 1,
@@ -695,38 +803,50 @@ class _ActiveDownloadTile extends ConsumerWidget {
       ),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            item.song.artist,
-            maxLines: 1,
+            failed ? statusText : '${item.song.artist} · $statusText',
+            maxLines: failed ? 2 : 1,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+            style: textTheme.bodySmall?.copyWith(
+                color: failed ? scheme.error : scheme.onSurfaceVariant),
           ),
-          const SizedBox(height: 4),
-          if (item.status != 'queued')
+          if (!failed) ...[
+            const SizedBox(height: 4),
             ClipRRect(
               borderRadius: BorderRadius.circular(2),
               child: LinearProgressIndicator(
-                value: item.progress,
+                // Indeterminate while queued or before the size is known.
+                value: queued || item.progress == 0 ? null : item.progress,
                 minHeight: 3,
                 backgroundColor: scheme.surfaceContainerHighest,
-                valueColor: AlwaysStoppedAnimation(scheme.primary),
               ),
             ),
+          ],
         ],
       ),
-      trailing: Text(
-        item.status == 'queued'
-            ? 'Queued'
-            : '${(item.progress * 100).round()}%',
-        style: TextStyle(
-          fontSize: 12,
-          color: item.status == 'queued'
-              ? scheme.onSurfaceVariant
-              : scheme.primary,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
+      trailing: failed
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.refresh_rounded),
+                  tooltip: 'Retry',
+                  onPressed: () => notifier.retry(songId),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  tooltip: 'Dismiss',
+                  onPressed: () => notifier.clearFailedOne(songId),
+                ),
+              ],
+            )
+          : IconButton(
+              icon: const Icon(Icons.close_rounded),
+              tooltip: 'Cancel download',
+              onPressed: () => notifier.cancel(songId),
+            ),
     );
   }
 }

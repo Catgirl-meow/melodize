@@ -67,13 +67,13 @@ UI code never touches the handler directly: it reads provider streams and calls 
 Every Riverpod provider lives here (~1.4k lines). Key patterns:
 
 - `AudioHandlerNotifier` (`StateNotifier<MelodizeAudioHandler?>`) exposes the handler; `main.dart` overrides it with a `createAudioHandler()` instance created before `runApp`.
-- Handler inputs are pushed via `ref.listen` in `_StartupRouter` (main.dart): `serverConfigProvider` → `setConfig`, prefs → `setStreamQuality`, `companionAnalysisProvider` → `setCompanionAnalysis`, `companionAudioApiProvider` → `setCompanionAudioApi`.
+- Handler inputs are pushed via `ref.listen` in `_StartupRouter` (main.dart): `serverConfigProvider` → `setConfig`, prefs → `setStreamQuality`, `companionAnalysisProvider` → `setCompanionAnalysis`, `companionAudioApiProvider` → `setCompanionAudioApi`, `downloadedPathsProvider` → `setDownloadedFiles`.
 - Playback UI state comes from stream providers (`currentSongStreamProvider`, `playerStateStreamProvider`, `positionStreamProvider`, `queueSnapshotStreamProvider`, `shuffleModeStreamProvider`, …) that mirror handler streams — all updates flow handler → stream → UI, never through Riverpod state.
 - `serverConfigProvider` (FutureProvider) doubles as the startup router: loading → spinner, error/null → `SetupScreen`, data → `MainShell`.
 
 ### Data
 
-- **drift/SQLite** (`lib/core/db/database.dart`): 5 tables — `CachedSongs` (library cache incl. download state), `PlayHistory` (deliberately stores artist/title strings, not IDs, so Deezer recommendations survive server switches), `ServerConfig` (single active), `DownloadQueue`, `LyricsCache`. Schema v4; migrations in `MigrationStrategy.onUpgrade`. Singleton via `AppDatabase()`.
+- **drift/SQLite** (`lib/core/db/database.dart`): 5 tables — `CachedSongs` (library cache incl. download state), `PlayHistory` (deliberately stores artist/title strings, not IDs, so Deezer recommendations survive server switches), `ServerConfig` (single active), `DownloadQueue` (persisted local-download queue: resumed on restart, failures kept with their reason), `LyricsCache`. Schema v5; migrations in `MigrationStrategy.onUpgrade`. Singleton via `AppDatabase()`.
 - **APIs** (`lib/core/api/`): `SubsonicClient` (MD5-salted auth), `CompanionAudioApi` (analysis cache fetch, rendered-transition jobs, downloads with auth headers), `DeezerClient` (public API + ARL session validation), `LrcLibClient` + `lyrics_ovh_client.dart` (multi-provider lyrics fallback).
 
 ### Platforms
@@ -82,11 +82,11 @@ Every Riverpod provider lives here (~1.4k lines). Key patterns:
 - **Linux**: media_kit/mpv backend (just_audio_media_kit, `prefetchPlaylist = true` for gapless); MPRIS2 via `lib/core/linux/linux_mpris.dart` (playerctl/keyboard shortcuts); bouncing scroll physics; handler disposed on app detach.
 - **macOS**: just_audio's AVFoundation backend (no media_kit, no libmpv); Now Playing + remote commands via `audio_service`; no MPRIS (that file is Linux-only); desktop keyboard shortcuts; sandboxed with `com.apple.security.network.client` and an ATS exception for plain-HTTP servers in `macos/Runner/`.
 - **Platform branching**: use `isDesktopPlatform` / `isMobilePlatform` from `lib/core/utils/platform_info.dart` instead of raw `Platform.isLinux || Platform.isMacOS` checks.
-- Downloads live in `melodize_downloads/` under the app storage dir (`core/utils/platform_dirs.dart`).
+- Downloads live in `melodize_downloads/` under the app storage dir (`core/utils/platform_dirs.dart`); layout rules in `core/downloads/download_files.dart`. A local download is complete only when audio **and** cover (`<id>.cover.jpg`) are saved; lyrics are cached best-effort. Files are written as `.part` and renamed when complete. `DownloadNotifier` (providers.dart) owns the queue, reports results through `downloadNoticeProvider` (one summary per batch), and on startup un-marks downloads whose file vanished, resumes the persisted queue and backfills missing covers. `downloadedPathsProvider` feeds the audio handler so songs from any view play from disk.
 
 ### UI
 
-`lib/features/` (home, library, player, search, settings, downloads, setup, shell) + `lib/shared/` (widgets, theme, utils). Theming: `AppTheme` with `DynamicColorBuilder` + `DynamicSchemeVariant.expressive`; Now Playing derives accent colors from album art via `palette_generator` (`dominantColorProvider`/`currentAccentColorProvider`). `docs/design.md` holds the visual conventions; open polish items are in `docs/roadmap.md`.
+`lib/features/` (home, library, player, search, settings, setup, shell) + `lib/shared/` (widgets, theme, utils). Theming: `AppTheme` with `DynamicColorBuilder` + `DynamicSchemeVariant.expressive`; Now Playing derives accent colors from album art via `palette_generator` (`dominantColorProvider`/`currentAccentColorProvider`). `docs/design.md` holds the visual conventions; open polish items are in `docs/roadmap.md`.
 
 ## Gotchas
 

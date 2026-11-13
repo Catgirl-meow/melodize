@@ -7,7 +7,6 @@ import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
-import 'core/utils/platform_dirs.dart';
 import 'core/utils/platform_info.dart';
 import 'core/audio/shuffle_mode.dart';
 import 'core/audio/audio_handler.dart';
@@ -194,6 +193,7 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
     // the already-available client as well so a configured companion works on
     // the first queue loaded after startup.
     handler?.setCompanionAudioApi(ref.read(companionAudioApiProvider));
+    handler?.setDownloadedFiles(ref.read(downloadedPathsProvider));
 
     // Restore persisted shuffle mode and crossfade on startup.
     Future.microtask(() {
@@ -224,16 +224,11 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
       // Prefs are read inside the delay so a setting change made after the
       // song starts but before 15 s elapses is still picked up.
       if (!song.isDownloaded) {
-        Future.delayed(const Duration(seconds: 15), () async {
+        Future.delayed(const Duration(seconds: 15), () {
           if (!mounted) return;
           final prefs = ref.read(preferencesNotifierProvider);
           if (prefs.autoDownload != 'on_play') return;
-          final dir = await getAppStorageDirectory();
-          final path =
-              '${dir.path}/melodize_downloads/${song.id}.${song.suffix ?? 'mp3'}';
-          ref
-              .read(downloadNotifierProvider.notifier)
-              .download(song, path, quality: prefs.downloadQuality);
+          ref.read(downloadNotifierProvider.notifier).download(song);
         });
       }
     });
@@ -247,29 +242,18 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
 
   Future<void> _redownloadAll(WidgetRef ref, String quality) async {
     final songs = await ref.read(downloadedSongsProvider.future);
-    if (songs.isEmpty) return;
-    final dir = await getAppStorageDirectory();
-    for (final song in songs) {
-      final path =
-          '${dir.path}/melodize_downloads/${song.id}.${song.suffix ?? 'mp3'}';
-      ref
-          .read(downloadNotifierProvider.notifier)
-          .download(song, path, quality: quality, force: true);
-    }
+    await ref
+        .read(downloadNotifierProvider.notifier)
+        .redownload(songs, quality: quality);
   }
 
   // Download every song in the library that isn't already on device.
   // Uses downloadBatch() so a single state update is emitted for all queued
   // songs instead of N individual updates — keeps the UI responsive.
-  Future<void> _downloadAll(WidgetRef ref) async {
+  void _downloadAll(WidgetRef ref) {
     final songs = ref.read(allSongsProvider).valueOrNull ?? [];
     if (songs.isEmpty) return;
-    final prefs = ref.read(preferencesNotifierProvider);
-    final dir = await getAppStorageDirectory();
-    final baseDir = '${dir.path}/melodize_downloads';
-    ref
-        .read(downloadNotifierProvider.notifier)
-        .downloadBatch(songs, baseDir, prefs.downloadQuality);
+    ref.read(downloadNotifierProvider.notifier).downloadBatch(songs);
   }
 
   @override
@@ -285,6 +269,10 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
     });
     ref.listen(companionAudioApiProvider, (_, next) {
       ref.read(audioHandlerNotifierProvider)?.setCompanionAudioApi(next);
+    });
+    // Finished downloads → handler, so any queue plays them from disk.
+    ref.listen<Map<String, String>>(downloadedPathsProvider, (_, next) {
+      ref.read(audioHandlerNotifierProvider)?.setDownloadedFiles(next);
     });
     ref.listen(companionAnalysisSyncProvider, (_, __) {});
 

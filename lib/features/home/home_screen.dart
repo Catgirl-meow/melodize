@@ -753,7 +753,9 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
       startDownloadPolling(companion, jobId);
     } catch (e) {
       if (!mounted) return;
-      showStyledSnack(context, 'Download could not start — check companion connection', isError: true);
+      showStyledSnack(context,
+          'Download could not start: ${companionStartError(e)}',
+          isError: true);
     }
   }
 

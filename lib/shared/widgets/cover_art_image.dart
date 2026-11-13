@@ -2,7 +2,8 @@ import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' as p;
+import '../../core/downloads/download_files.dart';
+import '../../core/downloads/local_cover_cache.dart';
 import '../../core/providers.dart';
 
 /// Returns the local cover-art file path derived from an audio file path.
@@ -10,9 +11,7 @@ import '../../core/providers.dart';
 /// E.g. `/music/song.flac` → `/music/song.cover.jpg`
 String? localCoverArtPath(String? audioPath) {
   if (audioPath == null || audioPath.isEmpty) return null;
-  final dir = p.dirname(audioPath);
-  final base = p.basenameWithoutExtension(audioPath);
-  return p.join(dir, '$base.cover.jpg');
+  return coverPathForAudio(audioPath);
 }
 
 class CoverArtImage extends ConsumerWidget {
@@ -22,6 +21,10 @@ class CoverArtImage extends ConsumerWidget {
   /// Path to the local audio file — used to derive the cached cover art path
   /// for offline display of downloaded songs.
   final String? localPath;
+
+  /// Song id, used to find the saved cover of a downloaded song when the
+  /// [Song] object came from a server view and carries no [localPath].
+  final String? songId;
   final double size;
   final double borderRadius;
   final BoxFit fit;
@@ -35,6 +38,7 @@ class CoverArtImage extends ConsumerWidget {
     required this.coverArtId,
     this.externalUrl,
     this.localPath,
+    this.songId,
     required this.size,
     this.borderRadius = 8,
     this.fit = BoxFit.cover,
@@ -44,19 +48,40 @@ class CoverArtImage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final subsonicUrl = coverArtId != null && coverArtId!.isNotEmpty
+    final audioPath = localPath ??
+        (songId == null
+            ? null
+            : ref.watch(downloadedPathsProvider.select((m) => m[songId])));
+    final local = localCoverArtPath(audioPath);
+    // A downloaded song's saved cover wins: it is instant and works offline,
+    // where the network image would first have to time out.
+    final hasLocal = local != null && localCoverExists(local);
+
+    final subsonicUrl = !hasLocal && coverArtId != null && coverArtId!.isNotEmpty
         ? ref.watch(coverArtUrlProvider(coverArtId!))
         : null;
-    final url = subsonicUrl ?? externalUrl;
+    final url = subsonicUrl ?? (hasLocal ? null : externalUrl);
+
+    // Cap the in-memory decoded size to 2× display pixels so full-resolution
+    // images (1000 px+) don't inflate the image cache for small tiles.
+    // double.infinity means the container controls size — skip the cap.
+    final cacheSize = size.isFinite
+        ? (size * MediaQuery.devicePixelRatioOf(context) * 1.5).ceil()
+        : null;
 
     Widget child;
-    if (url != null) {
-      // Cap the in-memory decoded size to 2× display pixels so full-resolution
-      // server images (1000 px+) don't inflate the image cache for small tiles.
-      // double.infinity means the container controls size — skip the cap.
-      final cacheSize = size.isFinite
-          ? (size * MediaQuery.devicePixelRatioOf(context) * 1.5).ceil()
-          : null;
+    if (hasLocal) {
+      child = Image.file(
+        File(local),
+        width: size,
+        height: size,
+        fit: fit,
+        cacheWidth: cacheSize,
+        cacheHeight: cacheSize,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => _placeholder(scheme),
+      );
+    } else if (url != null) {
       child = CachedNetworkImage(
         imageUrl: url,
         width: size,
@@ -64,33 +89,17 @@ class CoverArtImage extends ConsumerWidget {
         fit: fit,
         memCacheWidth: cacheSize,
         memCacheHeight: cacheSize,
-        errorWidget: (_, __, ___) => _localOrPlaceholder(scheme),
-        placeholder: (_, __) => _localOrPlaceholder(scheme),
+        errorWidget: (_, __, ___) => _placeholder(scheme),
+        placeholder: (_, __) => _placeholder(scheme),
       );
     } else {
-      child = _localOrPlaceholder(scheme);
+      child = _placeholder(scheme);
     }
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
       child: child,
     );
-  }
-
-  /// Try to load a locally-cached cover art file (saved alongside downloaded
-  /// audio). Falls back to the music-note placeholder.
-  Widget _localOrPlaceholder(ColorScheme scheme) {
-    final local = localCoverArtPath(localPath);
-    if (local != null && File(local).existsSync()) {
-      return Image.file(
-        File(local),
-        width: size,
-        height: size,
-        fit: fit,
-        errorBuilder: (_, __, ___) => _placeholder(scheme),
-      );
-    }
-    return _placeholder(scheme);
   }
 
   Widget _placeholder(ColorScheme scheme) => Container(

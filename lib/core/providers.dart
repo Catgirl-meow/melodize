@@ -6,7 +6,14 @@ import 'package:dio/dio.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart'
-    show Brightness, Color, HSLColor, ImageConfiguration, Size;
+    show
+        Brightness,
+        Color,
+        FileImage,
+        HSLColor,
+        ImageConfiguration,
+        ImageProvider,
+        Size;
 import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -27,6 +34,9 @@ import 'audio/playback_core.dart';
 import 'audio/smart_shuffle_engine.dart';
 import 'api/companion_audio_api.dart';
 import 'db/database.dart';
+import 'downloads/download_files.dart';
+import 'utils/platform_dirs.dart';
+import 'downloads/local_cover_cache.dart';
 import 'errors/app_errors.dart';
 import 'models/app_preferences.dart';
 import 'models/song.dart';
@@ -960,7 +970,8 @@ Future<void> _persistLyrics(
 
 /// Fetches lyrics with an LRCLIB → lyrics.ovh fallback. Shared by
 /// [lyricsProvider] and the download pre-cache so both paths follow the same
-/// cache/fallback rules. Never throws.
+/// cache/fallback rules. Throws when every provider failed for transport or
+/// server reasons (as opposed to "no lyrics for this track").
 ///
 /// Rules:
 ///  * an existing usable cache row wins immediately (offline availability);
@@ -1117,256 +1128,662 @@ final themeModeProvider = Provider<ThemeMode>((ref) {
 });
 
 // --- Downloads ---
+//
+// A download is complete only when the audio AND its cover art are on disk;
+// lyrics are fetched too but are optional (most tracks have none). The queue
+// is persisted in the DownloadQueue table so it survives restarts, and
+// failures stay visible (with their reason and a Retry action) until the user
+// retries or dismisses them.
 class DownloadItem {
   final Song song;
   final double progress; // 0.0 – 1.0
   // status: 'queued' | 'downloading' | 'done' | 'error'
   final String status;
   final String? errorMessage;
+  final String quality;
   const DownloadItem({
     required this.song,
     required this.progress,
     required this.status,
     this.errorMessage,
+    this.quality = 'lossless',
   });
+
+  bool get isActive => status == 'queued' || status == 'downloading';
 }
+
+/// A one-shot message for the shell's snackbar. [id] makes repeated identical
+/// messages distinct so the listener still fires.
+class DownloadNotice {
+  final int id;
+  final String message;
+  final bool isError;
+  const DownloadNotice(this.id, this.message, {this.isError = false});
+}
+
+final downloadNoticeProvider = StateProvider<DownloadNotice?>((_) => null);
 
 class _DownloadTask {
   final Song song;
-  final String savePath;
   final String quality;
   final bool force;
   const _DownloadTask({
     required this.song,
-    required this.savePath,
     required this.quality,
     required this.force,
   });
 }
 
 class DownloadNotifier extends StateNotifier<Map<String, DownloadItem>> {
-  final SubsonicClient? _client;
   final AppDatabase _db;
   final Ref _ref;
 
   // At most 2 simultaneous HTTP downloads to keep the device responsive.
   static const _maxConcurrent = 2;
-  int _activeCount = 0;
   final _queue = Queue<_DownloadTask>();
+  final _active = <String, CancelToken>{};
+  bool _online = true;
 
-  DownloadNotifier(this._client, this._db, this._ref) : super({});
+  // A "session" runs from the first enqueue until the queue drains. Batch
+  // downloads report one summary at the end instead of one snackbar per song.
+  int _sessionTotal = 0;
+  int _sessionDone = 0;
+  int _sessionFailed = 0;
+  bool _sessionErrorShown = false;
+  int _noticeSeq = 0;
+  // Set while the notifier is torn down: its cancels are not user cancels,
+  // so queue rows are kept for the next start to resume.
+  bool _disposing = false;
 
-  // Enqueue a single download (e.g. when user taps ⋯ > Download, or on-play).
-  Future<void> download(
-    Song song,
-    String savePath, {
-    String quality = 'lossless',
-    bool force = false,
-  }) async {
-    if (_client == null) return;
-    final current = state[song.id]?.status;
-    if (!force && (current == 'downloading' || current == 'queued')) return;
-
-    state = {
-      ...state,
-      song.id: DownloadItem(song: song, progress: 0, status: 'queued'),
-    };
-    _enqueue(_DownloadTask(
-        song: song, savePath: savePath, quality: quality, force: force));
+  DownloadNotifier(this._db, this._ref) : super({}) {
+    _online = _ref.read(isOnlineProvider).valueOrNull ?? true;
+    Future.microtask(_restore);
   }
 
-  // Bulk-enqueue an entire list in ONE state update to avoid flooding Riverpod
-  // with thousands of individual rebuilds when "Download all" is enabled.
-  Future<void> downloadBatch(
-    List<Song> songs,
-    String baseDir,
-    String quality,
-  ) async {
-    if (_client == null || songs.isEmpty) return;
-
-    final Map<String, DownloadItem> additions = {};
-    for (final song in songs) {
-      if (song.isDownloaded) continue;
-      final s = state[song.id]?.status;
-      if (s == 'downloading' || s == 'queued' || s == 'done') continue;
-      final savePath = '$baseDir/${song.id}.${song.suffix ?? 'mp3'}';
-      additions[song.id] =
-          DownloadItem(song: song, progress: 0, status: 'queued');
-      _queue.add(_DownloadTask(
-          song: song, savePath: savePath, quality: quality, force: false));
+  @override
+  void dispose() {
+    _disposing = true;
+    for (final token in _active.values) {
+      token.cancel('disposed');
     }
-    if (additions.isEmpty) return;
-
-    // Single state write for the entire batch.
-    state = {...state, ...additions};
-    _tryStartQueued();
+    _queue.clear();
+    super.dispose();
   }
 
-  void _enqueue(_DownloadTask task) {
-    if (_activeCount < _maxConcurrent) {
-      _runDownload(task);
-    } else {
-      _queue.add(task);
-    }
+  String get _defaultQuality =>
+      _ref.read(preferencesNotifierProvider).downloadQuality;
+
+  void _notice(String message, {bool isError = false}) {
+    if (!mounted) return;
+    _ref.read(downloadNoticeProvider.notifier).state =
+        DownloadNotice(++_noticeSeq, message, isError: isError);
   }
 
-  void _tryStartQueued() {
-    while (_activeCount < _maxConcurrent && _queue.isNotEmpty) {
-      _runDownload(_queue.removeFirst());
-    }
-  }
-
-  void _runDownload(_DownloadTask task) {
-    _activeCount++;
-    _doDownload(task).then((_) {
-      _activeCount--;
-      if (_queue.isNotEmpty && mounted) {
-        _runDownload(_queue.removeFirst());
-      }
-    });
-  }
-
-  Future<void> _doDownload(_DownloadTask task) async {
-    final song = task.song;
-    final savePath = task.savePath;
-    final quality = task.quality;
-
+  void _put(Song song, String status,
+      {double progress = 0, String? error, String? quality}) {
     if (!mounted) return;
     state = {
       ...state,
-      song.id: DownloadItem(song: song, progress: 0, status: 'downloading'),
+      song.id: DownloadItem(
+        song: song,
+        progress: progress,
+        status: status,
+        errorMessage: error,
+        quality: quality ?? state[song.id]?.quality ?? _defaultQuality,
+      ),
     };
+  }
+
+  /// Called by the provider when connectivity changes. Queued downloads wait
+  /// while offline instead of each failing with a connection error.
+  void setOnline(bool online) {
+    _online = online;
+    if (online) _pump();
+  }
+
+  bool get isOnline => _online;
+
+  // --- Enqueueing -----------------------------------------------------------
+
+  /// Queue a single download (song menu, auto-download on play, re-download
+  /// after a quality change with [force]).
+  Future<int> download(Song song, {String? quality, bool force = false}) =>
+      _enqueueAll([song], quality ?? _defaultQuality, force: force);
+
+  /// Queue many songs with ONE state update (album / artist / whole library).
+  /// Songs already downloaded or in flight are skipped. Returns how many were
+  /// actually queued.
+  Future<int> downloadBatch(List<Song> songs, {String? quality}) =>
+      _enqueueAll(songs, quality ?? _defaultQuality, force: false);
+
+  /// Download [songs] again even though they are on device (download quality
+  /// changed). The old files stay playable until each replacement finishes.
+  Future<int> redownload(List<Song> songs, {required String quality}) =>
+      _enqueueAll(songs, quality, force: true);
+
+  Future<int> _enqueueAll(
+    List<Song> songs,
+    String quality, {
+    required bool force,
+  }) async {
+    if (songs.isEmpty) return 0;
+    final downloaded = _ref.read(downloadedSongIdsProvider);
+    final accepted = <Song>[];
+    var rejectedPreview = false;
+    for (final song in songs) {
+      if (song.externalStreamUrl != null || song.id.startsWith('deezer:')) {
+        rejectedPreview = true;
+        continue;
+      }
+      final current = state[song.id];
+      if (current != null && current.isActive) continue;
+      if (!force && (song.isDownloaded || downloaded.contains(song.id))) {
+        continue;
+      }
+      accepted.add(song);
+    }
+    if (rejectedPreview && songs.length == 1) {
+      _notice('Previews are not in your library and can’t be downloaded',
+          isError: true);
+    }
+    if (accepted.isEmpty) return 0;
+
+    state = {
+      ...state,
+      for (final song in accepted)
+        song.id: DownloadItem(
+            song: song, progress: 0, status: 'queued', quality: quality),
+    };
+    _sessionTotal += accepted.length;
+
+    // Persist metadata + queue rows first: the song row is what the finished
+    // download attaches to, and the queue row lets a restart resume.
     try {
-      await Directory(p.dirname(savePath)).create(recursive: true);
-      await _client!.downloadSong(
-        song,
-        savePath,
-        quality: quality,
-        onProgress: (recv, total) {
-          if (!mounted) return;
-          if (total > 0) {
-            state = {
-              ...state,
-              song.id: DownloadItem(
-                song: song,
-                progress: recv / total,
-                status: 'downloading',
-              ),
-            };
+      await _db.upsertSongs(accepted.map(_songToCompanion).toList());
+      await _db.upsertDownloads([
+        for (final song in accepted)
+          DownloadQueueCompanion.insert(
+            songId: song.id,
+            songTitle: song.title,
+            artist: song.artist,
+            savePath: '',
+            status: const Value('queued'),
+            quality: Value(quality),
+            errorMessage: const Value(null),
+          ),
+      ]);
+    } catch (e) {
+      // Without the rows the downloads would finish but never register.
+      for (final song in accepted) {
+        _put(song, 'error',
+            error: 'Could not save to the local database: $e',
+            quality: quality);
+      }
+      _sessionFailed += accepted.length;
+      _notice('Downloads could not be queued: $e', isError: true);
+      _maybeFinishSession();
+      return 0;
+    }
+    for (final song in accepted) {
+      // A cancel may have landed while the rows were being written.
+      if (state[song.id]?.status != 'queued') continue;
+      _queue.add(_DownloadTask(song: song, quality: quality, force: force));
+    }
+    _pump();
+    return accepted.length;
+  }
+
+  void _pump() {
+    if (!mounted || !_online) return;
+    while (_active.length < _maxConcurrent && _queue.isNotEmpty) {
+      final task = _queue.removeFirst();
+      final token = CancelToken();
+      _active[task.song.id] = token;
+      _run(task, token).whenComplete(() {
+        _active.remove(task.song.id);
+        _pump();
+        _maybeFinishSession();
+      });
+    }
+  }
+
+  void _maybeFinishSession() {
+    if (!mounted || _active.isNotEmpty || _queue.isNotEmpty) return;
+    if (_sessionTotal > 1 && _sessionDone + _sessionFailed > 0) {
+      final finished = _sessionDone + _sessionFailed;
+      if (_sessionFailed == 0) {
+        _notice('Downloaded $_sessionDone songs');
+      } else {
+        _notice(
+          'Downloaded $_sessionDone of $finished songs — $_sessionFailed '
+          'failed. Retry them in Downloaded songs.',
+          isError: true,
+        );
+      }
+    }
+    _sessionTotal = 0;
+    _sessionDone = 0;
+    _sessionFailed = 0;
+    _sessionErrorShown = false;
+  }
+
+  // --- The download itself --------------------------------------------------
+
+  Future<void> _run(_DownloadTask task, CancelToken token) async {
+    final song = task.song;
+    _put(song, 'downloading', quality: task.quality);
+    String? coverWritten;
+    try {
+      final client = _ref.read(subsonicClientProvider);
+      if (client == null) {
+        throw const DownloadContentException('No server is configured');
+      }
+      await _db.updateDownloadStatus(song.id, 'downloading');
+
+      final root = await getAppStorageDirectory();
+      final dir = downloadsDirPath(root.path);
+      await Directory(dir).create(recursive: true);
+      final base = downloadBasePath(dir, song.id);
+
+      // 1. Cover art first: it is small, so a broken cover fails fast instead
+      //    of after a 50 MB FLAC. A download without its cover is incomplete.
+      final coverArtId = song.coverArt;
+      if (coverArtId != null && coverArtId.isNotEmpty) {
+        final coverPath = '$base.cover.jpg';
+        if (task.force || !File(coverPath).existsSync()) {
+          try {
+            await client.downloadCoverArt(coverArtId, coverPath,
+                cancelToken: token);
+          } on DioException catch (e) {
+            if (e.type == DioExceptionType.cancel) rethrow;
+            throw DownloadContentException(
+                'Cover art failed: ${friendlyDownloadError(e)}');
           }
+          evictLocalCoverCache(coverPath);
+          coverWritten = coverPath;
+        }
+      }
+
+      // 2. Audio, written to a .part file and renamed when complete.
+      var lastReported = 0.0;
+      final audioPath = await client.downloadSong(
+        song,
+        base,
+        quality: task.quality,
+        cancelToken: token,
+        onProgress: (recv, total) {
+          if (total <= 0) return;
+          final progress = recv / total;
+          // Throttle to 1 % steps: per-chunk updates rebuild every listener.
+          if (progress - lastReported < 0.01 && progress < 1) return;
+          lastReported = progress;
+          _put(song, 'downloading', progress: progress);
         },
       );
-      if (!mounted) return;
-      await _db.markDownloaded(song.id, savePath);
-      // Pre-cache lyrics so they're available offline. Fire-and-forget:
-      // a lyrics failure must not fail the download. The shared helper
-      // applies the cache-first / no-downgrade / definitive-miss rules that
-      // lyricsProvider uses.
-      unawaited(_fetchLyrics(
-        db: _db,
-        q: (
-          songId: song.id,
-          artist: song.artist,
-          title: song.title,
-          album: song.album,
-          duration: song.duration ?? 0,
-        ),
-      ));
-      // Pre-cache cover art for offline use. Fire-and-forget: a cover-art
-      // failure must not fail the download.
-      unawaited(_cacheCoverArt(song, savePath).catchError((_) {}));
-      await _db.upsertDownload(DownloadQueueCompanion.insert(
-        songId: song.id,
-        songTitle: song.title,
-        artist: song.artist,
-        savePath: savePath,
-        status: const Value('done'),
-        progress: const Value(100),
-      ));
-      if (!mounted) return;
-      final updated = Map<String, DownloadItem>.from(state);
-      updated[song.id] = DownloadItem(song: song, progress: 1, status: 'done');
-      state = updated;
-      _ref.invalidate(downloadedSongsProvider);
-    } catch (e) {
-      if (!mounted) return;
-      final updated = Map<String, DownloadItem>.from(state);
-      updated[song.id] = DownloadItem(
-          song: song, progress: 0, status: 'error', errorMessage: e.toString());
-      state = updated;
-    }
-  }
 
-  bool isDownloading(String songId) {
-    final s = state[songId]?.status;
-    return s == 'downloading' || s == 'queued';
-  }
-
-  /// Download and persist the cover-art image alongside the audio file so it
-  /// is available offline.  Writes a `.cover.jpg` sibling file.
-  Future<void> _cacheCoverArt(Song song, String audioPath) async {
-    // Resolve the cover art URL — prefer Subsonic, fall back to external.
-    final coverArtId = song.coverArt;
-    String? url;
-    if (coverArtId != null && coverArtId.isNotEmpty) {
-      url = _ref.read(coverArtUrlProvider(coverArtId));
-    }
-    url ??= song.externalCoverUrl;
-    if (url == null || url.isEmpty) return;
-
-    final coverPath = '${p.withoutExtension(audioPath)}.cover.jpg';
-    final file = File(coverPath);
-    if (file.existsSync()) return; // already cached
-
-    final dio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 15),
-      responseType: ResponseType.bytes,
-    ));
-    final resp = await dio.get<List<int>>(url);
-    final bytes = resp.data;
-    if (bytes != null && bytes.isNotEmpty) {
-      await file.writeAsBytes(bytes);
-    }
-  }
-
-  Future<void> removeDownload(String songId) async {
-    // Cancel if queued.
-    _queue.removeWhere((t) => t.song.id == songId);
-    try {
-      final row = await _db.getSongById(songId);
-      // Update DB before deleting the file so that if file deletion fails,
-      // the app won't attempt to play a track that no longer exists on disk.
-      await _db.unmarkDownloaded(songId);
-      await _db.deleteDownload(songId);
-      if (row?.localPath != null) {
-        final file = File(row!.localPath!);
-        if (await file.exists()) await file.delete();
-        // Also remove the cached cover-art sibling file.
-        final coverFile =
-            File('${p.withoutExtension(row.localPath!)}.cover.jpg');
-        if (await coverFile.exists()) await coverFile.delete();
+      // 3. Register as soon as the file is in place, before anything that
+      //    can be cancelled: a cancel or app exit from here on must not leave
+      //    a complete file that is neither downloaded nor resumable. The previous file (e.g. a FLAC replaced by a lower
+      //    quality MP3) is removed only after the new one is in place.
+      final previous = (await _db.getSongById(song.id))?.localPath;
+      await _db.upsertSong(_songToCompanion(song));
+      await _db.markDownloaded(song.id, audioPath);
+      await _db.updateDownloadStatus(song.id, 'done');
+      if (previous != null && previous != audioPath) {
+        final old = File(previous);
+        if (await old.exists()) await old.delete();
       }
-    } catch (_) {}
-    final updated = Map<String, DownloadItem>.from(state);
-    updated.remove(songId);
-    state = updated;
+
+      // 4. Lyrics for offline viewing. Optional: most tracks have none, and
+      //    Bounded so a slow provider can't hold a download slot; a cancel
+      //    here just stops the lookup. A provider outage must not undo a
+      //    finished download: the lyrics screen reports it when opened.
+      try {
+        await _fetchLyrics(
+          db: _db,
+          q: (
+            songId: song.id,
+            artist: song.artist,
+            title: song.title,
+            album: song.album,
+            duration: song.duration ?? 0,
+          ),
+          cancelToken: token,
+        ).timeout(const Duration(seconds: 20), onTimeout: () => null);
+      } catch (e) {
+        debugPrint('[Downloads] lyrics for ${song.id} not cached: $e');
+      }
+
+      _sessionDone++;
+      if (!mounted) return;
+      final next = Map<String, DownloadItem>.from(state)..remove(song.id);
+      state = next;
+      _ref.invalidate(downloadedSongsProvider);
+      if (_sessionTotal == 1) _notice('“${song.title}” downloaded');
+    } catch (e) {
+      final cancelled = e is DioException && e.type == DioExceptionType.cancel;
+      if (cancelled) {
+        // An app shutdown keeps the row ('downloading') so it resumes.
+        if (!_disposing) {
+          await _db.deleteDownloads([song.id]).catchError((_) {});
+          // A user cancel drops the cover this attempt fetched, unless the
+          // song was already downloaded (a forced re-download keeps its art).
+          final cover = coverWritten;
+          if (cover != null &&
+              !_ref.read(downloadedSongIdsProvider).contains(song.id)) {
+            await File(cover).delete().catchError((_) => File(cover));
+            evictLocalCoverCache(cover);
+          }
+        }
+        if (!mounted) return;
+        state = Map<String, DownloadItem>.from(state)..remove(song.id);
+        return;
+      }
+      final reason = friendlyDownloadError(e);
+      debugPrint('[Downloads] ${song.id} failed: $e');
+      await _db
+          .updateDownloadStatus(song.id, 'error', errorMessage: reason)
+          .catchError((_) {});
+      _sessionFailed++;
+      _put(song, 'error', error: reason);
+      if (!_sessionErrorShown) {
+        _sessionErrorShown = true;
+        _notice('“${song.title}” couldn’t be downloaded: $reason',
+            isError: true);
+      }
+    }
+  }
+
+  // --- User actions -----------------------------------------------------------
+
+  bool isDownloading(String songId) => state[songId]?.isActive ?? false;
+
+  /// Cancel a queued or running download.
+  Future<void> cancel(String songId) async {
+    final token = _active[songId];
+    if (token != null) {
+      token.cancel('user');
+      return; // _run cleans up state and the queue row.
+    }
+    _queue.removeWhere((t) => t.song.id == songId);
+    if (state[songId]?.status == 'queued') {
+      _sessionTotal = (_sessionTotal - 1).clamp(0, 1 << 30);
+      state = Map<String, DownloadItem>.from(state)..remove(songId);
+      await _db.deleteDownloads([songId]);
+      _maybeFinishSession();
+    }
+  }
+
+  Future<void> cancelAll() async {
+    final queued = _queue.map((t) => t.song.id).toList();
+    _queue.clear();
+    _sessionTotal = (_sessionTotal - queued.length).clamp(0, 1 << 30);
+    for (final token in _active.values) {
+      token.cancel('user');
+    }
+    if (queued.isNotEmpty) {
+      state = Map<String, DownloadItem>.from(state)
+        ..removeWhere((id, _) => queued.contains(id));
+      await _db.deleteDownloads(queued);
+    }
+    _maybeFinishSession();
+  }
+
+  Future<void> retry(String songId) async {
+    final item = state[songId];
+    if (item == null || item.status != 'error') return;
+    await _enqueueAll([item.song], item.quality, force: false);
+  }
+
+  Future<void> retryAllFailed() async {
+    final failed = state.values.where((d) => d.status == 'error').toList();
+    final byQuality = <String, List<Song>>{};
+    for (final d in failed) {
+      byQuality.putIfAbsent(d.quality, () => []).add(d.song);
+    }
+    for (final entry in byQuality.entries) {
+      await _enqueueAll(entry.value, entry.key, force: false);
+    }
+  }
+
+  /// Forget failed downloads without retrying them.
+  Future<void> clearFailed() => _forgetFailed(state.entries
+      .where((e) => e.value.status == 'error')
+      .map((e) => e.key)
+      .toList());
+
+  Future<void> clearFailedOne(String songId) =>
+      _forgetFailed(state[songId]?.status == 'error' ? [songId] : const []);
+
+  Future<void> _forgetFailed(List<String> ids) async {
+    if (ids.isEmpty) return;
+    state = Map<String, DownloadItem>.from(state)
+      ..removeWhere((id, _) => ids.contains(id));
+    await _db.deleteDownloads(ids);
+  }
+
+  Future<void> removeDownload(String songId) => removeDownloads([songId]);
+
+  /// Delete downloaded files and their covers. Throws if a file can't be
+  /// deleted, after un-marking it so the app never plays a half-removed song.
+  Future<void> removeDownloads(List<String> songIds) async {
+    for (final id in songIds) {
+      await cancel(id);
+    }
+    Object? firstError;
+    for (final id in songIds) {
+      try {
+        final row = await _db.getSongById(id);
+        await _db.unmarkDownloaded(id);
+        final path = row?.localPath;
+        if (path != null) {
+          for (final f in [File(path), File(coverPathForAudio(path))]) {
+            if (await f.exists()) await f.delete();
+          }
+          evictLocalCoverCache(coverPathForAudio(path));
+        }
+      } catch (e) {
+        firstError ??= e;
+      }
+    }
+    await _db.deleteDownloads(songIds);
+    if (mounted) {
+      state = Map<String, DownloadItem>.from(state)
+        ..removeWhere((id, _) => songIds.contains(id));
+    }
+    _ref.invalidate(downloadedSongsProvider);
+    if (firstError != null) throw firstError;
+  }
+
+  // --- Startup: integrity check, resume, cover backfill ---------------------
+
+  Future<void> _restore() async {
+    try {
+      await _ref.read(serverConfigProvider.future);
+      final root = await getAppStorageDirectory();
+      final dir = Directory(downloadsDirPath(root.path));
+      final downloaded = await _db.getDownloadedSongs();
+      final unfinished = await _db.getUnfinishedDownloads();
+
+      // 1. Downloads whose file vanished (cleared storage, manual delete):
+      //    un-mark them and say so instead of failing at play time.
+      final missing = <CachedSong>[];
+      for (final row in downloaded) {
+        final path = row.localPath;
+        if (path == null || !File(path).existsSync()) missing.add(row);
+      }
+      for (final row in missing) {
+        await _db.unmarkDownloaded(row.id);
+      }
+      if (missing.isNotEmpty) {
+        _ref.invalidate(downloadedSongsProvider);
+        final n = missing.length;
+        _notice(
+          n == 1
+              ? '“${missing.first.title}” was missing from storage and was '
+                  'removed from Downloads'
+              : '$n downloaded songs were missing from storage and were '
+                  'removed from Downloads',
+          isError: true,
+        );
+      }
+
+      // 2. Leftovers from crashes: .part files and covers no download owns.
+      if (dir.existsSync()) {
+        final keep = <String>{};
+        for (final row in downloaded) {
+          final path = row.localPath;
+          if (path == null) continue;
+          keep.add(p.normalize(path));
+          keep.add(p.normalize(coverPathForAudio(path)));
+        }
+        final pendingBases = {
+          for (final q in unfinished) downloadBasePath(dir.path, q.songId),
+        };
+        // Anything the user queued while this check was starting.
+        final liveBases = {
+          for (final id in state.keys) downloadBasePath(dir.path, id),
+        };
+        await for (final entity in dir.list()) {
+          if (entity is! File) continue;
+          final path = p.normalize(entity.path);
+          if (keep.contains(path)) continue;
+          if (liveBases.any((b) => path.startsWith('$b.'))) continue;
+          // Only .part files and orphaned covers are removed. An unreferenced
+          // audio file is left alone: deleting the user's music on a path
+          // mismatch would be far worse than a few stray megabytes.
+          final isPart = path.endsWith('.part');
+          final isOrphanCover = path.endsWith('.cover.jpg') &&
+              !pendingBases.contains(path.substring(0, path.length - 10));
+          if (isPart || isOrphanCover) {
+            await entity.delete().catchError((_) => entity);
+          }
+        }
+      }
+
+      // 3. Resume the queue saved before the app closed.
+      if (unfinished.isNotEmpty) {
+        final failed = <String, DownloadItem>{};
+        final resume = <String, List<Song>>{};
+        final gone = <String>[];
+        for (final q in unfinished) {
+          final row = await _db.getSongById(q.songId);
+          if (row == null) {
+            gone.add(q.songId);
+            continue;
+          }
+          final song = _rowToSong(row);
+          final quality = q.quality ?? _defaultQuality;
+          if (q.status == 'error') {
+            failed[song.id] = DownloadItem(
+              song: song,
+              progress: 0,
+              status: 'error',
+              errorMessage: q.errorMessage ?? 'Download failed',
+              quality: quality,
+            );
+          } else if (!row.isDownloaded) {
+            resume.putIfAbsent(quality, () => []).add(song);
+          } else {
+            gone.add(q.songId);
+          }
+        }
+        if (gone.isNotEmpty) await _db.deleteDownloads(gone);
+        if (mounted && failed.isNotEmpty) state = {...state, ...failed};
+        for (final entry in resume.entries) {
+          await _enqueueAll(entry.value, entry.key, force: false);
+        }
+      }
+
+      // 4. Downloads made before covers were part of the pipeline (or whose
+      //    cover failed back then): fetch the missing covers now.
+      await _backfillCovers(
+          downloaded.where((r) => !missing.contains(r)).toList());
+    } catch (e, st) {
+      debugPrint('[Downloads] restore failed: $e\n$st');
+      _notice('Could not check downloads: $e', isError: true);
+    }
+  }
+
+  Future<void> _backfillCovers(List<CachedSong> rows) async {
+    final client = _ref.read(subsonicClientProvider);
+    if (client == null || !_online) return;
+    final todo = rows.where((r) {
+      final art = r.coverArt;
+      return art != null &&
+          art.isNotEmpty &&
+          r.localPath != null &&
+          !File(coverPathForAudio(r.localPath!)).existsSync();
+    }).toList();
+    if (todo.isEmpty) return;
+    var failures = 0;
+    String? firstReason;
+    for (final row in todo) {
+      if (!mounted) return;
+      final cover = coverPathForAudio(row.localPath!);
+      try {
+        await client.downloadCoverArt(row.coverArt!, cover);
+        evictLocalCoverCache(cover);
+      } catch (e) {
+        failures++;
+        firstReason ??= friendlyDownloadError(e);
+      }
+    }
+    if (failures > 0) {
+      _notice(
+        'Couldn’t save cover art for $failures downloaded '
+        'song${failures == 1 ? '' : 's'}: $firstReason',
+        isError: true,
+      );
+    }
     _ref.invalidate(downloadedSongsProvider);
   }
 }
 
 final downloadNotifierProvider =
     StateNotifierProvider<DownloadNotifier, Map<String, DownloadItem>>((ref) {
-  final client = ref.watch(subsonicClientProvider);
-  final db = ref.watch(databaseProvider);
-  return DownloadNotifier(client, db, ref);
+  // Deliberately watches nothing: rebuilding on a config refresh would orphan
+  // in-flight downloads. The client is read when each download starts.
+  final notifier = DownloadNotifier(ref.read(databaseProvider), ref);
+  ref.listen<AsyncValue<bool>>(isOnlineProvider, (_, next) {
+    final online = next.valueOrNull;
+    if (online != null) notifier.setOnline(online);
+  });
+  return notifier;
+});
+
+/// Song id → local audio path for every finished download. Feeds the audio
+/// handler (play from disk even when a song comes from a server view) and
+/// [CoverArtImage] (show the saved cover offline).
+final downloadedPathsProvider = Provider<Map<String, String>>((ref) {
+  final songs = ref.watch(downloadedSongsProvider).valueOrNull ?? const [];
+  return {
+    for (final s in songs)
+      if (s.localPath != null) s.id: s.localPath!,
+  };
 });
 
 // Set of downloaded song IDs — only updates when a download *completes* (not on progress ticks).
 // DownloadNotifier invalidates downloadedSongsProvider on completion, which cascades here.
 final downloadedSongIdsProvider = Provider<Set<String>>((ref) {
-  final songs = ref.watch(downloadedSongsProvider).valueOrNull ?? [];
-  return songs.map((s) => s.id).toSet();
+  return ref.watch(downloadedPathsProvider).keys.toSet();
+});
+
+/// Bytes used by downloaded audio + covers, for the Downloaded songs header.
+final downloadsStorageBytesProvider = FutureProvider<int>((ref) async {
+  final paths = ref.watch(downloadedPathsProvider).values;
+  var total = 0;
+  for (final path in paths) {
+    for (final f in [File(path), File(coverPathForAudio(path))]) {
+      try {
+        total += await f.length();
+      } on FileSystemException {
+        // Missing cover (song without art) or a file the startup check is
+        // about to report; neither contributes to the total.
+      }
+    }
+  }
+  return total;
 });
 
 // --- Album art dominant color (cached per URL) ---
@@ -1375,8 +1792,16 @@ final dominantColorProvider =
     FutureProvider.family<Color?, String>((ref, url) async {
   if (url.isEmpty) return null;
   try {
+    // file:// keys come from a downloaded song's saved cover, so the accent
+    // works offline too.
+    final ImageProvider<Object> image;
+    if (url.startsWith('file://')) {
+      image = FileImage(File(Uri.parse(url).toFilePath()));
+    } else {
+      image = CachedNetworkImageProvider(url);
+    }
     final palette = await PaletteGenerator.fromImageProvider(
-      CachedNetworkImageProvider(url),
+      image,
       size: const Size(112, 112), // downsample before extraction — much faster
       maximumColorCount: 8,
     );
@@ -1437,9 +1862,14 @@ Color? _cachedLastAccent;
 final currentAccentColorProvider = Provider<Color?>((ref) {
   final song = ref.watch(currentSongStreamProvider).valueOrNull;
   if (song == null) return null;
-  final coverUrl = ref.watch(coverArtUrlProvider(song.coverArt ?? '')) ??
-      song.externalCoverUrl ??
-      '';
+  final localCover = song.localPath == null
+      ? null
+      : coverPathForAudio(song.localPath!);
+  final coverUrl = localCover != null && localCoverExists(localCover)
+      ? Uri.file(localCover).toString()
+      : ref.watch(coverArtUrlProvider(song.coverArt ?? '')) ??
+          song.externalCoverUrl ??
+          '';
   if (coverUrl.isEmpty) return null;
   final color = ref.watch(dominantColorProvider(coverUrl)).valueOrNull;
   if (color != null) {

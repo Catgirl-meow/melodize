@@ -3,18 +3,28 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/album.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
-import '../../core/utils/platform_dirs.dart';
 import 'snack.dart';
 
 /// Queues a local-storage download for [song].
-Future<void> startLocalDownload(WidgetRef ref, Song song) async {
-  final dir = await getAppStorageDirectory();
-  final prefs = ref.read(preferencesNotifierProvider);
-  final path =
-      '${dir.path}/melodize_downloads/${song.id}.${song.suffix ?? 'mp3'}';
-  ref
-      .read(downloadNotifierProvider.notifier)
-      .download(song, path, quality: prefs.downloadQuality);
+Future<void> startLocalDownload(WidgetRef ref, Song song) =>
+    ref.read(downloadNotifierProvider.notifier).download(song);
+
+/// Queues [songs] for download and tells the user how many were queued.
+Future<void> downloadSongs(
+    BuildContext context, WidgetRef ref, List<Song> songs) async {
+  if (songs.isEmpty) return;
+  final queued =
+      await ref.read(downloadNotifierProvider.notifier).downloadBatch(songs);
+  if (!context.mounted) return;
+  if (queued == 0) {
+    showStyledSnack(context, 'Already downloaded');
+  } else if (queued < songs.length) {
+    showStyledSnack(context,
+        'Downloading $queued songs (${songs.length - queued} already saved)');
+  } else {
+    showStyledSnack(
+        context, 'Downloading $queued song${queued == 1 ? '' : 's'}');
+  }
 }
 
 /// Batch-downloads all songs in [album] to local storage.
@@ -22,17 +32,8 @@ Future<void> downloadAlbum(
     BuildContext context, WidgetRef ref, Album album) async {
   try {
     final songs = await ref.read(albumSongsProvider(album.id).future);
-    if (songs.isEmpty) return;
-    final dir = await getAppStorageDirectory();
-    final prefs = ref.read(preferencesNotifierProvider);
-    ref.read(downloadNotifierProvider.notifier).downloadBatch(
-      songs,
-      '${dir.path}/melodize_downloads',
-      prefs.downloadQuality,
-    );
-    if (context.mounted) {
-      showStyledSnack(context, 'Downloading ${songs.length} songs…');
-    }
+    if (!context.mounted) return;
+    await downloadSongs(context, ref, songs);
   } catch (e) {
     if (context.mounted) {
       showStyledSnack(context, 'Failed to start download: $e', isError: true);

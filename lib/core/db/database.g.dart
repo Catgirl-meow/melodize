@@ -1557,6 +1557,18 @@ class $DownloadQueueTable extends DownloadQueue
       type: DriftSqlType.int,
       requiredDuringInsert: false,
       defaultValue: const Constant(0));
+  static const VerificationMeta _qualityMeta =
+      const VerificationMeta('quality');
+  @override
+  late final GeneratedColumn<String> quality = GeneratedColumn<String>(
+      'quality', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _errorMessageMeta =
+      const VerificationMeta('errorMessage');
+  @override
+  late final GeneratedColumn<String> errorMessage = GeneratedColumn<String>(
+      'error_message', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _addedAtMeta =
       const VerificationMeta('addedAt');
   @override
@@ -1566,8 +1578,17 @@ class $DownloadQueueTable extends DownloadQueue
       requiredDuringInsert: false,
       defaultValue: currentDateAndTime);
   @override
-  List<GeneratedColumn> get $columns =>
-      [songId, songTitle, artist, savePath, status, progress, addedAt];
+  List<GeneratedColumn> get $columns => [
+        songId,
+        songTitle,
+        artist,
+        savePath,
+        status,
+        progress,
+        quality,
+        errorMessage,
+        addedAt
+      ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -1610,6 +1631,16 @@ class $DownloadQueueTable extends DownloadQueue
       context.handle(_progressMeta,
           progress.isAcceptableOrUnknown(data['progress']!, _progressMeta));
     }
+    if (data.containsKey('quality')) {
+      context.handle(_qualityMeta,
+          quality.isAcceptableOrUnknown(data['quality']!, _qualityMeta));
+    }
+    if (data.containsKey('error_message')) {
+      context.handle(
+          _errorMessageMeta,
+          errorMessage.isAcceptableOrUnknown(
+              data['error_message']!, _errorMessageMeta));
+    }
     if (data.containsKey('added_at')) {
       context.handle(_addedAtMeta,
           addedAt.isAcceptableOrUnknown(data['added_at']!, _addedAtMeta));
@@ -1635,6 +1666,10 @@ class $DownloadQueueTable extends DownloadQueue
           .read(DriftSqlType.string, data['${effectivePrefix}status'])!,
       progress: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}progress'])!,
+      quality: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}quality']),
+      errorMessage: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}error_message']),
       addedAt: attachedDatabase.typeMapping
           .read(DriftSqlType.dateTime, data['${effectivePrefix}added_at'])!,
     );
@@ -1654,6 +1689,8 @@ class DownloadQueueData extends DataClass
   final String savePath;
   final String status;
   final int progress;
+  final String? quality;
+  final String? errorMessage;
   final DateTime addedAt;
   const DownloadQueueData(
       {required this.songId,
@@ -1662,6 +1699,8 @@ class DownloadQueueData extends DataClass
       required this.savePath,
       required this.status,
       required this.progress,
+      this.quality,
+      this.errorMessage,
       required this.addedAt});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1672,6 +1711,12 @@ class DownloadQueueData extends DataClass
     map['save_path'] = Variable<String>(savePath);
     map['status'] = Variable<String>(status);
     map['progress'] = Variable<int>(progress);
+    if (!nullToAbsent || quality != null) {
+      map['quality'] = Variable<String>(quality);
+    }
+    if (!nullToAbsent || errorMessage != null) {
+      map['error_message'] = Variable<String>(errorMessage);
+    }
     map['added_at'] = Variable<DateTime>(addedAt);
     return map;
   }
@@ -1684,6 +1729,12 @@ class DownloadQueueData extends DataClass
       savePath: Value(savePath),
       status: Value(status),
       progress: Value(progress),
+      quality: quality == null && nullToAbsent
+          ? const Value.absent()
+          : Value(quality),
+      errorMessage: errorMessage == null && nullToAbsent
+          ? const Value.absent()
+          : Value(errorMessage),
       addedAt: Value(addedAt),
     );
   }
@@ -1698,6 +1749,8 @@ class DownloadQueueData extends DataClass
       savePath: serializer.fromJson<String>(json['savePath']),
       status: serializer.fromJson<String>(json['status']),
       progress: serializer.fromJson<int>(json['progress']),
+      quality: serializer.fromJson<String?>(json['quality']),
+      errorMessage: serializer.fromJson<String?>(json['errorMessage']),
       addedAt: serializer.fromJson<DateTime>(json['addedAt']),
     );
   }
@@ -1711,6 +1764,8 @@ class DownloadQueueData extends DataClass
       'savePath': serializer.toJson<String>(savePath),
       'status': serializer.toJson<String>(status),
       'progress': serializer.toJson<int>(progress),
+      'quality': serializer.toJson<String?>(quality),
+      'errorMessage': serializer.toJson<String?>(errorMessage),
       'addedAt': serializer.toJson<DateTime>(addedAt),
     };
   }
@@ -1722,6 +1777,8 @@ class DownloadQueueData extends DataClass
           String? savePath,
           String? status,
           int? progress,
+          Value<String?> quality = const Value.absent(),
+          Value<String?> errorMessage = const Value.absent(),
           DateTime? addedAt}) =>
       DownloadQueueData(
         songId: songId ?? this.songId,
@@ -1730,6 +1787,9 @@ class DownloadQueueData extends DataClass
         savePath: savePath ?? this.savePath,
         status: status ?? this.status,
         progress: progress ?? this.progress,
+        quality: quality.present ? quality.value : this.quality,
+        errorMessage:
+            errorMessage.present ? errorMessage.value : this.errorMessage,
         addedAt: addedAt ?? this.addedAt,
       );
   DownloadQueueData copyWithCompanion(DownloadQueueCompanion data) {
@@ -1740,6 +1800,10 @@ class DownloadQueueData extends DataClass
       savePath: data.savePath.present ? data.savePath.value : this.savePath,
       status: data.status.present ? data.status.value : this.status,
       progress: data.progress.present ? data.progress.value : this.progress,
+      quality: data.quality.present ? data.quality.value : this.quality,
+      errorMessage: data.errorMessage.present
+          ? data.errorMessage.value
+          : this.errorMessage,
       addedAt: data.addedAt.present ? data.addedAt.value : this.addedAt,
     );
   }
@@ -1753,14 +1817,16 @@ class DownloadQueueData extends DataClass
           ..write('savePath: $savePath, ')
           ..write('status: $status, ')
           ..write('progress: $progress, ')
+          ..write('quality: $quality, ')
+          ..write('errorMessage: $errorMessage, ')
           ..write('addedAt: $addedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(
-      songId, songTitle, artist, savePath, status, progress, addedAt);
+  int get hashCode => Object.hash(songId, songTitle, artist, savePath, status,
+      progress, quality, errorMessage, addedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1771,6 +1837,8 @@ class DownloadQueueData extends DataClass
           other.savePath == this.savePath &&
           other.status == this.status &&
           other.progress == this.progress &&
+          other.quality == this.quality &&
+          other.errorMessage == this.errorMessage &&
           other.addedAt == this.addedAt);
 }
 
@@ -1781,6 +1849,8 @@ class DownloadQueueCompanion extends UpdateCompanion<DownloadQueueData> {
   final Value<String> savePath;
   final Value<String> status;
   final Value<int> progress;
+  final Value<String?> quality;
+  final Value<String?> errorMessage;
   final Value<DateTime> addedAt;
   final Value<int> rowid;
   const DownloadQueueCompanion({
@@ -1790,6 +1860,8 @@ class DownloadQueueCompanion extends UpdateCompanion<DownloadQueueData> {
     this.savePath = const Value.absent(),
     this.status = const Value.absent(),
     this.progress = const Value.absent(),
+    this.quality = const Value.absent(),
+    this.errorMessage = const Value.absent(),
     this.addedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -1800,6 +1872,8 @@ class DownloadQueueCompanion extends UpdateCompanion<DownloadQueueData> {
     required String savePath,
     this.status = const Value.absent(),
     this.progress = const Value.absent(),
+    this.quality = const Value.absent(),
+    this.errorMessage = const Value.absent(),
     this.addedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : songId = Value(songId),
@@ -1813,6 +1887,8 @@ class DownloadQueueCompanion extends UpdateCompanion<DownloadQueueData> {
     Expression<String>? savePath,
     Expression<String>? status,
     Expression<int>? progress,
+    Expression<String>? quality,
+    Expression<String>? errorMessage,
     Expression<DateTime>? addedAt,
     Expression<int>? rowid,
   }) {
@@ -1823,6 +1899,8 @@ class DownloadQueueCompanion extends UpdateCompanion<DownloadQueueData> {
       if (savePath != null) 'save_path': savePath,
       if (status != null) 'status': status,
       if (progress != null) 'progress': progress,
+      if (quality != null) 'quality': quality,
+      if (errorMessage != null) 'error_message': errorMessage,
       if (addedAt != null) 'added_at': addedAt,
       if (rowid != null) 'rowid': rowid,
     });
@@ -1835,6 +1913,8 @@ class DownloadQueueCompanion extends UpdateCompanion<DownloadQueueData> {
       Value<String>? savePath,
       Value<String>? status,
       Value<int>? progress,
+      Value<String?>? quality,
+      Value<String?>? errorMessage,
       Value<DateTime>? addedAt,
       Value<int>? rowid}) {
     return DownloadQueueCompanion(
@@ -1844,6 +1924,8 @@ class DownloadQueueCompanion extends UpdateCompanion<DownloadQueueData> {
       savePath: savePath ?? this.savePath,
       status: status ?? this.status,
       progress: progress ?? this.progress,
+      quality: quality ?? this.quality,
+      errorMessage: errorMessage ?? this.errorMessage,
       addedAt: addedAt ?? this.addedAt,
       rowid: rowid ?? this.rowid,
     );
@@ -1870,6 +1952,12 @@ class DownloadQueueCompanion extends UpdateCompanion<DownloadQueueData> {
     if (progress.present) {
       map['progress'] = Variable<int>(progress.value);
     }
+    if (quality.present) {
+      map['quality'] = Variable<String>(quality.value);
+    }
+    if (errorMessage.present) {
+      map['error_message'] = Variable<String>(errorMessage.value);
+    }
     if (addedAt.present) {
       map['added_at'] = Variable<DateTime>(addedAt.value);
     }
@@ -1888,6 +1976,8 @@ class DownloadQueueCompanion extends UpdateCompanion<DownloadQueueData> {
           ..write('savePath: $savePath, ')
           ..write('status: $status, ')
           ..write('progress: $progress, ')
+          ..write('quality: $quality, ')
+          ..write('errorMessage: $errorMessage, ')
           ..write('addedAt: $addedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -2928,6 +3018,8 @@ typedef $$DownloadQueueTableCreateCompanionBuilder = DownloadQueueCompanion
   required String savePath,
   Value<String> status,
   Value<int> progress,
+  Value<String?> quality,
+  Value<String?> errorMessage,
   Value<DateTime> addedAt,
   Value<int> rowid,
 });
@@ -2939,6 +3031,8 @@ typedef $$DownloadQueueTableUpdateCompanionBuilder = DownloadQueueCompanion
   Value<String> savePath,
   Value<String> status,
   Value<int> progress,
+  Value<String?> quality,
+  Value<String?> errorMessage,
   Value<DateTime> addedAt,
   Value<int> rowid,
 });
@@ -2969,6 +3063,12 @@ class $$DownloadQueueTableFilterComposer
 
   ColumnFilters<int> get progress => $composableBuilder(
       column: $table.progress, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get quality => $composableBuilder(
+      column: $table.quality, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get errorMessage => $composableBuilder(
+      column: $table.errorMessage, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<DateTime> get addedAt => $composableBuilder(
       column: $table.addedAt, builder: (column) => ColumnFilters(column));
@@ -3001,6 +3101,13 @@ class $$DownloadQueueTableOrderingComposer
   ColumnOrderings<int> get progress => $composableBuilder(
       column: $table.progress, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<String> get quality => $composableBuilder(
+      column: $table.quality, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get errorMessage => $composableBuilder(
+      column: $table.errorMessage,
+      builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<DateTime> get addedAt => $composableBuilder(
       column: $table.addedAt, builder: (column) => ColumnOrderings(column));
 }
@@ -3031,6 +3138,12 @@ class $$DownloadQueueTableAnnotationComposer
 
   GeneratedColumn<int> get progress =>
       $composableBuilder(column: $table.progress, builder: (column) => column);
+
+  GeneratedColumn<String> get quality =>
+      $composableBuilder(column: $table.quality, builder: (column) => column);
+
+  GeneratedColumn<String> get errorMessage => $composableBuilder(
+      column: $table.errorMessage, builder: (column) => column);
 
   GeneratedColumn<DateTime> get addedAt =>
       $composableBuilder(column: $table.addedAt, builder: (column) => column);
@@ -3068,6 +3181,8 @@ class $$DownloadQueueTableTableManager extends RootTableManager<
             Value<String> savePath = const Value.absent(),
             Value<String> status = const Value.absent(),
             Value<int> progress = const Value.absent(),
+            Value<String?> quality = const Value.absent(),
+            Value<String?> errorMessage = const Value.absent(),
             Value<DateTime> addedAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
@@ -3078,6 +3193,8 @@ class $$DownloadQueueTableTableManager extends RootTableManager<
             savePath: savePath,
             status: status,
             progress: progress,
+            quality: quality,
+            errorMessage: errorMessage,
             addedAt: addedAt,
             rowid: rowid,
           ),
@@ -3088,6 +3205,8 @@ class $$DownloadQueueTableTableManager extends RootTableManager<
             required String savePath,
             Value<String> status = const Value.absent(),
             Value<int> progress = const Value.absent(),
+            Value<String?> quality = const Value.absent(),
+            Value<String?> errorMessage = const Value.absent(),
             Value<DateTime> addedAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
@@ -3098,6 +3217,8 @@ class $$DownloadQueueTableTableManager extends RootTableManager<
             savePath: savePath,
             status: status,
             progress: progress,
+            quality: quality,
+            errorMessage: errorMessage,
             addedAt: addedAt,
             rowid: rowid,
           ),

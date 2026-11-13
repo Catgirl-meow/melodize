@@ -57,6 +57,11 @@ class DownloadQueue extends Table {
   TextColumn get savePath => text()();
   TextColumn get status => text().withDefault(const Constant('pending'))();
   IntColumn get progress => integer().withDefault(const Constant(0))();
+  // Requested quality ('lossless' or a max bitrate), so a queue restored
+  // after a restart downloads what the user originally asked for.
+  TextColumn get quality => text().nullable()();
+  // Last failure reason, shown next to the Retry button after a restart.
+  TextColumn get errorMessage => text().nullable()();
   DateTimeColumn get addedAt => dateTime().withDefault(currentDateAndTime)();
 
   @override
@@ -88,7 +93,7 @@ class AppDatabase extends _$AppDatabase {
   factory AppDatabase() => _instance;
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -102,6 +107,11 @@ class AppDatabase extends _$AppDatabase {
           if (from < 4) {
             // Drop orphaned queue_entries table (never written to).
             await customStatement('DROP TABLE IF EXISTS queue_entries');
+          }
+          if (from < 5) {
+            // Persisted download queue: resume after restart, keep failures.
+            await m.addColumn(downloadQueue, downloadQueue.quality);
+            await m.addColumn(downloadQueue, downloadQueue.errorMessage);
           }
         },
       );
@@ -125,13 +135,21 @@ class AppDatabase extends _$AppDatabase {
   Future<CachedSong?> getSongById(String id) =>
       (select(cachedSongs)..where((t) => t.id.equals(id))).getSingleOrNull();
 
-  Future<void> markDownloaded(String id, String localPath) =>
-      (update(cachedSongs)..where((t) => t.id.equals(id))).write(
-        CachedSongsCompanion(
-          isDownloaded: const Value(true),
-          localPath: Value(localPath),
-        ),
-      );
+  /// Flags [id] as downloaded at [localPath]. Throws if the song row does not
+  /// exist: a silent no-op here used to leave a file on disk that never
+  /// showed up in Downloads. Callers upsert the song's metadata first.
+  Future<void> markDownloaded(String id, String localPath) async {
+    final rows = await (update(cachedSongs)..where((t) => t.id.equals(id)))
+        .write(
+      CachedSongsCompanion(
+        isDownloaded: const Value(true),
+        localPath: Value(localPath),
+      ),
+    );
+    if (rows == 0) {
+      throw StateError('Song $id is missing from the local library cache');
+    }
+  }
 
   Future<void> unmarkDownloaded(String id) =>
       (update(cachedSongs)..where((t) => t.id.equals(id))).write(
@@ -168,14 +186,32 @@ class AppDatabase extends _$AppDatabase {
   Future<void> upsertDownload(DownloadQueueCompanion entry) =>
       into(downloadQueue).insertOnConflictUpdate(entry);
 
+  /// Queue rows that still need work after a restart: queued, interrupted
+  /// mid-download, or failed (shown with a Retry button).
+  Future<List<DownloadQueueData>> getUnfinishedDownloads() =>
+      (select(downloadQueue)
+            ..where((t) => t.status.isIn(['queued', 'downloading', 'error']))
+            ..orderBy([(t) => OrderingTerm.asc(t.addedAt)]))
+          .get();
+
+  Future<void> upsertDownloads(List<DownloadQueueCompanion> entries) =>
+      batch((b) => b.insertAllOnConflictUpdate(downloadQueue, entries));
+
   Future<void> updateDownloadStatus(
-          String songId, String status, int progress) =>
+    String songId,
+    String status, {
+    String? errorMessage,
+  }) =>
       (update(downloadQueue)..where((t) => t.songId.equals(songId))).write(
         DownloadQueueCompanion(
           status: Value(status),
-          progress: Value(progress),
+          progress: Value(status == 'done' ? 100 : 0),
+          errorMessage: Value(errorMessage),
         ),
       );
+
+  Future<void> deleteDownloads(Iterable<String> songIds) =>
+      (delete(downloadQueue)..where((t) => t.songId.isIn(songIds))).go();
 
   Future<void> deleteDownload(String songId) =>
       (delete(downloadQueue)..where((t) => t.songId.equals(songId))).go();

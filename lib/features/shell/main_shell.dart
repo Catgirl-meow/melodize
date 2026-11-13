@@ -121,34 +121,6 @@ class _MainShellState extends ConsumerState<MainShell>
         duration: const Duration(milliseconds: 350),
       );
 
-  /// Map raw local-download error strings to user-friendly messages.
-  String _friendlyLocalDownloadError(String err) {
-    final lower = err.toLowerCase();
-    if (lower.contains('timeout') || lower.contains('timed out')) {
-      return 'Download timed out — check your connection and try again';
-    }
-    if (lower.contains('connection refused') ||
-        lower.contains('connection error') ||
-        lower.contains('socket')) {
-      return 'Cannot reach server — check your connection';
-    }
-    if (lower.contains('401') || lower.contains('unauthorized')) {
-      return 'Server rejected the request — check credentials in Settings';
-    }
-    if (lower.contains('404') || lower.contains('not found')) {
-      return 'Song not found on server — it may have been removed';
-    }
-    if (lower.contains('403') || lower.contains('forbidden')) {
-      return 'Access denied — check server permissions';
-    }
-    if (lower.contains('disk') ||
-        lower.contains('space') ||
-        lower.contains('storage')) {
-      return 'Not enough storage space on device';
-    }
-    return 'Download failed — $err';
-  }
-
   void _invalidateServerProviders() {
     ref.invalidate(allSongsProvider);
     ref.invalidate(newestAlbumsProvider);
@@ -298,43 +270,23 @@ class _MainShellState extends ConsumerState<MainShell>
       if (!wasOnline && isNowOnline) _invalidateServerProviders();
     });
 
-    // Surface local download completion and errors as snackbars.
+    // Download results (single completions, batch summaries, failures with
+    // their reason) arrive as notices from DownloadNotifier.
     //
     // Listener runs with MainShell's own context, which is above the
-    // Scaffold. If a DownloadNotifier state change fires synchronously
-    // during a navigation transition, the Scaffold child hasn't
-    // registered with the root ScaffoldMessenger yet and
-    // showSnackBar asserts `_scaffolds.isNotEmpty`. Defer to after the
-    // current frame and swallow the assertion defensively — dropping a
-    // snack is strictly better than crashing the UI thread.
-    ref.listen<Map<String, DownloadItem>>(downloadNotifierProvider,
-        (prev, next) {
-      if (prev == null) return;
+    // Scaffold. If a notice fires during a navigation transition, the
+    // Scaffold child hasn't registered with the root ScaffoldMessenger yet
+    // and showSnackBar asserts `_scaffolds.isNotEmpty`. Defer to after the
+    // current frame; _safeSnack swallows the assertion defensively.
+    // Instantiate the download manager with the shell: it resumes the
+    // persisted queue and checks downloaded files on creation.
+    ref.listen(downloadNotifierProvider, (_, __) {});
+    ref.listen<DownloadNotice?>(downloadNoticeProvider, (_, notice) {
+      if (notice == null) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        for (final entry in next.entries) {
-          final prevItem = prev[entry.key];
-          if (prevItem?.status != 'done' && entry.value.status == 'done') {
-            _safeSnack('"${entry.value.song.title}" downloaded',
-                bottomOffset: snackBottom + kSnackGap);
-          }
-          // Surface on state transition into 'error' AND on errorMessage
-          // change while already in 'error' (handles same-song re-failure
-          // after the user retries — the second failure was previously
-          // silent because status didn't change).
-          final wasError = prevItem?.status == 'error';
-          final isError = entry.value.status == 'error';
-          final errMsgChanged =
-              wasError && prevItem?.errorMessage != entry.value.errorMessage;
-          if (isError && (!wasError || errMsgChanged)) {
-            final errMsg = entry.value.errorMessage;
-            final msg = errMsg != null
-                ? _friendlyLocalDownloadError(errMsg)
-                : '"${entry.value.song.title}" failed to download — try again';
-            _safeSnack(msg,
-                isError: true, bottomOffset: snackBottom + kSnackGap);
-          }
-        }
+        _safeSnack(notice.message,
+            isError: notice.isError, bottomOffset: snackBottom + kSnackGap);
       });
     });
 

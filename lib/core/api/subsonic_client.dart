@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import '../downloads/download_files.dart';
 import '../models/song.dart';
 import '../models/album.dart';
 import '../models/artist.dart';
@@ -281,22 +282,103 @@ class SubsonicClient {
 
   // --- Downloads ---
   // quality: 'lossless' → /rest/download, other values → /rest/stream transcoded.
-  Future<void> downloadSong(
+  /// Downloads [song] to `<basePath>.<ext>` and returns that final path.
+  ///
+  /// The extension comes from the response Content-Type (a transcoded stream
+  /// is saved as `.mp3`/`.opus`, not under the original `.flac` suffix). Bytes
+  /// go to a `.part` file that is renamed into place only after the transfer
+  /// completes and is validated, so a failed or cancelled download never
+  /// leaves a truncated file behind. Throws [DownloadContentException] when
+  /// the server answers with an API error body instead of audio.
+  Future<String> downloadSong(
     Song song,
-    String savePath, {
+    String basePath, {
     String quality = 'lossless',
     void Function(int received, int total)? onProgress,
+    CancelToken? cancelToken,
   }) async {
     final endpoint =
         quality == 'lossless' ? '/rest/download' : '/rest/stream';
     final params = <String, dynamic>{..._authParams(), 'id': song.id};
-    if (quality != 'lossless') params['maxBitRate'] = quality;
-    await _dio.download(
-      endpoint,
-      savePath,
+    if (quality != 'lossless') {
+      params['maxBitRate'] = quality;
+      // Navidrome's default downsampling format is Opus-in-Ogg, which
+      // AVFoundation can't play. Ask for MP3 on Apple platforms.
+      if (Platform.isMacOS || Platform.isIOS) params['format'] = 'mp3';
+    }
+
+    String? contentType;
+    String? partPath;
+    try {
+      await _dio.download(
+        endpoint,
+        (Headers headers) {
+          contentType = headers.value(Headers.contentTypeHeader);
+          // /rest/download serves the original file, so its own suffix is
+          // the truth (Navidrome labels .opus as the generic audio/ogg). A
+          // transcode is named by what the server actually sent.
+          final original = song.suffix?.trim().toLowerCase();
+          final ext = quality == 'lossless' &&
+                  original != null &&
+                  original.isNotEmpty
+              ? original
+              : audioExtensionFor(contentType: contentType);
+          return partPath = partPathFor('$basePath.$ext');
+        },
+        queryParameters: params,
+        onReceiveProgress: onProgress,
+        cancelToken: cancelToken,
+        deleteOnError: true,
+      );
+      final part = File(partPath!);
+      if (isSubsonicErrorContentType(contentType)) {
+        final body = await part.readAsString().catchError((_) => '');
+        throw DownloadContentException(
+            'Server refused the download: ${subsonicErrorMessage(body)}');
+      }
+      if (await part.length() == 0) {
+        throw const DownloadContentException('Server sent an empty file');
+      }
+      final finalPath = partPath!.substring(0, partPath!.length - 5);
+      await part.rename(finalPath);
+      return finalPath;
+    } catch (_) {
+      if (partPath != null) {
+        final part = File(partPath!);
+        if (await part.exists()) await part.delete().catchError((_) => part);
+      }
+      rethrow;
+    }
+  }
+
+  /// Saves the cover art [coverArtId] to [destPath] (atomically, via a
+  /// `.part` file). Throws when the server does not return an image.
+  Future<void> downloadCoverArt(
+    String coverArtId,
+    String destPath, {
+    int size = downloadCoverSize,
+    CancelToken? cancelToken,
+  }) async {
+    final params = <String, dynamic>{..._authParams(), 'id': coverArtId};
+    if (size > 0) params['size'] = size;
+    final resp = await _dio.get<List<int>>(
+      '/rest/getCoverArt',
       queryParameters: params,
-      onReceiveProgress: onProgress,
+      cancelToken: cancelToken,
+      options: Options(responseType: ResponseType.bytes),
     );
+    final type = resp.headers.value(Headers.contentTypeHeader);
+    final bytes = resp.data ?? const <int>[];
+    if (isSubsonicErrorContentType(type)) {
+      throw DownloadContentException('Cover art unavailable: '
+          '${subsonicErrorMessage(utf8.decode(bytes, allowMalformed: true))}');
+    }
+    if (bytes.isEmpty) {
+      throw const DownloadContentException('Server sent an empty cover image');
+    }
+    final part = File(partPathFor(destPath));
+    await part.writeAsBytes(bytes, flush: true);
+    await part.rename(destPath);
   }
 
   // --- Scrobble ---

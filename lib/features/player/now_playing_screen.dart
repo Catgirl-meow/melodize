@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import '../../core/models/song.dart';
 import '../../core/models/lyrics_result.dart';
+import '../../core/downloads/local_cover_cache.dart';
 import '../../core/errors/app_errors.dart';
 import '../../core/providers.dart';
 import '../../core/audio/shuffle_mode.dart';
@@ -641,7 +642,7 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
       startDownloadPolling(companion, jobId);
     } catch (e) {
       if (!mounted) return;
-      _snack('Download could not start — check companion connection',
+      _snack('Download could not start: ${companionStartError(e)}',
           isError: true);
     }
   }
@@ -744,27 +745,29 @@ class _AlbumArt extends ConsumerWidget {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
-        child: coverUrl.isNotEmpty
-            ? CachedNetworkImage(
-                imageUrl: coverUrl,
-                fit: BoxFit.cover,
-                errorWidget: (_, __, ___) => _localOrPlaceholder(scheme),
-              )
-            : _localOrPlaceholder(scheme),
+        child: _image(scheme),
       ),
     );
   }
 
-  Widget _localOrPlaceholder(ColorScheme scheme) {
+  /// A downloaded song's saved cover wins over the network image: instant,
+  /// and it works offline.
+  Widget _image(ColorScheme scheme) {
     final local = localCoverArtPath(localPath);
-    if (local != null && File(local).existsSync()) {
+    if (local != null && localCoverExists(local)) {
       return Image.file(
         File(local),
         fit: BoxFit.cover,
+        gaplessPlayback: true,
         errorBuilder: (_, __, ___) => _placeholder(scheme),
       );
     }
-    return _placeholder(scheme);
+    if (coverUrl.isEmpty) return _placeholder(scheme);
+    return CachedNetworkImage(
+      imageUrl: coverUrl,
+      fit: BoxFit.cover,
+      errorWidget: (_, __, ___) => _placeholder(scheme),
+    );
   }
 
   Widget _placeholder(ColorScheme scheme) {

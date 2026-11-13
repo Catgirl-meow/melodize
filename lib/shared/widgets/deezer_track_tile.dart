@@ -55,7 +55,7 @@ class _DeezerTrackTileState extends ConsumerState<DeezerTrackTile>
     } catch (e) {
       if (!mounted) return;
       showStyledSnack(
-          context, 'Download could not start — check companion connection',
+          context, 'Download could not start: ${companionStartError(e)}',
           isError: true);
     }
   }

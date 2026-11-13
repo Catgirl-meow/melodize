@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import '../models/song.dart';
 import '../api/subsonic_client.dart';
 import '../api/companion_audio_api.dart';
+import '../downloads/download_files.dart';
 import '../errors/app_errors.dart';
 import '../linux/linux_mpris.dart';
 import '../utils/platform_info.dart';
@@ -468,13 +469,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         return;
       }
 
-      Uri? artUri;
-      if (_config != null && (song.coverArt?.isNotEmpty ?? false)) {
-        artUri =
-            Uri.tryParse(_clientFor(_config!).coverArtUrl(song.coverArt!));
-      } else if (song.externalCoverUrl != null) {
-        artUri = Uri.tryParse(song.externalCoverUrl!);
-      }
+      final artUri = _artUriFor(song, _config);
       mediaItem.add(MediaItem(
         id: song.id,
         title: song.title,
@@ -537,10 +532,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     if (current != null &&
         song != null &&
         (song.coverArt?.isNotEmpty ?? false)) {
-      mediaItem.add(current.copyWith(
-        artUri:
-            Uri.tryParse(_clientFor(config).coverArtUrl(song.coverArt!)),
-      ));
+      mediaItem.add(current.copyWith(artUri: _artUriFor(song, config)));
     }
   }
 
@@ -2398,7 +2390,38 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   // ---------------------------------------------------------------------------
 
-  AudioSource _songToSource(Song song) {
+  /// Song id → local audio path for every finished download. Pushed from
+  /// `downloadedPathsProvider` so songs that arrive from server views (album,
+  /// playlist, search — whose [Song] objects carry no download state) still
+  /// play from disk instead of re-streaming a file the user already has.
+  Map<String, String> _downloadedFiles = const {};
+
+  void setDownloadedFiles(Map<String, String> files) {
+    _downloadedFiles = files;
+  }
+
+  /// Returns [song] with its download state filled in when a finished
+  /// download for it exists on disk.
+  Song _withLocalFile(Song song) {
+    if (song.externalStreamUrl != null) return song;
+    final path = song.isDownloaded && song.localPath != null
+        ? song.localPath!
+        : _downloadedFiles[song.id];
+    if (path == null) return song;
+    if (!File(path).existsSync()) {
+      // The download index points at a deleted file. Stream instead (the
+      // song is still on the server); the download manager's startup check
+      // reports and clears the stale entry.
+      debugPrint('[Downloads] missing local file for ${song.id}: $path');
+      return song.isDownloaded
+          ? song.withoutDownload()
+          : song;
+    }
+    return song.copyWith(isDownloaded: true, localPath: path);
+  }
+
+  AudioSource _songToSource(Song original) {
+    final song = _withLocalFile(original);
     final Uri uri;
     if (song.externalStreamUrl != null) {
       uri = Uri.parse(song.externalStreamUrl!);
@@ -2413,6 +2436,24 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       uri = Uri.parse('about:blank');
     }
     return AudioSource.uri(uri, tag: song);
+  }
+
+  /// Art for the system media controls (lock screen, notification, Now
+  /// Playing). A downloaded song uses its saved cover so offline playback
+  /// still shows art.
+  Uri? _artUriFor(Song song, SubsonicConfig? config) {
+    final local = song.localPath;
+    if (local != null) {
+      final cover = coverPathForAudio(local);
+      if (File(cover).existsSync()) return Uri.file(cover);
+    }
+    if (config != null && (song.coverArt?.isNotEmpty ?? false)) {
+      return Uri.tryParse(_clientFor(config).coverArtUrl(song.coverArt!));
+    }
+    if (song.externalCoverUrl != null) {
+      return Uri.tryParse(song.externalCoverUrl!);
+    }
+    return null;
   }
 
   // Linux MPRIS (playerctl / media keys). Other platforms rely on
