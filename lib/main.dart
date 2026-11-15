@@ -275,6 +275,14 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
       ref.read(audioHandlerNotifierProvider)?.setDownloadedFiles(next);
     });
     ref.listen(companionAnalysisSyncProvider, (_, __) {});
+    // Connectivity → handler, so a track that fails to load offline is
+    // reported as "not downloaded" rather than as a network error.
+    ref.listen<AsyncValue<bool>>(isOnlineProvider, (_, next) {
+      final online = next.valueOrNull;
+      if (online != null) {
+        ref.read(audioHandlerNotifierProvider)?.setDeviceOnline(online);
+      }
+    });
 
     // Sync server config to audio handler
     ref.listen(serverConfigProvider, (_, next) {

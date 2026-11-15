@@ -763,9 +763,13 @@ class _AlbumArt extends ConsumerWidget {
       );
     }
     if (coverUrl.isEmpty) return _placeholder(scheme);
+    // The placeholder shows while the cover loads: on a slow or flaky
+    // connection that can take a while, and without it the art area was an
+    // empty hole over the background gradient.
     return CachedNetworkImage(
       imageUrl: coverUrl,
       fit: BoxFit.cover,
+      placeholder: (_, __) => _placeholder(scheme),
       errorWidget: (_, __, ___) => _placeholder(scheme),
     );
   }
@@ -815,7 +819,9 @@ class _SongInfoRow extends StatelessWidget {
             ],
           ),
         ),
-        if (song.suffix != null)
+        if (song.suffix != null) ...[
+          // Keeps a scrolling title from running into the badge.
+          const SizedBox(width: 12),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
             decoration: BoxDecoration(
@@ -829,6 +835,7 @@ class _SongInfoRow extends StatelessWidget {
                   color: fgAccent, fontWeight: FontWeight.bold),
             ),
           ),
+        ],
       ],
     );
   }
