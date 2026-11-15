@@ -31,6 +31,7 @@ dependencies:
   # UI
   dynamic_color: ^1.7.0       # Material You wallpaper colors
   cached_network_image: ^3.3.1
+  flutter_cache_manager: ^3.4.1  # shared image disk cache (lock-screen art)
   palette_generator: ^0.3.3+3  # Pull colors from album art
   flutter_staggered_animations: ^1.1.1
 

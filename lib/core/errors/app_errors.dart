@@ -43,6 +43,7 @@ String describeError(Object error) {
     }
   }
   if (error is SocketException) return _describeSocket(error);
+  if (error is DeviceOfflineException) return error.toString();
   if (error is FileSystemException) {
     final os = error.osError?.message;
     final path = error.path;
@@ -62,6 +63,43 @@ String describeError(Object error) {
     if (text.startsWith(prefix)) text = text.substring(prefix.length);
   }
   return text;
+}
+
+/// Thrown instead of starting a network request while the device has no
+/// network at all (flight mode, Wi-Fi and mobile data off).
+class DeviceOfflineException implements Exception {
+  const DeviceOfflineException();
+
+  @override
+  String toString() => 'No internet connection';
+}
+
+/// True when [error] means the request never got an answer: no route,
+/// DNS failure, refused connection, or a timeout. These are what flaky or
+/// missing connectivity looks like, as opposed to the server answering with
+/// an error (bad credentials, HTTP 500, a malformed response).
+bool isConnectionError(Object error) {
+  if (error is DioException) {
+    switch (error.type) {
+      case DioExceptionType.connectionTimeout:
+      case DioExceptionType.sendTimeout:
+      case DioExceptionType.receiveTimeout:
+      case DioExceptionType.connectionError:
+        return true;
+      case DioExceptionType.unknown:
+        final inner = error.error;
+        return inner is SocketException ||
+            inner is TimeoutException ||
+            inner is HttpException;
+      case DioExceptionType.badCertificate:
+      case DioExceptionType.badResponse:
+      case DioExceptionType.cancel:
+        return false;
+    }
+  }
+  return error is SocketException ||
+      error is TimeoutException ||
+      error is DeviceOfflineException;
 }
 
 String _describeSocket(SocketException e) {

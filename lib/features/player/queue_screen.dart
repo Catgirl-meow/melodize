@@ -493,6 +493,8 @@ class _NowPlayingCard extends ConsumerWidget {
                     child: CoverArtImage(
                       coverArtId: song.coverArt,
                       externalUrl: song.externalCoverUrl,
+                      localPath: song.localPath,
+                      songId: song.id,
                       size: 64,
                     ),
                   ),
@@ -606,6 +608,8 @@ class _UpNextItem extends StatelessWidget {
                   child: CoverArtImage(
                     coverArtId: song.coverArt,
                     externalUrl: song.externalCoverUrl,
+                    localPath: song.localPath,
+                    songId: song.id,
                     size: 44,
                   ),
                 ),
@@ -684,6 +688,8 @@ class _PlayedItem extends StatelessWidget {
             child: CoverArtImage(
               coverArtId: song.coverArt,
               externalUrl: song.externalCoverUrl,
+              localPath: song.localPath,
+              songId: song.id,
               size: 36,
             ),
           ),

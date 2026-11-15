@@ -109,3 +109,13 @@ const Map<int, String> _diacriticMap = {
   0x00FD: 'y', 0x00FF: 'y',
   0x0141: 'l', 0x0142: 'l',
 };
+
+/// Folds text for substring search: lowercase, common diacritics removed,
+/// punctuation turned into spaces, whitespace collapsed. Unlike [normalize]
+/// it keeps bracketed parts and feat. clauses, because people search for
+/// "slowed" or "remix" too.
+String foldForSearch(String input) {
+  var s = _stripDiacritics(input.toLowerCase());
+  s = s.replaceAll(_punctuation, ' ');
+  return s.replaceAll(_whitespace, ' ').trim();
+}

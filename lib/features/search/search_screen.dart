@@ -86,6 +86,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final query = ref.watch(searchQueryProvider);
     final resultsAsync = ref.watch(searchResultsProvider);
     final deezerAsync = ref.watch(deezerSearchProvider);
+    final isOnline = ref.watch(isOnlineProvider).valueOrNull ?? true;
     final isWide = MediaQuery.sizeOf(context).width >= 700;
 
     return Scaffold(
@@ -142,6 +143,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                       filter: _filter,
                       resultsAsync: resultsAsync,
                       deezerAsync: deezerAsync,
+                      isOnline: isOnline,
                       onRetry: _retry,
                     ),
             ),
@@ -239,6 +241,10 @@ class _SearchResults extends StatelessWidget {
   final _SearchFilter filter;
   final AsyncValue<SearchResults> resultsAsync;
   final AsyncValue<List<RecommendedTrack>> deezerAsync;
+
+  /// Device connectivity. Offline, Deezer (an internet service) is left
+  /// out of the "All" view instead of showing a failure there.
+  final bool isOnline;
   final VoidCallback onRetry;
 
   const _SearchResults({
@@ -246,6 +252,7 @@ class _SearchResults extends StatelessWidget {
     required this.filter,
     required this.resultsAsync,
     required this.deezerAsync,
+    required this.isOnline,
     required this.onRetry,
   });
 
@@ -257,8 +264,8 @@ class _SearchResults extends StatelessWidget {
           _SearchError(query: query, error: e, onRetry: onRetry),
       data: (results) {
         final showLibrary = filter != _SearchFilter.deezer;
-        final showDeezer =
-            filter == _SearchFilter.all || filter == _SearchFilter.deezer;
+        final showDeezer = filter == _SearchFilter.deezer ||
+            (filter == _SearchFilter.all && isOnline);
         final showSongs = showLibrary &&
             (filter == _SearchFilter.all ||
                 filter == _SearchFilter.library ||
@@ -289,7 +296,7 @@ class _SearchResults extends StatelessWidget {
         if (!hasVisibleResult &&
             !deezerLoading &&
             (!showDeezer || !deezerError)) {
-          return _NoResults(query: query);
+          return _NoResults(query: query, fromCache: results.fromCache);
         }
         if (!hasVisibleResult && showDeezer && deezerError) {
           return _SearchError(
@@ -297,6 +304,9 @@ class _SearchResults extends StatelessWidget {
         }
 
         final sections = <Widget>[];
+        if (results.fromCache && showLibrary) {
+          sections.add(_CachedResultsNote(isOnline: isOnline));
+        }
         if (showSongs && results.songs.isNotEmpty) {
           sections.add(_AnimatedSection(
             label: 'Songs',
@@ -505,14 +515,55 @@ class _AnimatedSection extends StatelessWidget {
 
 class _NoResults extends StatelessWidget {
   final String query;
-  const _NoResults({required this.query});
+  final bool fromCache;
+  const _NoResults({required this.query, this.fromCache = false});
 
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Text('No results for "$query"',
-          style:
-              TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Text(
+            fromCache
+                ? 'No results for "$query" in your library as last synced'
+                : 'No results for "$query"',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant)),
+      ),
+    );
+  }
+}
+
+/// Says that library results come from the on-device cache, because the
+/// server could not be asked.
+class _CachedResultsNote extends StatelessWidget {
+  final bool isOnline;
+  const _CachedResultsNote({required this.isOnline});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final reason = isOnline ? "Can't reach your server" : "You're offline";
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Row(
+        children: [
+          Icon(Icons.offline_pin_rounded,
+              size: 18, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '$reason. Showing matches from your library as last synced, '
+              'downloaded songs first.',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

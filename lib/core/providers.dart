@@ -46,6 +46,7 @@ import 'models/artist.dart';
 import 'models/lyrics_result.dart';
 import 'models/search_results.dart';
 import 'utils/title_normalize.dart';
+import 'library/local_search.dart';
 
 // --- Database ---
 final databaseProvider = Provider<AppDatabase>((_) => AppDatabase());
@@ -352,6 +353,8 @@ final deezerArlStatusProvider = FutureProvider<DeezerArlStatus>((ref) async {
     preferencesNotifierProvider.select((p) => p.deezerArl),
   );
   if (arl.isEmpty) return DeezerArlStatus.notSet;
+  // Watching connectivity re-checks the ARL when the connection returns.
+  if (_deviceOffline(ref)) return DeezerArlStatus.unreachable;
   try {
     final ok = await DeezerClient.validateArl(arl);
     return ok ? DeezerArlStatus.valid : DeezerArlStatus.invalid;
@@ -512,7 +515,9 @@ final allSongsProvider = StreamProvider<List<Song>>((ref) async* {
   final cached = await db.getAllCachedSongs();
   yield filter(cached.map(_rowToSong).toList());
 
-  if (client != null) {
+  // Offline the cached library is the whole answer; the refresh runs when
+  // the connection returns (watching connectivity re-runs this provider).
+  if (client != null && !_deviceOffline(ref)) {
     try {
       final fresh = await client.getAllSongs();
       await db.upsertSongs(fresh.map(_songToCompanion).toList());
@@ -559,9 +564,25 @@ final allSongsProvider = StreamProvider<List<Song>>((ref) async* {
 /// say that they may be out of date.
 final librarySyncErrorProvider = StateProvider<Object?>((_) => null);
 
+/// Whether the device has no network at all. Watching it makes a provider
+/// re-run when the connection comes back, so a section that failed offline
+/// fills itself in without a manual refresh.
+///
+/// Selects the plain bool so the startup "loading → online" step doesn't
+/// count as a change and fire every server request twice.
+bool _deviceOffline(Ref ref) =>
+    !ref.watch(isOnlineProvider.select((v) => v.valueOrNull ?? true));
+
+/// The on-device library cache, for views that work offline.
+Future<List<Song>> _cachedSongs(Ref ref) async {
+  final rows = await ref.read(databaseProvider).getAllCachedSongs();
+  return rows.map(_rowToSong).toList();
+}
+
 final randomSongsProvider = FutureProvider<List<Song>>((ref) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return [];
+  if (_deviceOffline(ref)) throw const DeviceOfflineException();
   return await client.getRandomSongs(count: 20);
 });
 
@@ -615,6 +636,12 @@ final recommendationsProvider =
   if (client == null) {
     return const RecsError(
         'Connect a server in Settings to get recommendations.');
+  }
+  // Recommendations come from Deezer. Offline, say so at once instead of
+  // retrying every seed into DNS failures; watching connectivity reloads
+  // them when the connection comes back.
+  if (_deviceOffline(ref)) {
+    return const RecsError('Recommendations need an internet connection.');
   }
 
   // Library snapshot used for the already-owned cross-check. ref.read,
@@ -789,6 +816,9 @@ final deezerSearchProvider =
     FutureProvider<List<RecommendedTrack>>((ref) async {
   final query = ref.watch(searchQueryProvider).trim();
   if (query.length < 2) return [];
+  // Offline: fail at once with a clear reason instead of a DNS error after
+  // a timeout. The search screen hides Deezer results while offline.
+  if (_deviceOffline(ref)) throw const DeviceOfflineException();
   // Let errors reach the UI so a Deezer/network failure is not presented as
   // "no results". This request is also tied to the current query state.
   return ref.watch(deezerClientProvider).search(query);
@@ -802,6 +832,7 @@ final deezerSearchProvider =
 final deezerArtistTracksProvider = FutureProvider.autoDispose
     .family<List<RecommendedTrack>, String>((ref, artistName) async {
   if (artistName.trim().isEmpty) return [];
+  if (_deviceOffline(ref)) throw const DeviceOfflineException();
   final deezer = ref.watch(deezerClientProvider);
 
   final artistId = await deezer.searchBestArtist(artistName: artistName);
@@ -845,12 +876,16 @@ final recentlyPlayedProvider = FutureProvider<List<Song>>((ref) async {
 final newestAlbumsProvider = FutureProvider<List<Album>>((ref) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return [];
+  if (_deviceOffline(ref)) throw const DeviceOfflineException();
   return await client.getNewestAlbums(size: 20);
 });
 
 final allAlbumsProvider = FutureProvider<List<Album>>((ref) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return [];
+  // Offline: the albums of the cached library (the offline banner says why
+  // the list may be incomplete).
+  if (_deviceOffline(ref)) return albumsFromSongs(await _cachedSongs(ref));
   final all = <Album>[];
   int offset = 0;
   const size = 500;
@@ -867,6 +902,9 @@ final albumSongsProvider =
     FutureProvider.family<List<Song>, String>((ref, albumId) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return [];
+  if (_deviceOffline(ref)) {
+    return cachedAlbumSongs(await _cachedSongs(ref), albumId);
+  }
   return await client.getAlbumSongs(albumId);
 });
 
@@ -874,6 +912,7 @@ final albumSongsProvider =
 final allArtistsProvider = FutureProvider<List<Artist>>((ref) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return [];
+  if (_deviceOffline(ref)) return artistsFromSongs(await _cachedSongs(ref));
   return await client.getArtists();
 });
 
@@ -881,6 +920,10 @@ final artistAlbumsProvider =
     FutureProvider.family<List<Album>, String>((ref, artistId) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return [];
+  if (_deviceOffline(ref)) {
+    return albumsFromSongs(
+        cachedArtistSongs(await _cachedSongs(ref), artistId));
+  }
   return await client.getArtistAlbums(artistId);
 });
 
@@ -890,6 +933,7 @@ final artistTopSongsProvider =
     FutureProvider.family<List<Song>, String>((ref, artistName) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return [];
+  if (_deviceOffline(ref)) throw const DeviceOfflineException();
   return client.getTopSongs(artistName);
 });
 
@@ -898,6 +942,9 @@ final artistAllSongsProvider =
     FutureProvider.family<List<Song>, String>((ref, artistId) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return [];
+  if (_deviceOffline(ref)) {
+    return cachedArtistSongs(await _cachedSongs(ref), artistId);
+  }
   final albums = await client.getArtistAlbums(artistId);
   final perAlbum =
       await Future.wait(albums.map((a) => client.getAlbumSongs(a.id)));
@@ -908,6 +955,7 @@ final artistAllSongsProvider =
 final playlistsProvider = FutureProvider<List<Playlist>>((ref) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return const [];
+  if (_deviceOffline(ref)) throw const DeviceOfflineException();
   return await client.getPlaylists();
 });
 
@@ -915,6 +963,7 @@ final playlistSongsProvider =
     FutureProvider.family<List<Song>, String>((ref, playlistId) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return [];
+  if (_deviceOffline(ref)) throw const DeviceOfflineException();
   return await client.getPlaylistSongs(playlistId);
 });
 
@@ -934,10 +983,26 @@ final searchResultsProvider = FutureProvider<SearchResults>((ref) async {
   final client = ref.watch(subsonicClientProvider);
   if (client == null) return SearchResults.empty();
 
-  // Keep failures visible to the screen instead of converting them to an
-  // indistinguishable empty result. Riverpod scopes this request to the
-  // current query, so a newer query cannot be replaced by an older response.
-  return client.search(query);
+  Future<SearchResults> fromCache() async {
+    final rows = await ref.read(databaseProvider).getAllCachedSongs();
+    return searchCachedLibrary(rows.map(_rowToSong).toList(), query);
+  }
+
+  // Offline: search the library cache instead of waiting for the request
+  // to time out. The screen labels these results as coming from the cache.
+  if (_deviceOffline(ref)) return fromCache();
+
+  // Riverpod scopes this request to the current query, so a newer query
+  // cannot be replaced by an older response.
+  try {
+    return await client.search(query);
+  } catch (e) {
+    // A connection failure (flaky mobile data, VPN, server host down) falls
+    // back to the cache, labelled as such. Anything else, like rejected
+    // credentials or a server error, stays an error the screen shows.
+    if (isConnectionError(e)) return fromCache();
+    rethrow;
+  }
 });
 
 // --- Lyrics ---

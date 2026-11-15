@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:math';
 import 'package:audio_service/audio_service.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
@@ -369,7 +370,16 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     }, onError: (Object e, StackTrace _) {
       // A track that can't be loaded or decoded (server down, 404, bad
       // file). Without this the player just stops and nothing says why.
-      final title = currentSong?.title;
+      final song = currentSong;
+      final title = song?.title;
+      if (!_deviceOnline && song != null && !_withLocalFile(song).isDownloaded &&
+          song.externalStreamUrl == null) {
+        // Offline the cause is known; the platform's network error text
+        // ("Source error", "Unable to resolve host") says less than this.
+        AppErrors.report(
+            "Can't play \"$title\" offline: it isn't downloaded");
+        return;
+      }
       _reportPlayerError(
           title == null ? "Couldn't play this track" : "Couldn't play \"$title\"",
           e);
@@ -378,6 +388,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     // Clear media item on idle/completed so OriginOS doesn't show stale info.
     player.processingStateStream.listen((state) {
       if (state == ProcessingState.idle || state == ProcessingState.completed) {
+        _mediaItemGeneration++;
         mediaItem.add(null);
       }
     });      // Track shuffle history and correct auto-advance in virtual orders.
@@ -465,22 +476,83 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       final song = rawTag is Song ? rawTag : null;
 
       if (song == null) {
+        _mediaItemGeneration++;
         mediaItem.add(null);
         return;
       }
 
-      final artUri = _artUriFor(song, _config);
-      mediaItem.add(MediaItem(
-        id: song.id,
-        title: song.title,
-        artist: song.artist,
-        album: song.album,
-        duration:
-            song.duration != null ? Duration(seconds: song.duration!) : null,
-        artUri: artUri,
-      ));
+      unawaited(_emitMediaItem(song));
       _broadcastState(positionOverride: Duration.zero);
     });
+  }
+
+  /// Bumped on every media item change, so a slow art lookup for a song
+  /// that is no longer current never overwrites the newer one.
+  int _mediaItemGeneration = 0;
+
+  /// Publishes [song] to the system media controls (Android notification and
+  /// lock screen, macOS Now Playing, MPRIS).
+  ///
+  /// For a streamed song the art is handed over as the image cache's file
+  /// when the cover is already on disk (shown in the app, or prefetched by
+  /// [_prefetchUpcomingArt]). Given a URL instead, audio_service downloads
+  /// it again itself; on a weak or flaky connection that download stalls or
+  /// fails and the lock screen shows a blank tile or the previous song's
+  /// cover.
+  Future<void> _emitMediaItem(Song song) async {
+    final generation = ++_mediaItemGeneration;
+    var artUri = _artUriFor(song, _config);
+    if (artUri != null && artUri.scheme.startsWith('http')) {
+      final cached = await _cachedArtFile(artUri);
+      if (generation != _mediaItemGeneration) return;
+      if (cached != null) artUri = cached;
+    }
+    mediaItem.add(MediaItem(
+      id: song.id,
+      title: song.title,
+      artist: song.artist,
+      album: song.album,
+      duration:
+          song.duration != null ? Duration(seconds: song.duration!) : null,
+      artUri: artUri,
+    ));
+    _prefetchUpcomingArt();
+  }
+
+  /// The image cache's file for [url], or null when it isn't cached yet.
+  /// The cache is shared with the app's cover images.
+  static Future<Uri?> _cachedArtFile(Uri url) async {
+    try {
+      final info = await DefaultCacheManager().getFileFromCache(url.toString());
+      if (info == null || !info.file.existsSync()) return null;
+      return Uri.file(info.file.path);
+    } catch (e) {
+      // A cache read problem only means audio_service downloads the art
+      // itself, which is what happens for any uncached cover.
+      debugPrint('[Art] cache lookup failed for $url: $e');
+      return null;
+    }
+  }
+
+  /// Downloads the covers of the next two songs into the image cache while
+  /// the connection is usable, so the system controls have them as files
+  /// when those songs start, even if the signal has dropped by then.
+  void _prefetchUpcomingArt() {
+    final snapshot = _snapshot();
+    final songs = snapshot.songs;
+    for (var i = snapshot.currentIndex + 1;
+        i < songs.length && i <= snapshot.currentIndex + 2;
+        i++) {
+      final url = _artUriFor(songs[i], _config);
+      if (url == null || !url.scheme.startsWith('http')) continue;
+      unawaited(DefaultCacheManager()
+          .getSingleFile(url.toString())
+          .then<void>((_) {}, onError: (Object e) {
+        // Best effort: when this fails, the song's art is fetched again
+        // when it starts.
+        debugPrint('[Art] prefetch failed for ${songs[i].id}: $e');
+      }));
+    }
   }
 
   void _broadcastState({Duration? positionOverride}) {
@@ -532,7 +604,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     if (current != null &&
         song != null &&
         (song.coverArt?.isNotEmpty ?? false)) {
-      mediaItem.add(current.copyWith(artUri: _artUriFor(song, config)));
+      unawaited(_emitMediaItem(song));
     }
   }
 
@@ -2396,6 +2468,11 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   /// play from disk instead of re-streaming a file the user already has.
   Map<String, String> _downloadedFiles = const {};
 
+  bool _deviceOnline = true;
+
+  /// Device connectivity (any network interface up), from connectivity_plus.
+  void setDeviceOnline(bool online) => _deviceOnline = online;
+
   void setDownloadedFiles(Map<String, String> files) {
     _downloadedFiles = files;
   }
@@ -2652,7 +2729,9 @@ Future<void> connectAudioService(MelodizeAudioHandler handler) async {
         // Keep foreground service alive when paused so aggressive ROMs don't
         // kill the MediaSession.
         androidStopForegroundOnPause: false,
-        androidNotificationIcon: 'mipmap/ic_launcher',
+        // A monochrome silhouette: Android renders the small icon white, so
+        // the full-colour launcher icon turned into a blob in the status bar.
+        androidNotificationIcon: 'drawable/ic_stat_melodize',
       ),
     );
   } catch (e, st) {

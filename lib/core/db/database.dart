@@ -92,6 +92,10 @@ class AppDatabase extends _$AppDatabase {
   static final AppDatabase _instance = AppDatabase._internal();
   factory AppDatabase() => _instance;
 
+  /// A separate database on [executor], e.g. `NativeDatabase.memory()`.
+  /// Tests only; the app uses the singleton.
+  AppDatabase.forTesting(super.executor);
+
   @override
   int get schemaVersion => 5;
 

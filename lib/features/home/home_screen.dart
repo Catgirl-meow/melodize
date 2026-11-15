@@ -17,6 +17,7 @@ import '../../shared/widgets/error_notice.dart';
 import '../../shared/widgets/playlist_cover.dart';
 import '../library/album_detail_screen.dart';
 import '../library/playlist_detail_screen.dart';
+import '../settings/downloaded_songs_screen.dart';
 import '../settings/settings_screen.dart';
 
 // M3 Expressive motion tokens.
@@ -119,6 +120,8 @@ class HomeScreen extends ConsumerWidget {
     final reachability = ref.watch(serverReachableProvider).valueOrNull ??
         ServerReachability.reachable;
     final arlStatus = ref.watch(deezerArlStatusProvider).valueOrNull;
+    final downloaded =
+        ref.watch(downloadedSongsProvider).valueOrNull ?? const <Song>[];
     final scheme = Theme.of(context).colorScheme;
     // When the device is offline or the server unreachable, the banners at
     // the top already explain why sections are missing; otherwise a failed
@@ -145,29 +148,37 @@ class HomeScreen extends ConsumerWidget {
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
-    const SliverToBoxAdapter(child: OfflineBanner()),
-
-            // Inline greeting — replaces SliverAppBar.medium to avoid the large
-            // empty band above the bottom-aligned title on phones.
+            // Offline banner + inline greeting (replaces SliverAppBar.medium
+            // to avoid the large empty band above the bottom-aligned title on
+            // phones). The banner sits inside the safe area, below the status
+            // bar, like on the Search and Library tabs.
             SliverToBoxAdapter(
               child: SafeArea(
                 top: true,
                 bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                  child: Text(
-                    _greeting(username),
-                    style: AppTheme.pageTitleStyle(context),
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const OfflineBanner(),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                      child: Text(
+                        _greeting(username),
+                        style: AppTheme.pageTitleStyle(context),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
 
             // Deezer ARL status banner — only show when we *confirmed*
             // the ARL is rejected (not when we simply can't reach Deezer).
+            // "Can't reach Deezer" is left out while the device is offline:
+            // the offline banner already says why.
             if (arlStatus == DeezerArlStatus.invalid)
               const SliverToBoxAdapter(child: _DeezerExpiredBanner())
-            else if (arlStatus == DeezerArlStatus.unreachable)
+            else if (arlStatus == DeezerArlStatus.unreachable && isOnline)
               const SliverToBoxAdapter(child: _DeezerUnreachableBanner()),
 
             // Server status — specific message per failure mode.
@@ -182,6 +193,37 @@ class HomeScreen extends ConsumerWidget {
                           size: 16, color: scheme.onSurfaceVariant),
                       label: Text(_reachabilityMessage(reachability)),
                       onPressed: () => _refresh(ref),
+                    ),
+                  ),
+                ),
+              ),
+
+            // Without the server, lead with what can still play: the
+            // downloaded songs.
+            if (serverDown && downloaded.isNotEmpty)
+              SliverToBoxAdapter(
+                child: _fadeIn(
+                  delay: _kStagger0,
+                  child: _Section(
+                    title: 'Downloaded',
+                    trailing: TextButton(
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const DownloadedSongsScreen(),
+                        ),
+                      ),
+                      child: const Text('See all'),
+                    ),
+                    child: SizedBox(
+                      height: _carouselHeight(context),
+                      child: _buildCarousel(
+                        context: context,
+                        onItemTap: (i) => _playSongs(ref, downloaded, i),
+                        children: [
+                          for (final s in downloaded) _SongCard(song: s),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -281,13 +323,8 @@ class HomeScreen extends ConsumerWidget {
                   child: Center(child: CircularProgressIndicator()),
                 ),
               ),
-              error: (e, _) => SliverToBoxAdapter(
-                child: ErrorNotice(
-                  title: "Couldn't load songs from the server",
-                  error: e,
-                  onRetry: () => ref.invalidate(randomSongsProvider),
-                ),
-              ),
+              error: (e, _) => sectionError(
+                  "Couldn't load songs from the server", e, randomSongsProvider),
               data: (songs) => SliverToBoxAdapter(
                 child: _fadeIn(
                   delay: _kStagger2,
@@ -308,8 +345,9 @@ class HomeScreen extends ConsumerWidget {
               ),
             ),
 
-            // Recommended for You
-            _buildRecsSection(context, ref, recsAsync),
+            // Recommended for You. Deezer needs the internet, so the section
+            // waits offline instead of showing a failure under the banner.
+            if (isOnline) _buildRecsSection(context, ref, recsAsync),
 
             // Recently played
             recentAsync.when(
@@ -572,6 +610,8 @@ class _SongCard extends ConsumerWidget {
             width: double.infinity,
             child: CoverArtImage(
               coverArtId: song.coverArt,
+              // Lets a downloaded song show its saved cover offline.
+              songId: song.id,
               size: _kCardImageSize,
               borderRadius: 12,
             ),
