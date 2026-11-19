@@ -10,7 +10,7 @@ import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/utils/download_polling_mixin.dart';
-import '../../shared/utils/snack.dart';
+import '../../shared/widgets/like_button.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/offline_banner.dart';
 import '../../shared/widgets/error_notice.dart';
@@ -757,47 +757,8 @@ class _RecommendationCard extends ConsumerStatefulWidget {
 
 class _RecommendationCardState extends ConsumerState<_RecommendationCard>
     with DownloadPollingMixin {
-  Future<void> _addToLibrary() async {
-    final companion = ref.read(companionClientProvider);
-    if (companion == null) {
-      showStyledSnack(context,
-          'Companion not configured — set it up in Settings',
-          isError: true);
-      return;
-    }
-    final prefs = ref.read(preferencesNotifierProvider);
-    if (!prefs.hasDeezerArl) {
-      showStyledSnack(context,
-          'Add Deezer ARL in Settings — required for server downloads',
-          isError: true);
-      return;
-    }
-    final arlStatus = ref.read(deezerArlStatusProvider).valueOrNull;
-    if (arlStatus == DeezerArlStatus.invalid) {
-      showStyledSnack(context,
-          'Deezer session expired — update ARL in Settings',
-          isError: true);
-      return;
-    }
-    if (arlStatus == DeezerArlStatus.unreachable) {
-      showStyledSnack(context,
-          "Can't verify Deezer session — download will attempt anyway");
-    }
-    final deezerTrackId = widget.song.id.substring('deezer:'.length);
-    final url = 'https://www.deezer.com/track/$deezerTrackId';
-    showStyledSnack(context, 'Sending to server (FLAC)…');
-    try {
-      final jobId =
-          await companion.startDownload(url, deezerArl: prefs.deezerArl);
-      if (!mounted) return;
-      startDownloadPolling(companion, jobId);
-    } catch (e) {
-      if (!mounted) return;
-      showStyledSnack(context,
-          'Download could not start: ${companionStartError(e)}',
-          isError: true);
-    }
-  }
+  Future<void> _addToLibrary() =>
+      addDeezerTrackToServer(deezerIdOf(widget.song)!);
 
   void _moreLikeThis() {
     ref.read(recommendationsSeedOverrideProvider.notifier).state = (
@@ -867,6 +828,24 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
                 endIndent: 16,
                 color: scheme.outlineVariant),
             const SizedBox(height: 4),
+            Consumer(builder: (_, ref, __) {
+              final liked = ref.watch(isLikedProvider(widget.song.id));
+              return ListTile(
+                leading: Icon(
+                    liked
+                        ? Icons.favorite_rounded
+                        : Icons.favorite_border_rounded,
+                    color: liked ? scheme.primary : null),
+                title: Text(liked ? 'Unlike' : 'Like'),
+                subtitle: liked
+                    ? null
+                    : const Text('Add to your library and like it'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  toggleRecommendationLike(this, widget.song, liked: liked);
+                },
+              );
+            }),
             if (canDownload)
               ListTile(
                 leading: const Icon(Icons.library_add_rounded),

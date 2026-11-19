@@ -378,6 +378,21 @@ class SubsonicClient {
     await part.rename(destPath);
   }
 
+  // --- Likes (Subsonic star) ---
+  /// Stars [songId] on the server, which Melodize shows as "liked". Throws on
+  /// failure so the caller can undo its optimistic heart.
+  Future<void> star(String songId) => _get('star', {'id': songId});
+
+  Future<void> unstar(String songId) => _get('unstar', {'id': songId});
+
+  /// Every song the user starred, from any client.
+  Future<List<Song>> getStarredSongs() async {
+    final resp = await _get('getStarred2');
+    return (resp['starred2']?['song'] as List? ?? [])
+        .map((s) => Song.fromSubsonicJson(s as Map<String, dynamic>))
+        .toList();
+  }
+
   // --- Scrobble ---
   Future<void> scrobble(String songId, {bool submission = true}) async {
     try {

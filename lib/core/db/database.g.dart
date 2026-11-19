@@ -112,6 +112,18 @@ class $CachedSongsTable extends CachedSongs
   late final GeneratedColumn<DateTime> created = GeneratedColumn<DateTime>(
       'created', aliasedName, true,
       type: DriftSqlType.dateTime, requiredDuringInsert: false);
+  static const VerificationMeta _starredMeta =
+      const VerificationMeta('starred');
+  @override
+  late final GeneratedColumn<DateTime> starred = GeneratedColumn<DateTime>(
+      'starred', aliasedName, true,
+      type: DriftSqlType.dateTime, requiredDuringInsert: false);
+  static const VerificationMeta _playCountMeta =
+      const VerificationMeta('playCount');
+  @override
+  late final GeneratedColumn<int> playCount = GeneratedColumn<int>(
+      'play_count', aliasedName, true,
+      type: DriftSqlType.int, requiredDuringInsert: false);
   static const VerificationMeta _cachedAtMeta =
       const VerificationMeta('cachedAt');
   @override
@@ -140,6 +152,8 @@ class $CachedSongsTable extends CachedSongs
         isDownloaded,
         localPath,
         created,
+        starred,
+        playCount,
         cachedAt
       ];
   @override
@@ -235,6 +249,14 @@ class $CachedSongsTable extends CachedSongs
       context.handle(_createdMeta,
           created.isAcceptableOrUnknown(data['created']!, _createdMeta));
     }
+    if (data.containsKey('starred')) {
+      context.handle(_starredMeta,
+          starred.isAcceptableOrUnknown(data['starred']!, _starredMeta));
+    }
+    if (data.containsKey('play_count')) {
+      context.handle(_playCountMeta,
+          playCount.isAcceptableOrUnknown(data['play_count']!, _playCountMeta));
+    }
     if (data.containsKey('cached_at')) {
       context.handle(_cachedAtMeta,
           cachedAt.isAcceptableOrUnknown(data['cached_at']!, _cachedAtMeta));
@@ -284,6 +306,10 @@ class $CachedSongsTable extends CachedSongs
           .read(DriftSqlType.string, data['${effectivePrefix}local_path']),
       created: attachedDatabase.typeMapping
           .read(DriftSqlType.dateTime, data['${effectivePrefix}created']),
+      starred: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}starred']),
+      playCount: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}play_count']),
       cachedAt: attachedDatabase.typeMapping
           .read(DriftSqlType.dateTime, data['${effectivePrefix}cached_at'])!,
     );
@@ -314,6 +340,8 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
   final bool isDownloaded;
   final String? localPath;
   final DateTime? created;
+  final DateTime? starred;
+  final int? playCount;
   final DateTime cachedAt;
   const CachedSong(
       {required this.id,
@@ -334,6 +362,8 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
       required this.isDownloaded,
       this.localPath,
       this.created,
+      this.starred,
+      this.playCount,
       required this.cachedAt});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -382,6 +412,12 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
     if (!nullToAbsent || created != null) {
       map['created'] = Variable<DateTime>(created);
     }
+    if (!nullToAbsent || starred != null) {
+      map['starred'] = Variable<DateTime>(starred);
+    }
+    if (!nullToAbsent || playCount != null) {
+      map['play_count'] = Variable<int>(playCount);
+    }
     map['cached_at'] = Variable<DateTime>(cachedAt);
     return map;
   }
@@ -425,6 +461,12 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
       created: created == null && nullToAbsent
           ? const Value.absent()
           : Value(created),
+      starred: starred == null && nullToAbsent
+          ? const Value.absent()
+          : Value(starred),
+      playCount: playCount == null && nullToAbsent
+          ? const Value.absent()
+          : Value(playCount),
       cachedAt: Value(cachedAt),
     );
   }
@@ -451,6 +493,8 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
       isDownloaded: serializer.fromJson<bool>(json['isDownloaded']),
       localPath: serializer.fromJson<String?>(json['localPath']),
       created: serializer.fromJson<DateTime?>(json['created']),
+      starred: serializer.fromJson<DateTime?>(json['starred']),
+      playCount: serializer.fromJson<int?>(json['playCount']),
       cachedAt: serializer.fromJson<DateTime>(json['cachedAt']),
     );
   }
@@ -476,6 +520,8 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
       'isDownloaded': serializer.toJson<bool>(isDownloaded),
       'localPath': serializer.toJson<String?>(localPath),
       'created': serializer.toJson<DateTime?>(created),
+      'starred': serializer.toJson<DateTime?>(starred),
+      'playCount': serializer.toJson<int?>(playCount),
       'cachedAt': serializer.toJson<DateTime>(cachedAt),
     };
   }
@@ -499,6 +545,8 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
           bool? isDownloaded,
           Value<String?> localPath = const Value.absent(),
           Value<DateTime?> created = const Value.absent(),
+          Value<DateTime?> starred = const Value.absent(),
+          Value<int?> playCount = const Value.absent(),
           DateTime? cachedAt}) =>
       CachedSong(
         id: id ?? this.id,
@@ -519,6 +567,8 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
         isDownloaded: isDownloaded ?? this.isDownloaded,
         localPath: localPath.present ? localPath.value : this.localPath,
         created: created.present ? created.value : this.created,
+        starred: starred.present ? starred.value : this.starred,
+        playCount: playCount.present ? playCount.value : this.playCount,
         cachedAt: cachedAt ?? this.cachedAt,
       );
   CachedSong copyWithCompanion(CachedSongsCompanion data) {
@@ -544,6 +594,8 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
           : this.isDownloaded,
       localPath: data.localPath.present ? data.localPath.value : this.localPath,
       created: data.created.present ? data.created.value : this.created,
+      starred: data.starred.present ? data.starred.value : this.starred,
+      playCount: data.playCount.present ? data.playCount.value : this.playCount,
       cachedAt: data.cachedAt.present ? data.cachedAt.value : this.cachedAt,
     );
   }
@@ -569,32 +621,37 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
           ..write('isDownloaded: $isDownloaded, ')
           ..write('localPath: $localPath, ')
           ..write('created: $created, ')
+          ..write('starred: $starred, ')
+          ..write('playCount: $playCount, ')
           ..write('cachedAt: $cachedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(
-      id,
-      title,
-      artist,
-      album,
-      albumId,
-      artistId,
-      duration,
-      year,
-      genre,
-      track,
-      coverArt,
-      suffix,
-      contentType,
-      bitRate,
-      size,
-      isDownloaded,
-      localPath,
-      created,
-      cachedAt);
+  int get hashCode => Object.hashAll([
+        id,
+        title,
+        artist,
+        album,
+        albumId,
+        artistId,
+        duration,
+        year,
+        genre,
+        track,
+        coverArt,
+        suffix,
+        contentType,
+        bitRate,
+        size,
+        isDownloaded,
+        localPath,
+        created,
+        starred,
+        playCount,
+        cachedAt
+      ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -617,6 +674,8 @@ class CachedSong extends DataClass implements Insertable<CachedSong> {
           other.isDownloaded == this.isDownloaded &&
           other.localPath == this.localPath &&
           other.created == this.created &&
+          other.starred == this.starred &&
+          other.playCount == this.playCount &&
           other.cachedAt == this.cachedAt);
 }
 
@@ -639,6 +698,8 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
   final Value<bool> isDownloaded;
   final Value<String?> localPath;
   final Value<DateTime?> created;
+  final Value<DateTime?> starred;
+  final Value<int?> playCount;
   final Value<DateTime> cachedAt;
   final Value<int> rowid;
   const CachedSongsCompanion({
@@ -660,6 +721,8 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
     this.isDownloaded = const Value.absent(),
     this.localPath = const Value.absent(),
     this.created = const Value.absent(),
+    this.starred = const Value.absent(),
+    this.playCount = const Value.absent(),
     this.cachedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -682,6 +745,8 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
     this.isDownloaded = const Value.absent(),
     this.localPath = const Value.absent(),
     this.created = const Value.absent(),
+    this.starred = const Value.absent(),
+    this.playCount = const Value.absent(),
     this.cachedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
@@ -707,6 +772,8 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
     Expression<bool>? isDownloaded,
     Expression<String>? localPath,
     Expression<DateTime>? created,
+    Expression<DateTime>? starred,
+    Expression<int>? playCount,
     Expression<DateTime>? cachedAt,
     Expression<int>? rowid,
   }) {
@@ -729,6 +796,8 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
       if (isDownloaded != null) 'is_downloaded': isDownloaded,
       if (localPath != null) 'local_path': localPath,
       if (created != null) 'created': created,
+      if (starred != null) 'starred': starred,
+      if (playCount != null) 'play_count': playCount,
       if (cachedAt != null) 'cached_at': cachedAt,
       if (rowid != null) 'rowid': rowid,
     });
@@ -753,6 +822,8 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
       Value<bool>? isDownloaded,
       Value<String?>? localPath,
       Value<DateTime?>? created,
+      Value<DateTime?>? starred,
+      Value<int?>? playCount,
       Value<DateTime>? cachedAt,
       Value<int>? rowid}) {
     return CachedSongsCompanion(
@@ -774,6 +845,8 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
       isDownloaded: isDownloaded ?? this.isDownloaded,
       localPath: localPath ?? this.localPath,
       created: created ?? this.created,
+      starred: starred ?? this.starred,
+      playCount: playCount ?? this.playCount,
       cachedAt: cachedAt ?? this.cachedAt,
       rowid: rowid ?? this.rowid,
     );
@@ -836,6 +909,12 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
     if (created.present) {
       map['created'] = Variable<DateTime>(created.value);
     }
+    if (starred.present) {
+      map['starred'] = Variable<DateTime>(starred.value);
+    }
+    if (playCount.present) {
+      map['play_count'] = Variable<int>(playCount.value);
+    }
     if (cachedAt.present) {
       map['cached_at'] = Variable<DateTime>(cachedAt.value);
     }
@@ -866,6 +945,8 @@ class CachedSongsCompanion extends UpdateCompanion<CachedSong> {
           ..write('isDownloaded: $isDownloaded, ')
           ..write('localPath: $localPath, ')
           ..write('created: $created, ')
+          ..write('starred: $starred, ')
+          ..write('playCount: $playCount, ')
           ..write('cachedAt: $cachedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -2267,6 +2348,417 @@ class LyricsCacheCompanion extends UpdateCompanion<LyricsCacheData> {
   }
 }
 
+class $PendingLikesTable extends PendingLikes
+    with TableInfo<$PendingLikesTable, PendingLike> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $PendingLikesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _deezerIdMeta =
+      const VerificationMeta('deezerId');
+  @override
+  late final GeneratedColumn<int> deezerId = GeneratedColumn<int>(
+      'deezer_id', aliasedName, false,
+      type: DriftSqlType.int, requiredDuringInsert: false);
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+      'title', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _artistMeta = const VerificationMeta('artist');
+  @override
+  late final GeneratedColumn<String> artist = GeneratedColumn<String>(
+      'artist', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _albumMeta = const VerificationMeta('album');
+  @override
+  late final GeneratedColumn<String> album = GeneratedColumn<String>(
+      'album', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _durationMeta =
+      const VerificationMeta('duration');
+  @override
+  late final GeneratedColumn<int> duration = GeneratedColumn<int>(
+      'duration', aliasedName, true,
+      type: DriftSqlType.int, requiredDuringInsert: false);
+  static const VerificationMeta _coverUrlMeta =
+      const VerificationMeta('coverUrl');
+  @override
+  late final GeneratedColumn<String> coverUrl = GeneratedColumn<String>(
+      'cover_url', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _previewUrlMeta =
+      const VerificationMeta('previewUrl');
+  @override
+  late final GeneratedColumn<String> previewUrl = GeneratedColumn<String>(
+      'preview_url', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _likedAtMeta =
+      const VerificationMeta('likedAt');
+  @override
+  late final GeneratedColumn<DateTime> likedAt = GeneratedColumn<DateTime>(
+      'liked_at', aliasedName, false,
+      type: DriftSqlType.dateTime,
+      requiredDuringInsert: false,
+      defaultValue: currentDateAndTime);
+  @override
+  List<GeneratedColumn> get $columns =>
+      [deezerId, title, artist, album, duration, coverUrl, previewUrl, likedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'pending_likes';
+  @override
+  VerificationContext validateIntegrity(Insertable<PendingLike> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('deezer_id')) {
+      context.handle(_deezerIdMeta,
+          deezerId.isAcceptableOrUnknown(data['deezer_id']!, _deezerIdMeta));
+    }
+    if (data.containsKey('title')) {
+      context.handle(
+          _titleMeta, title.isAcceptableOrUnknown(data['title']!, _titleMeta));
+    } else if (isInserting) {
+      context.missing(_titleMeta);
+    }
+    if (data.containsKey('artist')) {
+      context.handle(_artistMeta,
+          artist.isAcceptableOrUnknown(data['artist']!, _artistMeta));
+    } else if (isInserting) {
+      context.missing(_artistMeta);
+    }
+    if (data.containsKey('album')) {
+      context.handle(
+          _albumMeta, album.isAcceptableOrUnknown(data['album']!, _albumMeta));
+    } else if (isInserting) {
+      context.missing(_albumMeta);
+    }
+    if (data.containsKey('duration')) {
+      context.handle(_durationMeta,
+          duration.isAcceptableOrUnknown(data['duration']!, _durationMeta));
+    }
+    if (data.containsKey('cover_url')) {
+      context.handle(_coverUrlMeta,
+          coverUrl.isAcceptableOrUnknown(data['cover_url']!, _coverUrlMeta));
+    }
+    if (data.containsKey('preview_url')) {
+      context.handle(
+          _previewUrlMeta,
+          previewUrl.isAcceptableOrUnknown(
+              data['preview_url']!, _previewUrlMeta));
+    }
+    if (data.containsKey('liked_at')) {
+      context.handle(_likedAtMeta,
+          likedAt.isAcceptableOrUnknown(data['liked_at']!, _likedAtMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {deezerId};
+  @override
+  PendingLike map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return PendingLike(
+      deezerId: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}deezer_id'])!,
+      title: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}title'])!,
+      artist: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}artist'])!,
+      album: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}album'])!,
+      duration: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}duration']),
+      coverUrl: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}cover_url']),
+      previewUrl: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}preview_url']),
+      likedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}liked_at'])!,
+    );
+  }
+
+  @override
+  $PendingLikesTable createAlias(String alias) {
+    return $PendingLikesTable(attachedDatabase, alias);
+  }
+}
+
+class PendingLike extends DataClass implements Insertable<PendingLike> {
+  final int deezerId;
+  final String title;
+  final String artist;
+  final String album;
+  final int? duration;
+  final String? coverUrl;
+  final String? previewUrl;
+  final DateTime likedAt;
+  const PendingLike(
+      {required this.deezerId,
+      required this.title,
+      required this.artist,
+      required this.album,
+      this.duration,
+      this.coverUrl,
+      this.previewUrl,
+      required this.likedAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['deezer_id'] = Variable<int>(deezerId);
+    map['title'] = Variable<String>(title);
+    map['artist'] = Variable<String>(artist);
+    map['album'] = Variable<String>(album);
+    if (!nullToAbsent || duration != null) {
+      map['duration'] = Variable<int>(duration);
+    }
+    if (!nullToAbsent || coverUrl != null) {
+      map['cover_url'] = Variable<String>(coverUrl);
+    }
+    if (!nullToAbsent || previewUrl != null) {
+      map['preview_url'] = Variable<String>(previewUrl);
+    }
+    map['liked_at'] = Variable<DateTime>(likedAt);
+    return map;
+  }
+
+  PendingLikesCompanion toCompanion(bool nullToAbsent) {
+    return PendingLikesCompanion(
+      deezerId: Value(deezerId),
+      title: Value(title),
+      artist: Value(artist),
+      album: Value(album),
+      duration: duration == null && nullToAbsent
+          ? const Value.absent()
+          : Value(duration),
+      coverUrl: coverUrl == null && nullToAbsent
+          ? const Value.absent()
+          : Value(coverUrl),
+      previewUrl: previewUrl == null && nullToAbsent
+          ? const Value.absent()
+          : Value(previewUrl),
+      likedAt: Value(likedAt),
+    );
+  }
+
+  factory PendingLike.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return PendingLike(
+      deezerId: serializer.fromJson<int>(json['deezerId']),
+      title: serializer.fromJson<String>(json['title']),
+      artist: serializer.fromJson<String>(json['artist']),
+      album: serializer.fromJson<String>(json['album']),
+      duration: serializer.fromJson<int?>(json['duration']),
+      coverUrl: serializer.fromJson<String?>(json['coverUrl']),
+      previewUrl: serializer.fromJson<String?>(json['previewUrl']),
+      likedAt: serializer.fromJson<DateTime>(json['likedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'deezerId': serializer.toJson<int>(deezerId),
+      'title': serializer.toJson<String>(title),
+      'artist': serializer.toJson<String>(artist),
+      'album': serializer.toJson<String>(album),
+      'duration': serializer.toJson<int?>(duration),
+      'coverUrl': serializer.toJson<String?>(coverUrl),
+      'previewUrl': serializer.toJson<String?>(previewUrl),
+      'likedAt': serializer.toJson<DateTime>(likedAt),
+    };
+  }
+
+  PendingLike copyWith(
+          {int? deezerId,
+          String? title,
+          String? artist,
+          String? album,
+          Value<int?> duration = const Value.absent(),
+          Value<String?> coverUrl = const Value.absent(),
+          Value<String?> previewUrl = const Value.absent(),
+          DateTime? likedAt}) =>
+      PendingLike(
+        deezerId: deezerId ?? this.deezerId,
+        title: title ?? this.title,
+        artist: artist ?? this.artist,
+        album: album ?? this.album,
+        duration: duration.present ? duration.value : this.duration,
+        coverUrl: coverUrl.present ? coverUrl.value : this.coverUrl,
+        previewUrl: previewUrl.present ? previewUrl.value : this.previewUrl,
+        likedAt: likedAt ?? this.likedAt,
+      );
+  PendingLike copyWithCompanion(PendingLikesCompanion data) {
+    return PendingLike(
+      deezerId: data.deezerId.present ? data.deezerId.value : this.deezerId,
+      title: data.title.present ? data.title.value : this.title,
+      artist: data.artist.present ? data.artist.value : this.artist,
+      album: data.album.present ? data.album.value : this.album,
+      duration: data.duration.present ? data.duration.value : this.duration,
+      coverUrl: data.coverUrl.present ? data.coverUrl.value : this.coverUrl,
+      previewUrl:
+          data.previewUrl.present ? data.previewUrl.value : this.previewUrl,
+      likedAt: data.likedAt.present ? data.likedAt.value : this.likedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PendingLike(')
+          ..write('deezerId: $deezerId, ')
+          ..write('title: $title, ')
+          ..write('artist: $artist, ')
+          ..write('album: $album, ')
+          ..write('duration: $duration, ')
+          ..write('coverUrl: $coverUrl, ')
+          ..write('previewUrl: $previewUrl, ')
+          ..write('likedAt: $likedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+      deezerId, title, artist, album, duration, coverUrl, previewUrl, likedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is PendingLike &&
+          other.deezerId == this.deezerId &&
+          other.title == this.title &&
+          other.artist == this.artist &&
+          other.album == this.album &&
+          other.duration == this.duration &&
+          other.coverUrl == this.coverUrl &&
+          other.previewUrl == this.previewUrl &&
+          other.likedAt == this.likedAt);
+}
+
+class PendingLikesCompanion extends UpdateCompanion<PendingLike> {
+  final Value<int> deezerId;
+  final Value<String> title;
+  final Value<String> artist;
+  final Value<String> album;
+  final Value<int?> duration;
+  final Value<String?> coverUrl;
+  final Value<String?> previewUrl;
+  final Value<DateTime> likedAt;
+  const PendingLikesCompanion({
+    this.deezerId = const Value.absent(),
+    this.title = const Value.absent(),
+    this.artist = const Value.absent(),
+    this.album = const Value.absent(),
+    this.duration = const Value.absent(),
+    this.coverUrl = const Value.absent(),
+    this.previewUrl = const Value.absent(),
+    this.likedAt = const Value.absent(),
+  });
+  PendingLikesCompanion.insert({
+    this.deezerId = const Value.absent(),
+    required String title,
+    required String artist,
+    required String album,
+    this.duration = const Value.absent(),
+    this.coverUrl = const Value.absent(),
+    this.previewUrl = const Value.absent(),
+    this.likedAt = const Value.absent(),
+  })  : title = Value(title),
+        artist = Value(artist),
+        album = Value(album);
+  static Insertable<PendingLike> custom({
+    Expression<int>? deezerId,
+    Expression<String>? title,
+    Expression<String>? artist,
+    Expression<String>? album,
+    Expression<int>? duration,
+    Expression<String>? coverUrl,
+    Expression<String>? previewUrl,
+    Expression<DateTime>? likedAt,
+  }) {
+    return RawValuesInsertable({
+      if (deezerId != null) 'deezer_id': deezerId,
+      if (title != null) 'title': title,
+      if (artist != null) 'artist': artist,
+      if (album != null) 'album': album,
+      if (duration != null) 'duration': duration,
+      if (coverUrl != null) 'cover_url': coverUrl,
+      if (previewUrl != null) 'preview_url': previewUrl,
+      if (likedAt != null) 'liked_at': likedAt,
+    });
+  }
+
+  PendingLikesCompanion copyWith(
+      {Value<int>? deezerId,
+      Value<String>? title,
+      Value<String>? artist,
+      Value<String>? album,
+      Value<int?>? duration,
+      Value<String?>? coverUrl,
+      Value<String?>? previewUrl,
+      Value<DateTime>? likedAt}) {
+    return PendingLikesCompanion(
+      deezerId: deezerId ?? this.deezerId,
+      title: title ?? this.title,
+      artist: artist ?? this.artist,
+      album: album ?? this.album,
+      duration: duration ?? this.duration,
+      coverUrl: coverUrl ?? this.coverUrl,
+      previewUrl: previewUrl ?? this.previewUrl,
+      likedAt: likedAt ?? this.likedAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (deezerId.present) {
+      map['deezer_id'] = Variable<int>(deezerId.value);
+    }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (artist.present) {
+      map['artist'] = Variable<String>(artist.value);
+    }
+    if (album.present) {
+      map['album'] = Variable<String>(album.value);
+    }
+    if (duration.present) {
+      map['duration'] = Variable<int>(duration.value);
+    }
+    if (coverUrl.present) {
+      map['cover_url'] = Variable<String>(coverUrl.value);
+    }
+    if (previewUrl.present) {
+      map['preview_url'] = Variable<String>(previewUrl.value);
+    }
+    if (likedAt.present) {
+      map['liked_at'] = Variable<DateTime>(likedAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PendingLikesCompanion(')
+          ..write('deezerId: $deezerId, ')
+          ..write('title: $title, ')
+          ..write('artist: $artist, ')
+          ..write('album: $album, ')
+          ..write('duration: $duration, ')
+          ..write('coverUrl: $coverUrl, ')
+          ..write('previewUrl: $previewUrl, ')
+          ..write('likedAt: $likedAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2275,12 +2767,19 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $ServerConfigTable serverConfig = $ServerConfigTable(this);
   late final $DownloadQueueTable downloadQueue = $DownloadQueueTable(this);
   late final $LyricsCacheTable lyricsCache = $LyricsCacheTable(this);
+  late final $PendingLikesTable pendingLikes = $PendingLikesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities =>
-      [cachedSongs, playHistory, serverConfig, downloadQueue, lyricsCache];
+  List<DatabaseSchemaEntity> get allSchemaEntities => [
+        cachedSongs,
+        playHistory,
+        serverConfig,
+        downloadQueue,
+        lyricsCache,
+        pendingLikes
+      ];
 }
 
 typedef $$CachedSongsTableCreateCompanionBuilder = CachedSongsCompanion
@@ -2303,6 +2802,8 @@ typedef $$CachedSongsTableCreateCompanionBuilder = CachedSongsCompanion
   Value<bool> isDownloaded,
   Value<String?> localPath,
   Value<DateTime?> created,
+  Value<DateTime?> starred,
+  Value<int?> playCount,
   Value<DateTime> cachedAt,
   Value<int> rowid,
 });
@@ -2326,6 +2827,8 @@ typedef $$CachedSongsTableUpdateCompanionBuilder = CachedSongsCompanion
   Value<bool> isDownloaded,
   Value<String?> localPath,
   Value<DateTime?> created,
+  Value<DateTime?> starred,
+  Value<int?> playCount,
   Value<DateTime> cachedAt,
   Value<int> rowid,
 });
@@ -2392,6 +2895,12 @@ class $$CachedSongsTableFilterComposer
 
   ColumnFilters<DateTime> get created => $composableBuilder(
       column: $table.created, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get starred => $composableBuilder(
+      column: $table.starred, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get playCount => $composableBuilder(
+      column: $table.playCount, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<DateTime> get cachedAt => $composableBuilder(
       column: $table.cachedAt, builder: (column) => ColumnFilters(column));
@@ -2461,6 +2970,12 @@ class $$CachedSongsTableOrderingComposer
   ColumnOrderings<DateTime> get created => $composableBuilder(
       column: $table.created, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<DateTime> get starred => $composableBuilder(
+      column: $table.starred, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get playCount => $composableBuilder(
+      column: $table.playCount, builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<DateTime> get cachedAt => $composableBuilder(
       column: $table.cachedAt, builder: (column) => ColumnOrderings(column));
 }
@@ -2528,6 +3043,12 @@ class $$CachedSongsTableAnnotationComposer
   GeneratedColumn<DateTime> get created =>
       $composableBuilder(column: $table.created, builder: (column) => column);
 
+  GeneratedColumn<DateTime> get starred =>
+      $composableBuilder(column: $table.starred, builder: (column) => column);
+
+  GeneratedColumn<int> get playCount =>
+      $composableBuilder(column: $table.playCount, builder: (column) => column);
+
   GeneratedColumn<DateTime> get cachedAt =>
       $composableBuilder(column: $table.cachedAt, builder: (column) => column);
 }
@@ -2573,6 +3094,8 @@ class $$CachedSongsTableTableManager extends RootTableManager<
             Value<bool> isDownloaded = const Value.absent(),
             Value<String?> localPath = const Value.absent(),
             Value<DateTime?> created = const Value.absent(),
+            Value<DateTime?> starred = const Value.absent(),
+            Value<int?> playCount = const Value.absent(),
             Value<DateTime> cachedAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
@@ -2595,6 +3118,8 @@ class $$CachedSongsTableTableManager extends RootTableManager<
             isDownloaded: isDownloaded,
             localPath: localPath,
             created: created,
+            starred: starred,
+            playCount: playCount,
             cachedAt: cachedAt,
             rowid: rowid,
           ),
@@ -2617,6 +3142,8 @@ class $$CachedSongsTableTableManager extends RootTableManager<
             Value<bool> isDownloaded = const Value.absent(),
             Value<String?> localPath = const Value.absent(),
             Value<DateTime?> created = const Value.absent(),
+            Value<DateTime?> starred = const Value.absent(),
+            Value<int?> playCount = const Value.absent(),
             Value<DateTime> cachedAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
@@ -2639,6 +3166,8 @@ class $$CachedSongsTableTableManager extends RootTableManager<
             isDownloaded: isDownloaded,
             localPath: localPath,
             created: created,
+            starred: starred,
+            playCount: playCount,
             cachedAt: cachedAt,
             rowid: rowid,
           ),
@@ -3403,6 +3932,218 @@ typedef $$LyricsCacheTableProcessedTableManager = ProcessedTableManager<
     ),
     LyricsCacheData,
     PrefetchHooks Function()>;
+typedef $$PendingLikesTableCreateCompanionBuilder = PendingLikesCompanion
+    Function({
+  Value<int> deezerId,
+  required String title,
+  required String artist,
+  required String album,
+  Value<int?> duration,
+  Value<String?> coverUrl,
+  Value<String?> previewUrl,
+  Value<DateTime> likedAt,
+});
+typedef $$PendingLikesTableUpdateCompanionBuilder = PendingLikesCompanion
+    Function({
+  Value<int> deezerId,
+  Value<String> title,
+  Value<String> artist,
+  Value<String> album,
+  Value<int?> duration,
+  Value<String?> coverUrl,
+  Value<String?> previewUrl,
+  Value<DateTime> likedAt,
+});
+
+class $$PendingLikesTableFilterComposer
+    extends Composer<_$AppDatabase, $PendingLikesTable> {
+  $$PendingLikesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get deezerId => $composableBuilder(
+      column: $table.deezerId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get title => $composableBuilder(
+      column: $table.title, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get artist => $composableBuilder(
+      column: $table.artist, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get album => $composableBuilder(
+      column: $table.album, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get duration => $composableBuilder(
+      column: $table.duration, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get coverUrl => $composableBuilder(
+      column: $table.coverUrl, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get previewUrl => $composableBuilder(
+      column: $table.previewUrl, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get likedAt => $composableBuilder(
+      column: $table.likedAt, builder: (column) => ColumnFilters(column));
+}
+
+class $$PendingLikesTableOrderingComposer
+    extends Composer<_$AppDatabase, $PendingLikesTable> {
+  $$PendingLikesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get deezerId => $composableBuilder(
+      column: $table.deezerId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get title => $composableBuilder(
+      column: $table.title, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get artist => $composableBuilder(
+      column: $table.artist, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get album => $composableBuilder(
+      column: $table.album, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get duration => $composableBuilder(
+      column: $table.duration, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get coverUrl => $composableBuilder(
+      column: $table.coverUrl, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get previewUrl => $composableBuilder(
+      column: $table.previewUrl, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get likedAt => $composableBuilder(
+      column: $table.likedAt, builder: (column) => ColumnOrderings(column));
+}
+
+class $$PendingLikesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $PendingLikesTable> {
+  $$PendingLikesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get deezerId =>
+      $composableBuilder(column: $table.deezerId, builder: (column) => column);
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get artist =>
+      $composableBuilder(column: $table.artist, builder: (column) => column);
+
+  GeneratedColumn<String> get album =>
+      $composableBuilder(column: $table.album, builder: (column) => column);
+
+  GeneratedColumn<int> get duration =>
+      $composableBuilder(column: $table.duration, builder: (column) => column);
+
+  GeneratedColumn<String> get coverUrl =>
+      $composableBuilder(column: $table.coverUrl, builder: (column) => column);
+
+  GeneratedColumn<String> get previewUrl => $composableBuilder(
+      column: $table.previewUrl, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get likedAt =>
+      $composableBuilder(column: $table.likedAt, builder: (column) => column);
+}
+
+class $$PendingLikesTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $PendingLikesTable,
+    PendingLike,
+    $$PendingLikesTableFilterComposer,
+    $$PendingLikesTableOrderingComposer,
+    $$PendingLikesTableAnnotationComposer,
+    $$PendingLikesTableCreateCompanionBuilder,
+    $$PendingLikesTableUpdateCompanionBuilder,
+    (
+      PendingLike,
+      BaseReferences<_$AppDatabase, $PendingLikesTable, PendingLike>
+    ),
+    PendingLike,
+    PrefetchHooks Function()> {
+  $$PendingLikesTableTableManager(_$AppDatabase db, $PendingLikesTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$PendingLikesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$PendingLikesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$PendingLikesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<int> deezerId = const Value.absent(),
+            Value<String> title = const Value.absent(),
+            Value<String> artist = const Value.absent(),
+            Value<String> album = const Value.absent(),
+            Value<int?> duration = const Value.absent(),
+            Value<String?> coverUrl = const Value.absent(),
+            Value<String?> previewUrl = const Value.absent(),
+            Value<DateTime> likedAt = const Value.absent(),
+          }) =>
+              PendingLikesCompanion(
+            deezerId: deezerId,
+            title: title,
+            artist: artist,
+            album: album,
+            duration: duration,
+            coverUrl: coverUrl,
+            previewUrl: previewUrl,
+            likedAt: likedAt,
+          ),
+          createCompanionCallback: ({
+            Value<int> deezerId = const Value.absent(),
+            required String title,
+            required String artist,
+            required String album,
+            Value<int?> duration = const Value.absent(),
+            Value<String?> coverUrl = const Value.absent(),
+            Value<String?> previewUrl = const Value.absent(),
+            Value<DateTime> likedAt = const Value.absent(),
+          }) =>
+              PendingLikesCompanion.insert(
+            deezerId: deezerId,
+            title: title,
+            artist: artist,
+            album: album,
+            duration: duration,
+            coverUrl: coverUrl,
+            previewUrl: previewUrl,
+            likedAt: likedAt,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$PendingLikesTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $PendingLikesTable,
+    PendingLike,
+    $$PendingLikesTableFilterComposer,
+    $$PendingLikesTableOrderingComposer,
+    $$PendingLikesTableAnnotationComposer,
+    $$PendingLikesTableCreateCompanionBuilder,
+    $$PendingLikesTableUpdateCompanionBuilder,
+    (
+      PendingLike,
+      BaseReferences<_$AppDatabase, $PendingLikesTable, PendingLike>
+    ),
+    PendingLike,
+    PrefetchHooks Function()>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -3417,4 +4158,6 @@ class $AppDatabaseManager {
       $$DownloadQueueTableTableManager(_db, _db.downloadQueue);
   $$LyricsCacheTableTableManager get lyricsCache =>
       $$LyricsCacheTableTableManager(_db, _db.lyricsCache);
+  $$PendingLikesTableTableManager get pendingLikes =>
+      $$PendingLikesTableTableManager(_db, _db.pendingLikes);
 }

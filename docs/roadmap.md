@@ -26,8 +26,9 @@ playback rework, the queue rewrite) is in git history and the release notes.
 
 ## Not planned
 
-Starred songs and favourites, CarPlay / Android Auto, macOS and iOS (macOS support was removed in November 2026), and recommendations from Navidrome's
-similar-songs API (Deezer finds music you don't already have).
+CarPlay / Android Auto, macOS and iOS (macOS support was removed in November 2026), and
+recommendations from Navidrome's similar-songs API (Deezer finds music you don't already have).
 
-Dropped for now (October 2026): a wavy progress bar, haptics, "not interested" on
-recommendations, and a collapsing app bar on Library.
+Dropped for now (October 2026): a wavy progress bar, haptics, and a collapsing app bar on
+Library. Likes (Subsonic star) and "not interested" on recommendations were picked back up in
+November 2026 as part of taste-aware recommendations.

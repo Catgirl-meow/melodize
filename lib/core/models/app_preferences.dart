@@ -24,6 +24,7 @@ class AppPreferences {
       floatingNavBar; // true = floating pill dock, false = classic nav bar
   final String themeMode; // 'dark' | 'light' | 'system'
   final String shuffleMode; // 'off' | 'shuffle' | 'smartShuffle'
+  final bool downloadLikedOffline; // liking a song also saves it on device
 
   const AppPreferences({
     this.streamQuality = 'lossless',
@@ -41,6 +42,7 @@ class AppPreferences {
     this.floatingNavBar = true,
     this.themeMode = 'dark',
     this.shuffleMode = 'off',
+    this.downloadLikedOffline = false,
   });
 
   bool get hasCompanion =>
@@ -63,6 +65,7 @@ class AppPreferences {
     bool? floatingNavBar,
     String? themeMode,
     String? shuffleMode,
+    bool? downloadLikedOffline,
   }) =>
       AppPreferences(
         streamQuality: streamQuality ?? this.streamQuality,
@@ -82,6 +85,7 @@ class AppPreferences {
         floatingNavBar: floatingNavBar ?? this.floatingNavBar,
         themeMode: themeMode ?? this.themeMode,
         shuffleMode: shuffleMode ?? this.shuffleMode,
+        downloadLikedOffline: downloadLikedOffline ?? this.downloadLikedOffline,
       );
 
   // Tolerant field readers: one field with an unexpected type must not make
@@ -105,6 +109,7 @@ class AppPreferences {
         floatingNavBar: _bool(j['floatingNavBar'], true),
         themeMode: _str(j['themeMode'], 'dark'),
         shuffleMode: _str(j['shuffleMode'], 'off'),
+        downloadLikedOffline: _bool(j['downloadLikedOffline'], false),
       );
 
   Map<String, dynamic> toJson() => {
@@ -123,6 +128,7 @@ class AppPreferences {
         'floatingNavBar': floatingNavBar,
         'themeMode': themeMode,
         'shuffleMode': shuffleMode,
+        'downloadLikedOffline': downloadLikedOffline,
       };
 
   static Future<File> get _file async {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/album.dart';
+import '../../core/db/database.dart' show PendingLike;
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/theme/app_theme.dart';
@@ -8,6 +9,8 @@ import '../../shared/widgets/album_grid_tile.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/error_notice.dart';
 import '../../shared/widgets/offline_banner.dart';
+import '../../shared/utils/download_polling_mixin.dart';
+import '../../shared/widgets/section_header.dart';
 import '../../shared/widgets/song_tile.dart';
 import 'album_detail_screen.dart';
 import 'artist_detail_screen.dart';
@@ -114,7 +117,9 @@ class LibraryScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return DefaultTabController(
-      length: 3,
+      length: 4,
+      // Songs stays the tab the screen opens on; Liked is one swipe left.
+      initialIndex: 1,
       child: Scaffold(
         appBar: AppBar(
           title: Text('Library', style: AppTheme.pageTitleStyle(context)),
@@ -124,6 +129,7 @@ class LibraryScreen extends ConsumerWidget {
           scrolledUnderElevation: 0,
           bottom: const TabBar(
             tabs: [
+              Tab(text: 'Liked'),
               Tab(text: 'Songs'),
               Tab(text: 'Albums'),
               Tab(text: 'Artists'),
@@ -136,6 +142,7 @@ class LibraryScreen extends ConsumerWidget {
             Expanded(
               child: TabBarView(
                 children: [
+                  RepaintBoundary(child: _LikedTab()),
                   RepaintBoundary(child: _SongsTab()),
                   RepaintBoundary(child: _AlbumsTab()),
                   RepaintBoundary(child: _ArtistsTab()),
@@ -642,6 +649,246 @@ class _ArtistsTabState extends ConsumerState<_ArtistsTab>
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// Liked
+
+class _LikedTab extends ConsumerStatefulWidget {
+  const _LikedTab();
+
+  @override
+  ConsumerState<_LikedTab> createState() => _LikedTabState();
+}
+
+class _LikedTabState extends ConsumerState<_LikedTab>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final likedAsync = ref.watch(likedSongsProvider);
+    final pendingAsync = ref.watch(pendingLikesProvider);
+    final pending = pendingAsync.valueOrNull ?? const <PendingLike>[];
+    final handler = ref.read(audioHandlerNotifierProvider);
+    final pendingError = pendingAsync.hasError
+        ? ErrorNotice(
+            title: "Couldn't read liked recommendations",
+            error: pendingAsync.error!,
+            compact: true,
+            onRetry: () => ref.invalidate(pendingLikesProvider),
+          )
+        : null;
+
+    return likedAsync.when(
+      skipLoadingOnReload: true,
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => ErrorNotice(
+        title: "Couldn't load liked songs",
+        error: e,
+        onRetry: () => ref.invalidate(allSongsProvider),
+      ),
+      data: (songs) {
+        if (songs.isEmpty && pending.isEmpty && pendingError == null) {
+          return const _LikedEmpty();
+        }
+        return CustomScrollView(
+          slivers: [
+            if (pendingError != null) SliverToBoxAdapter(child: pendingError),
+            if (songs.isNotEmpty)
+              SliverToBoxAdapter(
+                child: _LikedHeader(
+                  songs: songs,
+                  onPlay: () => handler?.loadQueue(songs),
+                ),
+              ),
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (_, i) => RepaintBoundary(
+                  child: SongTile(
+                    song: songs[i],
+                    showAlbum: true,
+                    onTap: () => handler?.loadQueue(songs, startIndex: i),
+                  ),
+                ),
+                childCount: songs.length,
+              ),
+            ),
+            if (pending.isNotEmpty) ...[
+              SliverToBoxAdapter(
+                child: SectionHeader('Waiting to be added',
+                    count: '${pending.length}'),
+              ),
+              SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (_, i) => _PendingLikeTile(like: pending[i]),
+                  childCount: pending.length,
+                ),
+              ),
+            ],
+            SliverPadding(
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.paddingOf(context).bottom + 16),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _LikedHeader extends StatelessWidget {
+  final List<Song> songs;
+  final VoidCallback onPlay;
+  const _LikedHeader({required this.songs, required this.onPlay});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final seconds = songs.fold<int>(0, (sum, s) => sum + (s.duration ?? 0));
+    final h = seconds ~/ 3600, m = (seconds % 3600) ~/ 60;
+    final length = h > 0 ? '$h h $m min' : '$m min';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Material(
+        color: scheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPlay,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: scheme.primary,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(Icons.play_arrow_rounded,
+                      size: 32, color: scheme.onPrimary),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Liked songs',
+                          style: text.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: scheme.onSecondaryContainer)),
+                      Text(
+                          '${songs.length} song${songs.length == 1 ? '' : 's'} · $length',
+                          style: text.bodyMedium?.copyWith(
+                              color: scheme.onSecondaryContainer
+                                  .withValues(alpha: 0.8))),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LikedEmpty extends StatelessWidget {
+  const _LikedEmpty();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.favorite_border_rounded,
+                size: 48, color: scheme.onSurfaceVariant),
+            const SizedBox(height: 12),
+            Text('No liked songs yet', style: text.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              'Tap the heart on Now Playing or in a song\'s menu. Likes sync '
+              'with your Navidrome server.',
+              textAlign: TextAlign.center,
+              style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A liked Deezer track that isn't in the library yet (the companion add is
+/// still running, failed, or there is no companion). Tap to preview; Add
+/// retries the server download.
+class _PendingLikeTile extends ConsumerStatefulWidget {
+  final PendingLike like;
+  const _PendingLikeTile({required this.like});
+
+  @override
+  ConsumerState<_PendingLikeTile> createState() => _PendingLikeTileState();
+}
+
+class _PendingLikeTileState extends ConsumerState<_PendingLikeTile>
+    with DownloadPollingMixin {
+  @override
+  Widget build(BuildContext context) {
+    final like = widget.like;
+    final scheme = Theme.of(context).colorScheme;
+    final canAdd = ref.watch(companionClientProvider) != null;
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      leading: CoverArtImage(
+          coverArtId: null, externalUrl: like.coverUrl, size: 48),
+      title: Text(like.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text('${like.artist} · preview',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: scheme.onSurfaceVariant)),
+      onTap: like.previewUrl == null
+          ? null
+          : () => ref.read(audioHandlerNotifierProvider)?.loadQueue([
+                Song.fromRecommendation(
+                  deezerId: like.deezerId,
+                  title: like.title,
+                  artist: like.artist,
+                  album: like.album,
+                  durationSeconds: like.duration ?? 0,
+                  previewUrl: like.previewUrl,
+                  coverUrl: like.coverUrl,
+                ),
+              ]),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (canAdd)
+            TextButton(
+              onPressed: () => addDeezerTrackToServer(like.deezerId),
+              child: const Text('Add'),
+            ),
+          IconButton(
+            tooltip: 'Unlike',
+            icon: Icon(Icons.favorite_rounded, color: scheme.primary),
+            onPressed: () => ref
+                .read(likesProvider.notifier)
+                .unlikeRecommendation(like.deezerId),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 /// "13 albums ......  ↑ Name" row at the top of each Library tab.
 class _SortBar extends StatelessWidget {
