@@ -89,7 +89,7 @@ class Song {
       starred: json['starred'] != null
           ? DateTime.tryParse(json['starred'].toString())
           : null,
-      playCount: json['playCount'] is int ? json['playCount'] as int : null,
+      playCount: (json['playCount'] as num?)?.toInt(),
     );
   }
 

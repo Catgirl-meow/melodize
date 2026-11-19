@@ -44,17 +44,40 @@ Use the theme's text styles, never a raw `fontSize:`.
 
 - Top-level tabs: a 64 px bar with the bold page title, no collapsing (Library keeps its tabs under it).
 - Sub-pages (Settings pages, Downloads, Downloaded songs): `SliverAppBar.medium`.
-- Album, artist and playlist detail screens: a full-bleed cover-art `SliverAppBar` with
+- Album and playlist detail screens: a full-bleed cover-art `SliverAppBar` with
   `flexibleSpace`. Intentional; keep it.
+- The artist page has its own portrait hero (see Artist page below).
 - Home has no collapsing bar. M3's medium and large bars bottom-align the title, which left a
   ~100 px gap under the Android status bar (tried and reverted in v1.9.9). A second attempt must
   move the title inside the flexible space.
 
 ## Detail pages
 
-Album, playlist and artist pages share `DetailActions`: Play (filled) and Shuffle (tonal) at
+Album and playlist pages share `DetailActions`: Play (filled) and Shuffle (tonal) at
 48 px, plus a tonal download icon button where a bulk download exists. Album tracks show the
 track number in the cover slot.
+
+## Artist page
+
+`lib/features/library/artist_detail_screen.dart`, sections in `lib/features/library/artist/`.
+
+- **Tint:** the page re-seeds the theme (`AppTheme.seeded`, vibrant variant so the buttons keep the photo's hue) from the artist
+  photo's palette, so every artist page has its own colours.
+- **Hero:** the photo (server `getArtistInfo2` image, then Deezer, then the artist cover art) in
+  the 9-lobe `CookieShape` over a blurred copy of itself; `displaySmall` w800 name, top two
+  genres as chips, "N releases · N songs · runtime". The hero is sized to its content (the name
+  may wrap); collapsed it becomes a bar with a small portrait, Shuffle and Play.
+- **Actions:** a button group: a 64 px Play pill, then square tonal Shuffle, Artist radio and
+  Download all (corner radius ≈ 31 % of the height).
+- **Sections** sit in 28 px containers or under `titleLarge` bold titles, in this order: Your
+  listening, Popular, Latest release, Discography, Not in your library, Fans also like, About,
+  All songs. A section with no data is hidden; a failed request shows a compact `ErrorNotice`;
+  online-only sections (Deezer, bio, similar) hide while the device is offline.
+- **Discography:** filter chips by release type, a sort menu, and a `CarouselView.weighted`
+  (5 : 3 : 1) that switches to a grid on request or for two releases or fewer.
+- **All songs** is its own page (search, sort chips, multi-select), not an inline list.
+- **Wide (≥ 900 px):** a 380 px identity pane (portrait, name, actions, listening) beside the
+  content; Popular sits next to Latest release and the discography is always a grid.
 
 ## Motion
 

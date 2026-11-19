@@ -1,275 +1,502 @@
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../core/library/artist_profile.dart';
 import '../../core/models/album.dart';
 import '../../core/models/artist.dart';
 import '../../core/providers.dart';
-import '../../shared/utils/song_actions.dart';
-import '../../shared/widgets/album_grid_tile.dart';
-import '../../shared/widgets/detail_actions.dart';
-import '../../shared/widgets/detail_header.dart';
-import '../../shared/widgets/section_header.dart';
-import '../../shared/widgets/deezer_track_tile.dart';
+import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/error_notice.dart';
-import '../../shared/widgets/song_tile.dart';
-import 'album_detail_screen.dart';
+import 'artist/artist_actions.dart';
+import 'artist/artist_discography.dart';
+import 'artist/artist_portrait.dart';
+import 'artist/artist_sections.dart';
 
+/// Width from which the page splits into an identity pane and content.
+const double kArtistWideBreakpoint = 900;
+
+/// The artist profile: portrait hero, actions, your listening, popular
+/// songs, latest release, discography, Deezer tracks you don't own, similar
+/// artists and the biography. See docs/design.md › Artist page.
 class ArtistDetailScreen extends ConsumerWidget {
   final Artist artist;
   const ArtistDetailScreen({super.key, required this.artist});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final albumsAsync = ref.watch(artistAlbumsProvider(artist.id));
-    final topSongsAsync = ref.watch(artistTopSongsProvider(artist.name));
-    final allSongsAsync = ref.watch(artistAllSongsProvider(artist.id));
-    final deezerAsync = ref.watch(deezerArtistTracksProvider(artist.name));
+    final info = ref.watch(artistInfoProvider(artist.id)).valueOrNull;
+    final deezer = ref.watch(deezerArtistProvider(artist.name)).valueOrNull;
+    final imageUrl = info?.imageUrl ?? deezer?.pictureUrl;
+    final coverUrl = ref.watch(coverArtUrlProvider(artist.coverArt ?? ''));
+    final seedUrl = imageUrl ?? coverUrl ?? '';
+    final seed = seedUrl.isEmpty
+        ? null
+        : ref.watch(dominantColorProvider(seedUrl)).valueOrNull;
+    final base = Theme.of(context);
+    // Theme.of returns a localized theme (text styles merged with the
+    // typography geometry, inherit: false). Localize the seeded one the same
+    // way, or AnimatedTheme can't lerp between them and throws.
+    final theme = seed == null
+        ? base
+        : ThemeData.localize(
+            AppTheme.seeded(seed, base.brightness),
+            base.typography.geometryThemeFor(
+                MaterialLocalizations.of(context).scriptCategory),
+          );
 
-    final allSongs = allSongsAsync.valueOrNull;
-    final topSongs = (topSongsAsync.valueOrNull ?? const []).take(5).toList();
-    final albums = albumsAsync.valueOrNull ?? const [];
-    final deezerTracks = deezerAsync.valueOrNull ?? const [];
-
-    Future<void> downloadAll() async {
-      final songs = allSongsAsync.valueOrNull;
-      if (songs == null || songs.isEmpty) return;
-      await downloadSongs(context, ref, songs);
-    }
-
-    void playAll({bool shuffle = false}) {
-      if (allSongs == null || allSongs.isEmpty) return;
-      final handler = ref.read(audioHandlerNotifierProvider);
-      final queue = shuffle ? ([...allSongs]..shuffle()) : allSongs;
-      handler?.loadQueue(queue);
-    }
-
-    return Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          // ── Collapsing artist header ─────────────────────────────────────
-          DetailHeader(
-            title: artist.name,
-            subtitle: _statsLabel(artist.albumCount, allSongs?.length),
-            coverArtId: artist.coverArt,
-            stretch: true,
+    return AnimatedTheme(
+      data: theme,
+      child: Builder(
+        builder: (context) => Scaffold(
+          body: LayoutBuilder(
+            builder: (context, c) => c.maxWidth >= kArtistWideBreakpoint
+                ? _WideLayout(artist: artist, imageUrl: imageUrl)
+                : _PhoneLayout(artist: artist, imageUrl: imageUrl),
           ),
-
-          // ── Action row ───────────────────────────────────────────────────
-          SliverToBoxAdapter(
-            child: DetailActions(
-              onPlay: allSongs != null && allSongs.isNotEmpty
-                  ? () => playAll()
-                  : null,
-              onShuffle: allSongs != null && allSongs.isNotEmpty
-                  ? () => playAll(shuffle: true)
-                  : null,
-              onDownload: allSongs != null && allSongs.isNotEmpty
-                  ? downloadAll
-                  : null,
-              downloadBusy: allSongsAsync.isLoading,
-            ),
-          ),
-
-          // ── Top Songs ────────────────────────────────────────────────────
-          if (topSongsAsync.isLoading)
-            const SliverToBoxAdapter(child: SizedBox.shrink()),
-          if (topSongsAsync.hasError && !topSongsAsync.isLoading)
-            SliverToBoxAdapter(
-              child: ErrorNotice(
-                title: "Couldn't load top songs",
-                error: topSongsAsync.error,
-                compact: true,
-                onRetry: () =>
-                    ref.invalidate(artistTopSongsProvider(artist.name)),
-              ),
-            ),
-          if (!topSongsAsync.isLoading && topSongs.isNotEmpty) ...[
-            const SliverToBoxAdapter(child: SectionHeader('Top songs')),
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (_, i) => SongTile(
-                  song: topSongs[i],
-                  onTap: () => ref
-                      .read(audioHandlerNotifierProvider)
-                      ?.loadQueue(topSongs, startIndex: i),
-                ),
-                childCount: topSongs.length,
-              ),
-            ),
-          ],
-
-          // ── On Deezer ────────────────────────────────────────────────────
-          // Shows tracks the user doesn't own yet — preview or save to server.
-          // Hidden while loading or when all tracks are already in the library.
-          if (deezerAsync.isLoading)
-            const SliverToBoxAdapter(child: SizedBox.shrink()),
-          if (deezerAsync.hasError && !deezerAsync.isLoading)
-            SliverToBoxAdapter(
-              child: ErrorNotice(
-                title: "Couldn't load this artist from Deezer",
-                error: deezerAsync.error,
-                compact: true,
-                onRetry: () =>
-                    ref.invalidate(deezerArtistTracksProvider(artist.name)),
-              ),
-            ),
-          if (!deezerAsync.isLoading && deezerTracks.isNotEmpty)
-            SliverMainAxisGroup(
-              slivers: [
-                SliverToBoxAdapter(
-                  child: SectionHeader(
-                    'On Deezer',
-                    count: '${deezerTracks.length}',
-                    icon: Icons.headphones_rounded,
-                  ),
-                ),
-                SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (_, i) => DeezerTrackTile(track: deezerTracks[i]),
-                    childCount: deezerTracks.length,
-                  ),
-                ),
-              ],
-            ),
-
-          // ── Albums ───────────────────────────────────────────────────────
-          SliverToBoxAdapter(
-            child: SectionHeader(
-              'Albums',
-              count: albums.isNotEmpty ? '${albums.length}' : null,
-            ),
-          ),
-          albumsAsync.when(
-            loading: () => const SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.all(32),
-                child: Center(child: CircularProgressIndicator()),
-              ),
-            ),
-            error: (e, _) => SliverToBoxAdapter(
-              child: ErrorNotice(
-                title: "Couldn't load albums",
-                error: e,
-                onRetry: () => ref.invalidate(artistAlbumsProvider(artist.id)),
-              ),
-            ),
-            data: (albums) => albums.isEmpty
-                ? const SliverToBoxAdapter(
-                    child: Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(child: Text('No albums')),
-                    ),
-                  )
-                : SliverPadding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    // Square covers plus room for a two-line album name,
-                    // sized from the text scale (see _AlbumCard).
-                    sliver: SliverLayoutBuilder(
-                      builder: (context, constraints) {
-                        final tileWidth = (constraints.crossAxisExtent - 8) / 2;
-                        return SliverGrid(
-                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            mainAxisExtent: AlbumGridTile.extent(
-                                context, tileWidth,
-                                detailLines: 1),
-                            crossAxisSpacing: 8,
-                            mainAxisSpacing: 8,
-                          ),
-                          delegate: SliverChildBuilderDelegate(
-                            (_, i) => RepaintBoundary(
-                              child: _AlbumCard(album: albums[i]),
-                            ),
-                            childCount: albums.length,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-          ),
-
-          // ── All Songs ────────────────────────────────────────────────────
-          allSongsAsync.when(
-            loading: () => const SliverToBoxAdapter(
-              child: SectionHeader('Songs', count: '…'),
-            ),
-            error: (e, _) => SliverToBoxAdapter(
-              child: ErrorNotice(
-                title: "Couldn't load this artist's songs",
-                error: e,
-                compact: true,
-                onRetry: () =>
-                    ref.invalidate(artistAllSongsProvider(artist.id)),
-              ),
-            ),
-            data: (songs) => songs.isEmpty
-                ? const SliverToBoxAdapter(child: SizedBox.shrink())
-                : SliverMainAxisGroup(
-                    slivers: [
-                      SliverToBoxAdapter(
-                        child: SectionHeader(
-                          'Songs',
-                          count: '${songs.length}',
-                        ),
-                      ),
-                      SliverList(
-                        delegate: SliverChildBuilderDelegate(
-                          (_, i) => SongTile(
-                            song: songs[i],
-                            showAlbum: true,
-                            onTap: () => ref
-                                .read(audioHandlerNotifierProvider)
-                                ?.loadQueue(songs, startIndex: i),
-                          ),
-                          childCount: songs.length,
-                        ),
-                      ),
-                    ],
-                  ),
-          ),
-
-          const SliverPadding(padding: EdgeInsets.only(bottom: 100)),
-        ],
+        ),
       ),
     );
   }
+}
 
-  static String _statsLabel(int albumCount, int? songCount) {
-    final parts = [
-      '$albumCount ${albumCount == 1 ? 'album' : 'albums'}',
-      if (songCount != null) '$songCount ${songCount == 1 ? 'song' : 'songs'}',
-    ];
-    return parts.join(' · ');
+/// Albums, totals and the latest release, shared by both layouts.
+class _ArtistData {
+  final AsyncValue<List<Album>> albumsAsync;
+  final List<Album> albums;
+  final ArtistTotals totals;
+  final Album? latest;
+
+  _ArtistData(this.albumsAsync)
+      : albums = albumsAsync.valueOrNull ?? const [],
+        totals = artistTotals(albumsAsync.valueOrNull ?? const []),
+        latest = latestRelease(albumsAsync.valueOrNull ?? const []);
+
+  String get statsLine {
+    if (albums.isEmpty) return '';
+    final t = totals;
+    return [
+      '${t.releases} ${t.releases == 1 ? 'release' : 'releases'}',
+      '${t.songs} ${t.songs == 1 ? 'song' : 'songs'}',
+      if (t.duration > Duration.zero) formatRuntime(t.duration),
+    ].join(' · ');
   }
 }
 
-// ---------------------------------------------------------------------------
+Widget _albumsState(WidgetRef ref, Artist artist, _ArtistData d) {
+  return d.albumsAsync.when(
+    loading: () => const Padding(
+      padding: EdgeInsets.all(32),
+      child: Center(child: CircularProgressIndicator()),
+    ),
+    error: (e, _) => ErrorNotice(
+      title: "Couldn't load albums",
+      error: e,
+      onRetry: () => ref.invalidate(artistAlbumsProvider(artist.id)),
+    ),
+    data: (albums) => albums.isEmpty
+        ? const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: Text('No albums')),
+          )
+        : const SizedBox.shrink(),
+  );
+}
 
-class _AlbumCard extends ConsumerWidget {
-  final Album album;
-  const _AlbumCard({required this.album});
+// ---------------------------------------------------------------------------
+// Phone
+
+class _PhoneLayout extends ConsumerWidget {
+  final Artist artist;
+  final String? imageUrl;
+  const _PhoneLayout({required this.artist, required this.imageUrl});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return AlbumGridTile(
-      coverArtId: album.coverArt,
-      title: album.name,
-      subtitle: album.year != null ? '${album.year}' : null,
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => AlbumDetailScreen(album: album)),
-      ),
-      trailing: IconButton(
-        icon: const Icon(Icons.download_rounded, size: 20),
-        tooltip: 'Download album',
-        visualDensity: VisualDensity.compact,
-        style: IconButton.styleFrom(
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    final d = _ArtistData(ref.watch(artistAlbumsProvider(artist.id)));
+    return CustomScrollView(
+      slivers: [
+        _ArtistHero(
+          artist: artist,
+          imageUrl: imageUrl,
+          genres: d.totals.genres,
+          statsLine: d.statsLine,
         ),
-        onPressed: () => downloadAlbum(context, ref, album),
+        SliverList.list(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: ArtistActions(artist: artist),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+              child: ListeningCard(artist: artist),
+            ),
+            PopularSection(artist: artist),
+            if (d.latest != null) ...[
+              const ArtistSectionTitle('Latest release'),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: LatestReleaseCard(album: d.latest!),
+              ),
+            ],
+            DiscographySection(albums: d.albums),
+            _albumsState(ref, artist, d),
+            MissingTracksSection(artist: artist),
+            SimilarArtistsSection(artist: artist),
+            AboutSection(artist: artist),
+            AllSongsRow(artist: artist, songCount: d.totals.songs),
+            const SizedBox(height: 120),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Collapsing hero: blurred portrait backdrop, cookie-shaped portrait, name,
+/// genre chips and totals. Collapsed, it becomes a bar with a small portrait,
+/// the name, Shuffle and Play.
+class _ArtistHero extends ConsumerWidget {
+  final Artist artist;
+  final String? imageUrl;
+  final List<String> genres;
+  final String statsLine;
+
+  const _ArtistHero({
+    required this.artist,
+    required this.imageUrl,
+    required this.genres,
+    required this.statsLine,
+  });
+
+  static const _portrait = 200.0;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final mq = MediaQuery.of(context);
+    final top = mq.padding.top;
+    final nameStyle = text.displaySmall?.copyWith(
+      fontWeight: FontWeight.w800,
+      letterSpacing: -0.5,
+      color: scheme.onSurface,
+    );
+
+    // Size the hero to its content: the name may wrap to two lines and the
+    // text scale grows everything.
+    final nameHeight = (TextPainter(
+      text: TextSpan(text: artist.name, style: nameStyle),
+      maxLines: 2,
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+      textScaler: mq.textScaler,
+    )..layout(maxWidth: mq.size.width - 48))
+        .height;
+    final statsHeight = mq.textScaler.scale(20);
+    final chipsHeight = genres.isEmpty ? 0.0 : 44.0;
+    final expanded = top +
+        kToolbarHeight +
+        _portrait +
+        16 +
+        nameHeight +
+        chipsHeight +
+        (statsLine.isEmpty ? 0 : statsHeight + 10) +
+        24;
+    final collapsed = top + kToolbarHeight;
+
+    return SliverAppBar(
+      pinned: true,
+      stretch: true,
+      automaticallyImplyLeading: false,
+      expandedHeight: expanded,
+      collapsedHeight: kToolbarHeight,
+      backgroundColor: scheme.surface,
+      surfaceTintColor: Colors.transparent,
+      flexibleSpace: LayoutBuilder(
+        builder: (context, c) {
+          final t = ((expanded - c.maxHeight) / (expanded - collapsed))
+              .clamp(0.0, 1.0);
+          final barVisible = t > 0.85;
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              // Backdrop: the portrait, blurred and faded into the page. Clipped,
+              // or the blur bleeds below the hero.
+              ClipRect(
+                child: Opacity(
+                  opacity: (1 - t) * 0.6,
+                  child: ImageFiltered(
+                    imageFilter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+                    child: ArtistImage(
+                      imageUrl: imageUrl,
+                      coverArtId: artist.coverArt,
+                      size: double.infinity,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: (c.maxHeight * 0.42).clamp(0, double.infinity),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: scheme.surface,
+                    borderRadius: BorderRadius.vertical(
+                        top: Radius.circular(48 * (1 - t))),
+                  ),
+                ),
+              ),
+              // Expanded content, anchored to the bottom so it scrolls away.
+              Positioned(
+                left: 24,
+                right: 24,
+                bottom: 24,
+                child: Opacity(
+                  opacity: (1 - t * 1.6).clamp(0.0, 1.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ArtistPortrait(
+                        imageUrl: imageUrl,
+                        coverArtId: artist.coverArt,
+                        size: _portrait,
+                        name: artist.name,
+                      ),
+                      const SizedBox(height: 16),
+                      Text(artist.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: nameStyle),
+                      if (genres.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: Wrap(
+                            spacing: 8,
+                            alignment: WrapAlignment.center,
+                            children: [
+                              for (final g in genres)
+                                Chip(
+                                  label: Text(g),
+                                  visualDensity: VisualDensity.compact,
+                                  side: BorderSide.none,
+                                  backgroundColor: scheme.secondaryContainer,
+                                  labelStyle: TextStyle(
+                                      color: scheme.onSecondaryContainer),
+                                ),
+                            ],
+                          ),
+                        ),
+                      if (statsLine.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Text(statsLine,
+                              style: text.bodyMedium
+                                  ?.copyWith(color: scheme.onSurfaceVariant)),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              // Toolbar row: back always; portrait, name and play once collapsed.
+              Positioned(
+                left: 0,
+                right: 0,
+                top: top,
+                height: kToolbarHeight,
+                child: Row(
+                  children: [
+                    const SizedBox(width: 4),
+                    IconButton.filledTonal(
+                      tooltip: 'Back',
+                      style: IconButton.styleFrom(
+                        backgroundColor: barVisible
+                            ? Colors.transparent
+                            : scheme.surface.withValues(alpha: 0.7),
+                      ),
+                      onPressed: () => Navigator.maybePop(context),
+                      icon: const Icon(Icons.arrow_back_rounded),
+                    ),
+                    Expanded(
+                      child: AnimatedOpacity(
+                        opacity: barVisible ? 1 : 0,
+                        duration: const Duration(milliseconds: 150),
+                        child: IgnorePointer(
+                          ignoring: !barVisible,
+                          child: Row(
+                            children: [
+                              const SizedBox(width: 4),
+                              ArtistPortrait(
+                                imageUrl: imageUrl,
+                                coverArtId: artist.coverArt,
+                                size: 36,
+                                name: artist.name,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(artist.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: text.titleLarge?.copyWith(
+                                        fontWeight: FontWeight.w700)),
+                              ),
+                              IconButton.filledTonal(
+                                tooltip: 'Shuffle',
+                                onPressed: () => playArtist(
+                                    context, ref, artist,
+                                    shuffle: true),
+                                icon: const Icon(Icons.shuffle_rounded),
+                              ),
+                              IconButton.filled(
+                                tooltip: 'Play',
+                                onPressed: () =>
+                                    playArtist(context, ref, artist),
+                                icon: const Icon(Icons.play_arrow_rounded),
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 }
 
 // ---------------------------------------------------------------------------
+// Desktop / wide
 
+class _WideLayout extends ConsumerWidget {
+  final Artist artist;
+  final String? imageUrl;
+  const _WideLayout({required this.artist, required this.imageUrl});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final d = _ArtistData(ref.watch(artistAlbumsProvider(artist.id)));
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+
+    final pane = SizedBox(
+      width: 380,
+      child: SafeArea(
+        right: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 120),
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: IconButton.filledTonal(
+                tooltip: 'Back',
+                onPressed: () => Navigator.maybePop(context),
+                icon: const Icon(Icons.arrow_back_rounded),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Center(
+              child: ArtistPortrait(
+                imageUrl: imageUrl,
+                coverArtId: artist.coverArt,
+                size: 220,
+                name: artist.name,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(artist.name,
+                textAlign: TextAlign.center,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: text.displaySmall?.copyWith(
+                    fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+            if (d.totals.genres.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Wrap(
+                  spacing: 8,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    for (final g in d.totals.genres)
+                      Chip(
+                        label: Text(g),
+                        visualDensity: VisualDensity.compact,
+                        side: BorderSide.none,
+                        backgroundColor: scheme.secondaryContainer,
+                        labelStyle:
+                            TextStyle(color: scheme.onSecondaryContainer),
+                      ),
+                  ],
+                ),
+              ),
+            if (d.statsLine.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(d.statsLine,
+                    textAlign: TextAlign.center,
+                    style: text.bodyMedium
+                        ?.copyWith(color: scheme.onSurfaceVariant)),
+              ),
+            const SizedBox(height: 20),
+            ArtistActions(artist: artist, height: 56),
+            const SizedBox(height: 20),
+            ListeningCard(artist: artist, compact: true),
+          ],
+        ),
+      ),
+    );
+
+    final content = SafeArea(
+      left: false,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(8, 0, 24, 120),
+        children: [
+          LayoutBuilder(builder: (context, c) {
+            final popular = PopularSection(artist: artist, wide: true);
+            if (d.latest == null) return popular;
+            final latest = Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const ArtistSectionTitle('Latest release'),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: LatestReleaseCard(album: d.latest!, vertical: true),
+                ),
+              ],
+            );
+            if (c.maxWidth < 760) return Column(children: [popular, latest]);
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(flex: 3, child: popular),
+                SizedBox(
+                    width: (c.maxWidth * 0.32).clamp(240, 340), child: latest),
+              ],
+            );
+          }),
+          DiscographySection(albums: d.albums, wide: true),
+          _albumsState(ref, artist, d),
+          MissingTracksSection(artist: artist),
+          SimilarArtistsSection(artist: artist),
+          AboutSection(artist: artist),
+          AllSongsRow(artist: artist, songCount: d.totals.songs),
+        ],
+      ),
+    );
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [pane, Expanded(child: content)],
+    );
+  }
+}

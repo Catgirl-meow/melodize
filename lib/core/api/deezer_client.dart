@@ -91,6 +91,38 @@ bool? _asBool(Object? value) {
   return null;
 }
 
+/// A Deezer artist: the picture and fan count shown on the artist page, and
+/// the entries of Deezer's related-artists list.
+class DeezerArtist {
+  final int id;
+  final String name;
+  final String? pictureUrl;
+  final int? fans;
+
+  const DeezerArtist({
+    required this.id,
+    required this.name,
+    this.pictureUrl,
+    this.fans,
+  });
+
+  factory DeezerArtist.fromJson(Map<String, dynamic> json) {
+    String? str(Object? v) {
+      final s = v?.toString();
+      return s == null || s.isEmpty ? null : s;
+    }
+
+    return DeezerArtist(
+      id: _asInt(json['id']) ?? 0,
+      name: str(json['name']) ?? 'Unknown Artist',
+      pictureUrl: str(json['picture_xl']) ??
+          str(json['picture_big']) ??
+          str(json['picture_medium']),
+      fans: _asInt(json['nb_fan']),
+    );
+  }
+}
+
 // Free Deezer API wrapper (no API key required).
 class DeezerClient {
   static const _base = 'https://api.deezer.com';
@@ -187,6 +219,23 @@ class DeezerClient {
             (t) => RecommendedTrack.fromDeezerJson(t as Map<String, dynamic>))
         .where((t) => t.previewUrl != null && t.previewUrl!.isNotEmpty)
         .toList();
+  }
+
+  /// Picture and fan count for a Deezer artist id.
+  Future<DeezerArtist?> artist(int artistId) async {
+    final resp = await _getJson('/artist/$artistId');
+    if (resp == null || resp['id'] == null) return null;
+    return DeezerArtist.fromJson(resp);
+  }
+
+  /// Deezer's "fans also like" list for an artist.
+  Future<List<DeezerArtist>> relatedArtists(int artistId,
+      {int limit = 12}) async {
+    final resp = await _getJson('/artist/$artistId/related?limit=$limit');
+    return [
+      for (final a in (resp?['data'] as List? ?? const []))
+        if (a is Map<String, dynamic>) DeezerArtist.fromJson(a),
+    ];
   }
 
   // Validate an ARL cookie against Deezer's gw-light endpoint.
