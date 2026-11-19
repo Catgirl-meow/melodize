@@ -54,12 +54,23 @@ if [ -z "$serial" ]; then
   setsid "$emulator" -avd "$avd" -no-window -no-audio -no-boot-anim \
     -gpu swiftshader_indirect -no-snapshot-save >"$log" 2>&1 < /dev/null &
   started=1
-  "$adb" wait-for-device
-  serial="$("$adb" devices | awk '/^emulator-[0-9]+\t/{print $1; exit}')"
+  # Wait for the emulator's own serial: `adb wait-for-device` returns at once
+  # when a phone is plugged in, and every adb call below must go to the
+  # emulator, never to that phone.
   for _ in $(seq 1 120); do
-    [ "$("$adb" -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break
+    serial="$("$adb" devices | awk '/^emulator-[0-9]+\t/{print $1; exit}')"
+    [ -n "$serial" ] && break
     sleep 1
   done
+  [ -n "$serial" ] || { echo "Emulator did not show up in adb devices (log: $log)" >&2; exit 1; }
+  booted=""
+  for _ in $(seq 1 180); do
+    if [ "$("$adb" -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then
+      booted=1; break
+    fi
+    sleep 1
+  done
+  [ -n "$booted" ] || { echo "Emulator $serial did not finish booting (log: $log)" >&2; exit 1; }
 fi
 export ANDROID_SERIAL="$serial"
 cleanup() {
@@ -72,10 +83,10 @@ echo "Device: $serial"
 
 # No animations (faster, steadier frames), screen always on.
 for k in window_animation_scale transition_animation_scale animator_duration_scale; do
-  "$adb" shell settings put global "$k" 0
+  "$adb" -s "$serial" shell settings put global "$k" 0
 done
-"$adb" shell svc power stayon true >/dev/null 2>&1 || true
-"$adb" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+"$adb" -s "$serial" shell svc power stayon true >/dev/null 2>&1 || true
+"$adb" -s "$serial" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
 
 [ $# -eq 0 ] && set -- integration_test/*_test.dart
 
@@ -85,9 +96,9 @@ for f in "$@"; do
   start=$(date +%s)
   # Each file starts from an empty app profile, with the notification
   # permission already granted so its dialog never covers the app.
-  if "$adb" shell pm path "$pkg" >/dev/null 2>&1; then
-    "$adb" shell pm clear "$pkg" >/dev/null
-    "$adb" shell pm grant "$pkg" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
+  if "$adb" -s "$serial" shell pm path "$pkg" >/dev/null 2>&1; then
+    "$adb" -s "$serial" shell pm clear "$pkg" >/dev/null
+    "$adb" -s "$serial" shell pm grant "$pkg" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
   fi
   # shellcheck disable=SC2086
   if "$flutter" test "$f" -d "$serial" \

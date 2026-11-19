@@ -131,7 +131,8 @@ void main() {
 
     test('unknown ids fail cleanly', () async {
       expect(() => client.getAlbumSongs('does-not-exist'), throwsException);
-      expect(await client.getSimilarSongs('does-not-exist'), isEmpty);
+      // Navidrome 0.64 answers error 70 "data not found".
+      expect(() => client.getSimilarSongs('does-not-exist'), throwsException);
     });
   });
 }
