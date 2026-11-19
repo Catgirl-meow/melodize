@@ -302,9 +302,6 @@ class SubsonicClient {
     final params = <String, dynamic>{..._authParams(), 'id': song.id};
     if (quality != 'lossless') {
       params['maxBitRate'] = quality;
-      // Navidrome's default downsampling format is Opus-in-Ogg, which
-      // AVFoundation can't play. Ask for MP3 on Apple platforms.
-      if (Platform.isMacOS || Platform.isIOS) params['format'] = 'mp3';
     }
 
     String? contentType;
