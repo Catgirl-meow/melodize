@@ -306,6 +306,7 @@ List<ScoredTrack> rankCandidates(
   TasteWeights w = const TasteWeights(),
   int limit = 30,
   int perArtist = 2,
+  double maxSeedShare = 0.3,
 }) {
   final maxAff = p.maxAffinity;
   final norm = maxAff <= 0 ? 1.0 : maxAff;
@@ -358,9 +359,29 @@ List<ScoredTrack> rankCandidates(
       (t, math.pow(rng.nextDouble(), 1 / math.pow(t.score, w.sharpness)))
   ]..sort((a, b) => b.$2.compareTo(a.$2));
 
+  // No single seed may fill more than [maxSeedShare] of the list: one
+  // strongly liked artist would otherwise crowd out everything else (seen
+  // on a real library with a single liked song). Tracks over the cap are
+  // used only if the list can't be filled otherwise.
+  final seedCap = math.max(1, (limit * maxSeedShare).ceil());
   final perArtistCount = <String, int>{};
+  final perSeedCount = <TasteSeed, int>{};
   final out = <ScoredTrack>[];
+  final overflow = <ScoredTrack>[];
   for (final (t, _) in keyed) {
+    if (out.length >= limit) break;
+    final a = normalize(t.track.artist);
+    final n = perArtistCount[a] ?? 0;
+    if (n >= perArtist) continue;
+    if ((perSeedCount[t.because] ?? 0) >= seedCap) {
+      overflow.add(t);
+      continue;
+    }
+    perArtistCount[a] = n + 1;
+    perSeedCount[t.because] = (perSeedCount[t.because] ?? 0) + 1;
+    out.add(t);
+  }
+  for (final t in overflow) {
     if (out.length >= limit) break;
     final a = normalize(t.track.artist);
     final n = perArtistCount[a] ?? 0;
