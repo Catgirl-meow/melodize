@@ -73,7 +73,9 @@ List<PlayRecord> history() {
 }
 
 Future<void> pumpArtist(WidgetTester tester, Size size,
-    {ArtistInfo info = const ArtistInfo(
+    {Artist artist = artist,
+    List<Override> extra = const [],
+    ArtistInfo info = const ArtistInfo(
       biography: 'Nova Lyra make dream pop.',
       lastFmUrl: 'https://www.last.fm/music/Nova+Lyra',
       similar: [
@@ -102,8 +104,9 @@ Future<void> pumpArtist(WidgetTester tester, Size size,
       artistInfoProvider(artist.id).overrideWith((_) async => info),
       deezerArtistIdProvider(artist.name).overrideWith((_) async => null),
       playRecordsProvider.overrideWith((_) async => history()),
+      ...extra,
     ],
-    child: const MaterialApp(home: ArtistDetailScreen(artist: artist)),
+    child: MaterialApp(home: ArtistDetailScreen(artist: artist)),
   ));
   for (var i = 0; i < 4; i++) {
     await tester.pump(const Duration(milliseconds: 100));
@@ -146,6 +149,24 @@ void main() {
     // The full song list is no longer inline.
     expect(find.text('Undertow'), findsOneWidget); // only in Popular
     expect(find.text('Not in your library'), findsNothing); // no Deezer match
+  });
+
+  // Regression: the page tint arriving after the first frame animated from
+  // Theme.of (localized text styles) to a raw ThemeData and threw "Failed
+  // to interpolate TextStyles with different inherit values".
+  testWidgets('photo tint animates in without errors', (tester) async {
+    const withCover =
+        Artist(id: 'ar1', name: 'Nova Lyra', albumCount: 3, coverArt: 'ar1');
+    await pumpArtist(tester, const Size(412, 4000), artist: withCover, extra: [
+      dominantColorProvider.overrideWith((ref, url) => Future.delayed(
+          const Duration(milliseconds: 150), () => const Color(0xFF7B3FC4))),
+    ]);
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(tester.takeException(), isNull);
+    final scheme = Theme.of(tester.element(find.text('Popular'))).colorScheme;
+    expect(HSLColor.fromColor(scheme.primary).hue, closeTo(270, 25));
   });
 
   testWidgets('sections without data stay hidden', (tester) async {

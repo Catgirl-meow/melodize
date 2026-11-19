@@ -35,7 +35,16 @@ class ArtistDetailScreen extends ConsumerWidget {
         ? null
         : ref.watch(dominantColorProvider(seedUrl)).valueOrNull;
     final base = Theme.of(context);
-    final theme = seed == null ? base : AppTheme.seeded(seed, base.brightness);
+    // Theme.of returns a localized theme (text styles merged with the
+    // typography geometry, inherit: false). Localize the seeded one the same
+    // way, or AnimatedTheme can't lerp between them and throws.
+    final theme = seed == null
+        ? base
+        : ThemeData.localize(
+            AppTheme.seeded(seed, base.brightness),
+            base.typography.geometryThemeFor(
+                MaterialLocalizations.of(context).scriptCategory),
+          );
 
     return AnimatedTheme(
       data: theme,
