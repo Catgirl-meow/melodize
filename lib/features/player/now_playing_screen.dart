@@ -16,6 +16,7 @@ import '../../core/audio/shuffle_mode.dart';
 import '../../core/utils/platform_info.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/utils/download_polling_mixin.dart';
+import '../../shared/utils/rec_feedback.dart';
 import '../../shared/widgets/like_button.dart';
 import '../../shared/utils/snack.dart';
 import '../../shared/utils/song_actions.dart';
@@ -596,12 +597,7 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
       showStyledSnack(context, msg, isError: isError);
 
   void _moreLikeThis() {
-    ref.read(recommendationsSeedOverrideProvider.notifier).state = (
-      artist: song.artist,
-      title: song.title,
-      genre: song.genre,
-    );
-    ref.invalidate(recommendationsProvider);
+    requestMoreLikeThis(ref, song);
     _snack('Refreshing recommendations from "${song.title}"');
   }
 

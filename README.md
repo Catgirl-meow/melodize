@@ -19,7 +19,8 @@ shuffle with automatic crossfades, and Deezer-powered discovery, in a Material 3
 - Queue: drag to reorder, play next, add to queue, swipe to remove, in every shuffle mode.
 - Shuffle and **smart shuffle**, which orders the upcoming songs like a DJ set (tempo, key,
   energy, genre) and crossfades each pair automatically.
-- Discovery from Deezer: recommendations from your listening history, "more like this",
+- Discovery from Deezer: recommendations that learn from your likes, plays, skips and
+  "Not interested", each with a reason ("You like …"); "more like this"; a Discovery slider;
   catalog search with 30-second previews.
 - Light, dark and Material You themes; Now Playing takes its colors from the cover art.
 - Scrobbling, sleep timer, lock-screen and media-key controls (MediaSession on Android, MPRIS

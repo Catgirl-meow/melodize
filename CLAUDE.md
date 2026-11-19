@@ -77,8 +77,12 @@ Every Riverpod provider lives here (~1.4k lines). Key patterns:
 
 ### Data
 
-- **drift/SQLite** (`lib/core/db/database.dart`): 5 tables — `CachedSongs` (library cache incl. download state), `PlayHistory` (deliberately stores artist/title strings, not IDs, so Deezer recommendations survive server switches), `ServerConfig` (single active), `DownloadQueue` (persisted local-download queue: resumed on restart, failures kept with their reason), `LyricsCache`. Schema v5; migrations in `MigrationStrategy.onUpgrade`. Singleton via `AppDatabase()`.
+- **drift/SQLite** (`lib/core/db/database.dart`): `CachedSongs` (library cache incl. download state), `PlayHistory` (deliberately stores artist/title strings, not IDs, so Deezer recommendations survive server switches), `ServerConfig` (single active), `DownloadQueue` (persisted local-download queue: resumed on restart, failures kept with their reason), `LyricsCache`, plus recommendation feedback: `PendingLikes`, `DismissedRecs` ("Not interested"), `RecImpressions`, `MoreLikeThisTaps`; `PlayHistory` also records listen length and skips. Schema v7; migrations in `MigrationStrategy.onUpgrade`. Singleton via `AppDatabase()`.
 - **APIs** (`lib/core/api/`): `SubsonicClient` (MD5-salted auth), `CompanionAudioApi` (analysis cache fetch, rendered-transition jobs, downloads with auth headers), `DeezerClient` (public API + ARL session validation), `LrcLibClient` + `lyrics_ovh_client.dart` (multi-provider lyrics fallback).
+
+### Recommendations
+
+`recommendationsProvider` (providers.dart) runs the pure-Dart taste model in `lib/core/recs/taste_model.dart`: likes, plays, skips, "Not interested" and "More like this" become per-artist affinity; seed artists' Deezer radios are ranked and sampled. `recommend()` throws `RecsFailure` subclasses that the provider maps to `RecsError` text, never an empty list. Quality is measured by `test/recs/recommendation_quality_test.dart` (simulated listeners) and `test/live/recommendations_real_test.dart` (a copy of real history); run both after changing weights.
 
 ### Platforms
 

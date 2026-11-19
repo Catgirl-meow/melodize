@@ -89,6 +89,102 @@ void main() {
     expect(picks, hasLength(1));
   });
 
+  test('an artist-capped track does not block another artist\'s edit', () {
+    // The capped artist's third song must not claim the song family.
+    const s = TasteSeed('Seed', SeedReason.topArtist, 1);
+    final picks = rankCandidates(
+      {
+        s: const [
+          RecommendedTrack(deezerId: 1, title: 'One', artist: 'A',
+              album: '', durationSeconds: 1),
+          RecommendedTrack(deezerId: 2, title: 'Two', artist: 'A',
+              album: '', durationSeconds: 1),
+          RecommendedTrack(deezerId: 3, title: 'Skins', artist: 'A',
+              album: '', durationSeconds: 1),
+          RecommendedTrack(deezerId: 4, title: 'Skins (Live)', artist: 'B',
+              album: '', durationSeconds: 1),
+        ]
+      },
+      const TasteProfile(affinity: {}, displayName: {}, genreShare: {},
+          recentArtists: [], likedArtists: []),
+      const TasteSignals(),
+      math.Random(1),
+      perArtist: 2,
+      maxSeedShare: 1,
+    );
+    expect(picks.map((p) => p.track.artist).where((a) => a == 'B'),
+        hasLength(1));
+    expect(picks, hasLength(3));
+  });
+
+  group('More like this (focusArtist)', () {
+    final now = DateTime(2026, 11, 19);
+    final played = TasteSignals(history: [
+      ListenEvent(artist: 'Kaito Ren', title: 'Tokyo Rain', at: now),
+    ]);
+
+    test('seeds first, even for an artist never played', () async {
+      final asked = <String>[];
+      final r = await recommend(
+        signals: played,
+        now: now,
+        radio: (seed) async {
+          asked.add(seed.artist);
+          return [for (var i = 0; i < 10; i++) _t('${seed.artist} fan $i', i)];
+        },
+        rng: math.Random(1),
+        focusArtist: 'Glass Parade',
+      );
+      expect(r.seeds.first.artist, 'Glass Parade');
+      expect(r.seeds.first.reason, SeedReason.requested);
+      expect(asked, contains('Kaito Ren'));
+      expect(r.tracks.where((t) => t.because.artist == 'Glass Parade'),
+          isNotEmpty);
+      expect(reasonLabel(r.seeds.first), 'More like Glass Parade');
+    });
+
+    test('its radio failing fails the call, naming the artist', () async {
+      await expectLater(
+        recommend(
+          signals: played,
+          now: now,
+          radio: (seed) async => seed.artist == 'Glass Parade'
+              ? throw Exception('HTTP 500')
+              : [_t('Z', 1)],
+          rng: math.Random(1),
+          focusArtist: 'Glass Parade',
+        ),
+        throwsA(isA<FocusRadioFailed>()
+            .having((e) => e.message, 'message', contains('Glass Parade'))),
+      );
+    });
+
+    test('no radio for it: NoRadioTracks, not a list without it', () async {
+      await expectLater(
+        recommend(
+          signals: played,
+          now: now,
+          radio: (seed) async =>
+              seed.artist == 'Glass Parade' ? [] : [_t('Z', 1)],
+          rng: math.Random(1),
+          focusArtist: 'Glass Parade',
+        ),
+        throwsA(isA<NoRadioTracks>()),
+      );
+    });
+
+    test('works with no history at all', () async {
+      final r = await recommend(
+        signals: const TasteSignals(),
+        now: now,
+        radio: (seed) async => [_t('Fan', 1)],
+        rng: math.Random(1),
+        focusArtist: 'Glass Parade',
+      );
+      expect(r.tracks.single.track.artist, 'Fan');
+    });
+  });
+
   group('recommend() fails loudly', () {
     final now = DateTime(2026, 11, 19);
     final played = TasteSignals(history: [

@@ -30,10 +30,14 @@ class SnackInset extends InheritedWidget {
 ///
 /// [messenger] — show on this messenger instead of the nearest one above
 /// [context] (MainShell's own listeners sit above the shell's messenger).
+///
+/// [actionLabel] + [onAction] add a button such as Undo.
 void showStyledSnack(BuildContext context, String message,
     {bool isError = false,
     double? bottomOffset,
-    ScaffoldMessengerState? messenger}) {
+    ScaffoldMessengerState? messenger,
+    String? actionLabel,
+    VoidCallback? onAction}) {
   final scheme = Theme.of(context).colorScheme;
   final bottom = bottomOffset ?? SnackInset.of(context) + kSnackGap;
   (messenger ?? ScaffoldMessenger.of(context))
@@ -55,6 +59,13 @@ void showStyledSnack(BuildContext context, String message,
             isError ? scheme.errorContainer : scheme.inverseSurface,
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        action: actionLabel == null || onAction == null
+            ? null
+            : SnackBarAction(
+                label: actionLabel,
+                textColor: isError ? scheme.error : scheme.inversePrimary,
+                onPressed: onAction,
+              ),
       ),
     );
 }
