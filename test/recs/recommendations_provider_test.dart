@@ -164,6 +164,14 @@ void main() {
     expect((r as RecsError).reason, contains('Nobody Knows'));
   });
 
+  test('an artist Deezer doesn\'t know is named, not dropped', () async {
+    await play('Kaito Ren', 'Tokyo Rain');
+    await play('Nobody Knows', 'Track');
+    final c = await container(FakeDeezer(unknown: {'Nobody Knows'}));
+    final r = await c.read(recommendationsProvider.future) as RecsReady;
+    expect(r.failedSeeds, ['Nobody Knows']);
+  });
+
   test('More like this builds around that artist and is remembered',
       () async {
     await play('Kaito Ren', 'Tokyo Rain');
