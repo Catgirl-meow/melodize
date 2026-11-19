@@ -62,7 +62,8 @@ Future<List<Rec>> todayAlgorithm(
   return out;
 }
 
-/// The taste model: affinity → seeds → radios → ranked picks.
+/// The taste model, through the same entry point the app uses. Throws a
+/// [RecsFailure] when it can't make a list.
 Future<List<Rec>> tasteAlgorithm(
   TasteSignals signals,
   DateTime now,
@@ -70,11 +71,15 @@ Future<List<Rec>> tasteAlgorithm(
   math.Random rng, {
   TasteWeights weights = const TasteWeights(),
 }) async {
-  final profile = TasteProfile.build(signals, now: now, w: weights);
-  final seeds = pickSeeds(profile, rng);
-  final radios = {for (final seed in seeds) seed: await radio(seed.artist)};
+  final result = await recommend(
+    signals: signals,
+    now: now,
+    radio: (seed) => radio(seed.artist),
+    rng: rng,
+    weights: weights,
+  );
   return [
-    for (final t in rankCandidates(radios, profile, signals, rng, w: weights))
+    for (final t in result.tracks)
       (track: t.track, reason: reasonLabel(t.because)),
   ];
 }

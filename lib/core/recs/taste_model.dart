@@ -124,6 +124,34 @@ class TasteWeights {
     this.sharpness = 2,
     this.useSkips = true,
   });
+
+  /// Throws [ArgumentError] for a weight that would make scores meaningless
+  /// (negative, NaN, infinite) instead of letting it skew every list.
+  void validate() {
+    final named = {
+      'like': like, 'listen': listen, 'skip': skip,
+      'halfLifeDays': halfLifeDays, 'moreLikeThis': moreLikeThis,
+      'dismissal': dismissal, 'genreBoost': genreBoost,
+      'dismissedArtistPenalty': dismissedArtistPenalty, 'fatigue': fatigue,
+      'knownArtistBonus': knownArtistBonus,
+      'dislikedArtistFactor': dislikedArtistFactor, 'discovery': discovery,
+      'sharpness': sharpness,
+    };
+    named.forEach((name, v) {
+      if (!v.isFinite || v < 0) {
+        throw ArgumentError.value(v, name, 'must be a finite number ≥ 0');
+      }
+    });
+    if (halfLifeDays == 0) {
+      throw ArgumentError.value(halfLifeDays, 'halfLifeDays', 'must be > 0');
+    }
+    if (sharpness == 0) {
+      throw ArgumentError.value(sharpness, 'sharpness', 'must be > 0');
+    }
+    if (fatigueFreeShows < 0) {
+      throw ArgumentError.value(fatigueFreeShows, 'fatigueFreeShows');
+    }
+  }
 }
 
 /// Per-artist affinity and per-genre share of the user's taste.
@@ -161,6 +189,7 @@ class TasteProfile {
     required DateTime now,
     TasteWeights w = const TasteWeights(),
   }) {
+    w.validate();
     final aff = <String, double>{};
     final names = <String, String>{};
     final genreOf = <String, String>{};
@@ -350,6 +379,13 @@ List<ScoredTrack> rankCandidates(
     if (own > 0) score += w.knownArtistBonus * own / norm;
     if (own < 0) score *= w.dislikedArtistFactor;
     if (!p.affinity.containsKey(artist)) score *= 1 + w.discovery;
+    if (!score.isFinite) {
+      // A bad weight or affinity, not a property of the track: fail loudly
+      // instead of quietly dropping it.
+      throw StateError('Recommendation score for "${c.t.title}" by '
+          '${c.t.artist} is $score (seed ${c.best.artist}, '
+          'affinity ${c.best.affinity})');
+    }
     if (score > 0) scored.add(ScoredTrack(c.t, score, c.best));
   });
 
@@ -408,6 +444,103 @@ String songFamily(String title) {
   s = s.replaceAll(_versionWords, ' ').replaceAll(RegExp(r'[^\p{L}\p{N}]+', unicode: true), ' ');
   s = s.trim();
   return s.isEmpty ? title.toLowerCase().trim() : s;
+}
+
+/// Why the taste model could not produce a list. Each has a message meant
+/// for the user; the recommendations section shows it instead of an empty
+/// or substitute list.
+sealed class RecsFailure implements Exception {
+  const RecsFailure();
+  String get message;
+  @override
+  String toString() => message;
+}
+
+/// No artist has a positive score: nothing played, liked or kept yet.
+class NoTasteYet extends RecsFailure {
+  const NoTasteYet();
+  @override
+  String get message =>
+      'Play or like a few songs — recommendations start from what you enjoy.';
+}
+
+/// Every seed's radio failed. [errors] maps seed artist → cause.
+class AllRadiosFailed extends RecsFailure {
+  final Map<String, Object> errors;
+  const AllRadiosFailed(this.errors);
+  @override
+  String get message {
+    final first = errors.values.first;
+    return "Couldn't load recommendations from Deezer for any of "
+        '${errors.length} artists: $first';
+  }
+}
+
+/// Deezer answered for every seed but had no radio tracks for any of them.
+class NoRadioTracks extends RecsFailure {
+  final List<String> seeds;
+  const NoRadioTracks(this.seeds);
+  @override
+  String get message => 'Deezer has no radio for ${seeds.join(', ')}. '
+      'Play or like a few other artists and refresh.';
+}
+
+/// Radios came back, but every track was owned or hidden.
+class NothingNew extends RecsFailure {
+  final int candidates;
+  const NothingNew(this.candidates);
+  @override
+  String get message => 'All $candidates suggestions were already in your '
+      'library or hidden. Refresh for new ones.';
+}
+
+/// A finished list plus the seeds whose radio failed, so the UI can say
+/// "2 of 8 artists couldn't be loaded" instead of hiding a partial result.
+class RecommendationResult {
+  final List<ScoredTrack> tracks;
+  final List<TasteSeed> seeds;
+
+  /// Seed artist → error, for radios that failed.
+  final Map<String, Object> failedSeeds;
+
+  const RecommendationResult(this.tracks, this.seeds, this.failedSeeds);
+}
+
+/// Runs the whole model: profile → seeds → radios → ranking. [radio] fetches
+/// one artist's radio and throws on failure (it must not turn errors into an
+/// empty list, or "Deezer is down" would look like "no music"). Throws a
+/// [RecsFailure] when no list can be made; one failing seed only shows up in
+/// [RecommendationResult.failedSeeds].
+Future<RecommendationResult> recommend({
+  required TasteSignals signals,
+  required DateTime now,
+  required Future<List<RecommendedTrack>> Function(TasteSeed seed) radio,
+  required math.Random rng,
+  TasteWeights weights = const TasteWeights(),
+  int limit = 30,
+}) async {
+  final profile = TasteProfile.build(signals, now: now, w: weights);
+  final seeds = pickSeeds(profile, rng);
+  if (seeds.isEmpty) throw const NoTasteYet();
+
+  final failed = <String, Object>{};
+  final radios = <TasteSeed, List<RecommendedTrack>>{};
+  await Future.wait(seeds.map((seed) async {
+    try {
+      radios[seed] = await radio(seed);
+    } catch (e) {
+      failed[seed.artist] = e;
+    }
+  }));
+  if (failed.length == seeds.length) throw AllRadiosFailed(failed);
+  final candidates = radios.values.fold<int>(0, (n, l) => n + l.length);
+  if (candidates == 0) {
+    throw NoRadioTracks([for (final s in radios.keys) s.artist]);
+  }
+  final tracks =
+      rankCandidates(radios, profile, signals, rng, w: weights, limit: limit);
+  if (tracks.isEmpty) throw NothingNew(candidates);
+  return RecommendationResult(tracks, seeds, failed);
 }
 
 /// Short reason label for a recommendation card.

@@ -238,6 +238,14 @@ void main() {
       expect(c.read(likesProvider), isNot(contains('4')));
     });
 
+    test('wrong song kinds are rejected, not ignored', () async {
+      final c = await container();
+      final likes = c.read(likesProvider.notifier);
+      expect(() => likes.toggle(_deezer(1, 'X', 'Y')), throwsArgumentError);
+      expect(() => likes.likeRecommendation(server.library.first),
+          throwsArgumentError);
+    });
+
     test('unliking a Deezer track drops its pending like', () async {
       final c = await container();
       await c

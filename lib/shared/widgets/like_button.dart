@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/errors/app_errors.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../utils/download_polling_mixin.dart';
@@ -80,12 +81,21 @@ Future<void> toggleRecommendationLike<T extends ConsumerStatefulWidget>(
   final ref = host.ref;
   final likes = ref.read(likesProvider.notifier);
   final deezerId = deezerIdOf(song);
-  if (deezerId == null) return;
-  if (liked) {
-    await likes.unlikeRecommendation(deezerId);
+  if (deezerId == null) {
+    throw ArgumentError.value(song.id, 'song', 'is not a Deezer track');
+  }
+  try {
+    if (liked) {
+      await likes.unlikeRecommendation(deezerId);
+      return;
+    }
+    await likes.likeRecommendation(song);
+  } catch (e) {
+    AppErrors.report(
+        liked ? "Couldn't unlike \"${song.title}\"" : "Couldn't like \"${song.title}\"",
+        e);
     return;
   }
-  await likes.likeRecommendation(song);
   if (!host.mounted) return;
   if (ref.read(companionClientProvider) == null) {
     showStyledSnack(host.context,

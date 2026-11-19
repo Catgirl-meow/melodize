@@ -97,6 +97,8 @@ void main() {
     final deezer = DeezerClient();
     final radioCache = <String, Future<List<RecommendedTrack>>>{};
     final titleOf = {for (final h in history.reversed) h.artist: h.title};
+    final radioErrors = <String, Object>{};
+    final failures = <String>[];
     Future<List<RecommendedTrack>> radio(String artist) =>
         radioCache.putIfAbsent(artist, () async {
           try {
@@ -106,12 +108,10 @@ void main() {
                 genreHint: genreByArtist[artist]);
             return id == null ? const [] : await deezer.artistRadio(id, limit: 20);
           } catch (e) {
-            // ignore: avoid_print
-            print('radio for $artist failed: $e');
-            return const [];
+            radioErrors[artist] = e;
+            rethrow;
           }
         });
-
     TasteSignals signalsFor(List<ListenEvent> h) => TasteSignals(
           history: h,
           likes: likes,
@@ -119,6 +119,25 @@ void main() {
           genreByArtist: genreByArtist,
           ownedTracks: owned,
         );
+
+    // Today's provider skips a seed whose radio fails (and records why);
+    // the failure still lands in the report's Errors section.
+    Future<List<Rec>> today_(List<ListenEvent> h, math.Random rng) =>
+        todayAlgorithm(h, owned, (a) async {
+          try {
+            return await radio(a);
+          } catch (_) {
+            return const <RecommendedTrack>[];
+          }
+        }, rng);
+    Future<List<Rec>> model_(List<ListenEvent> h, DateTime at, math.Random rng) async {
+      try {
+        return await tasteAlgorithm(signalsFor(h), at, radio, rng);
+      } on RecsFailure catch (e) {
+        failures.add('Taste model: ${e.message}');
+        return const [];
+      }
+    }
 
     final buf = StringBuffer('# Recommendations on your real history\n\n')
       ..writeln('Source: $source.\n')
@@ -153,8 +172,8 @@ void main() {
         for (var i = 0; i < 5; i++) {
           final rng = math.Random(i + 1);
           final recs = name == 'Today'
-              ? await todayAlgorithm(train, owned, radio, rng)
-              : await tasteAlgorithm(signalsFor(train), cutoff, radio, rng);
+              ? await today_(train, rng)
+              : await model_(train, cutoff, rng);
           final artists = {for (final r in recs) normalize(r.track.artist)};
           final hits = artists.intersection(discovered);
           if (hits.isNotEmpty) hitRefreshes++;
@@ -168,9 +187,8 @@ void main() {
     }
 
     // 2. Side by side on the full history.
-    final today = await todayAlgorithm(history, owned, radio, math.Random(42));
-    final model =
-        await tasteAlgorithm(signalsFor(history), now, radio, math.Random(42));
+    final today = await today_(history, math.Random(42));
+    final model = await model_(history, now, math.Random(42));
     final profile = TasteProfile.build(signalsFor(history), now: now);
     final top = profile.affinity.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
@@ -193,6 +211,13 @@ void main() {
           '${i < model.length ? model[i].reason ?? '' : ''} |');
     }
 
+    if (failures.isNotEmpty || radioErrors.isNotEmpty) {
+      buf.writeln('\n## Errors\n');
+      for (final f in failures.toSet()) {
+        buf.writeln('- $f');
+      }
+      radioErrors.forEach((a, e) => buf.writeln('- Deezer radio for $a: $e'));
+    }
     // ignore: avoid_print
     print(buf);
     if (reportPath != null) File(reportPath).writeAsStringSync(buf.toString());

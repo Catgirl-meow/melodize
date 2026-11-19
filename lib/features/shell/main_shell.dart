@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/errors/app_errors.dart';
+import '../../core/db/database.dart' show PendingLike;
 import '../../core/providers.dart';
 import '../../shared/utils/snack.dart';
 import '../home/home_screen.dart';
@@ -284,6 +285,13 @@ class _MainShellState extends ConsumerState<MainShell>
     // Keep likes alive so pending Deezer likes are applied on every library
     // sync, whichever screen is open.
     ref.listen(likesProvider, (_, __) {});
+    // The hearts on Deezer tracks read this table; if it can't be read they
+    // would all look unliked, so say so instead.
+    ref.listen<AsyncValue<List<PendingLike>>>(pendingLikesProvider, (_, next) {
+      if (next.hasError) {
+        AppErrors.report("Couldn't read liked recommendations", next.error);
+      }
+    });
     ref.listen<DownloadNotice?>(downloadNoticeProvider, (_, notice) {
       if (notice == null) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {

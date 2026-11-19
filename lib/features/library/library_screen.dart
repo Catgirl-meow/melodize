@@ -669,8 +669,17 @@ class _LikedTabState extends ConsumerState<_LikedTab>
   Widget build(BuildContext context) {
     super.build(context);
     final likedAsync = ref.watch(likedSongsProvider);
-    final pending = ref.watch(pendingLikesProvider).valueOrNull ?? const [];
+    final pendingAsync = ref.watch(pendingLikesProvider);
+    final pending = pendingAsync.valueOrNull ?? const <PendingLike>[];
     final handler = ref.read(audioHandlerNotifierProvider);
+    final pendingError = pendingAsync.hasError
+        ? ErrorNotice(
+            title: "Couldn't read liked recommendations",
+            error: pendingAsync.error!,
+            compact: true,
+            onRetry: () => ref.invalidate(pendingLikesProvider),
+          )
+        : null;
 
     return likedAsync.when(
       skipLoadingOnReload: true,
@@ -681,9 +690,12 @@ class _LikedTabState extends ConsumerState<_LikedTab>
         onRetry: () => ref.invalidate(allSongsProvider),
       ),
       data: (songs) {
-        if (songs.isEmpty && pending.isEmpty) return const _LikedEmpty();
+        if (songs.isEmpty && pending.isEmpty && pendingError == null) {
+          return const _LikedEmpty();
+        }
         return CustomScrollView(
           slivers: [
+            if (pendingError != null) SliverToBoxAdapter(child: pendingError),
             if (songs.isNotEmpty)
               SliverToBoxAdapter(
                 child: _LikedHeader(

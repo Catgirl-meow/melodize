@@ -632,7 +632,10 @@ class LikesNotifier extends StateNotifier<Set<String>> {
   /// if the server refuses; that failure is reported as an error snackbar.
   /// Returns the new state.
   Future<bool> toggle(Song song) async {
-    assert(!song.isExternal, 'Use likeRecommendation for Deezer tracks');
+    if (song.isExternal) {
+      throw ArgumentError.value(
+          song.id, 'song', 'is a Deezer track; use likeRecommendation');
+    }
     final like = !state.contains(song.id);
     await _setLiked(song, like);
     return like;
@@ -679,7 +682,9 @@ class LikesNotifier extends StateNotifier<Set<String>> {
   /// add it to the server library; the like is applied when it arrives.
   Future<void> likeRecommendation(Song song) async {
     final deezerId = deezerIdOf(song);
-    if (deezerId == null) return;
+    if (deezerId == null) {
+      throw ArgumentError.value(song.id, 'song', 'is not a Deezer track');
+    }
     await _ref.read(databaseProvider).addPendingLike(PendingLikesCompanion.insert(
           deezerId: Value(deezerId),
           title: song.title,

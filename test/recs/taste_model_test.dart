@@ -88,4 +88,95 @@ void main() {
     );
     expect(picks, hasLength(1));
   });
+
+  group('recommend() fails loudly', () {
+    final now = DateTime(2026, 11, 19);
+    final played = TasteSignals(history: [
+      ListenEvent(artist: 'Kaito Ren', title: 'Tokyo Rain', at: now),
+      ListenEvent(artist: 'Orbit Theory', title: 'Small Hours', at: now),
+    ]);
+
+    test('no history or likes: NoTasteYet', () async {
+      await expectLater(
+        recommend(
+            signals: const TasteSignals(),
+            now: now,
+            radio: (_) async => [],
+            rng: math.Random(1)),
+        throwsA(isA<NoTasteYet>()),
+      );
+    });
+
+    test('only skipped artists: NoTasteYet, not a list built on them',
+        () async {
+      await expectLater(
+        recommend(
+            signals: TasteSignals(history: [
+              ListenEvent(artist: 'X', title: 'Y', at: now, skipped: true)
+            ]),
+            now: now,
+            radio: (_) async => [_t('Z', 1)],
+            rng: math.Random(1)),
+        throwsA(isA<NoTasteYet>()),
+      );
+    });
+
+    test('every radio failing: AllRadiosFailed with the cause', () async {
+      try {
+        await recommend(
+            signals: played,
+            now: now,
+            radio: (_) async => throw Exception('HTTP 503'),
+            rng: math.Random(1));
+        fail('expected AllRadiosFailed');
+      } on AllRadiosFailed catch (e) {
+        expect(e.errors.keys, containsAll(['Kaito Ren', 'Orbit Theory']));
+        expect(e.message, contains('HTTP 503'));
+      }
+    });
+
+    test('one radio failing: a list, with the failure reported', () async {
+      final r = await recommend(
+          signals: played,
+          now: now,
+          radio: (seed) async => seed.artist == 'Kaito Ren'
+              ? throw Exception('timeout')
+              : [for (var i = 0; i < 5; i++) _t('New $i', i)],
+          rng: math.Random(1));
+      expect(r.tracks, isNotEmpty);
+      expect(r.failedSeeds.keys, ['Kaito Ren']);
+    });
+
+    test('Deezer has nothing: NoRadioTracks naming the artists', () async {
+      await expectLater(
+        recommend(
+            signals: played, now: now, radio: (_) async => [], rng: math.Random(1)),
+        throwsA(isA<NoRadioTracks>()
+            .having((e) => e.message, 'message', contains('Kaito Ren'))),
+      );
+    });
+
+    test('everything owned: NothingNew', () async {
+      await expectLater(
+        recommend(
+            signals: TasteSignals(
+                history: played.history, ownedTracks: {'z 1|z'}),
+            now: now,
+            radio: (_) async => [_t('Z', 1)],
+            rng: math.Random(1)),
+        throwsA(isA<NothingNew>()),
+      );
+    });
+
+    test('a broken weight is rejected up front', () {
+      expect(
+          () => TasteProfile.build(played,
+              now: now, w: const TasteWeights(like: double.nan)),
+          throwsArgumentError);
+      expect(
+          () => TasteProfile.build(played,
+              now: now, w: const TasteWeights(halfLifeDays: 0)),
+          throwsArgumentError);
+    });
+  });
 }
