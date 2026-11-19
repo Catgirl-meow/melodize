@@ -655,7 +655,7 @@ class _PlayerPage extends StatelessWidget {
           const SizedBox(height: 16),
           const RepaintBoundary(child: _SeekSlider()),
           // Desktop only: on mobile the hardware volume keys control the app,
-          // while on Linux/macOS they control the output device.
+          // while on Linux they control the output device.
           if (isDesktopPlatform) ...[
             const SizedBox(height: 8),
             const RepaintBoundary(child: _VolumeSlider()),

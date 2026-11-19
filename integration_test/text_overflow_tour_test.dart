@@ -21,7 +21,7 @@ import 'package:melodize/features/player/mini_player.dart';
 import 'package:melodize/features/shell/main_shell.dart';
 import 'package:melodize/main.dart' as app;
 
-import 'test_server_smoke_test.dart' show pumpUntil, fillSetup;
+import 'helpers.dart' show pumpUntil, fillSetup;
 
 const _url = String.fromEnvironment('ND_URL');
 const _user = String.fromEnvironment('ND_USER');

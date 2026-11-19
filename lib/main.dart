@@ -49,8 +49,7 @@ void main() {
     ),
   );
 
-  // Phase 2: connect audio_service — Android MediaSession/lock-screen, macOS
-  // Now Playing + remote commands — and register MPRIS on Linux so that
+  // Phase 2: connect audio_service — Android MediaSession/lock-screen — and register MPRIS on Linux so that
   // playerctl / niri XF86 keybindings work.
   WidgetsBinding.instance.addPostFrameCallback((_) {
     connectAudioService(audioHandler);
@@ -67,7 +66,7 @@ class _AppScrollBehavior extends ScrollBehavior {
   @override
   ScrollPhysics getScrollPhysics(BuildContext context) {
     // Android's clamping physics avoids the extra overscroll animation and
-    // matches native list behavior; desktop (Linux/macOS) gets the expressive
+    // matches native list behavior; desktop (Linux) gets the expressive
     // bounce that matches the rest of the desktop platform.
     if (isDesktopPlatform) {
       return const BouncingScrollPhysics(
@@ -110,9 +109,7 @@ class _MelodizeAppState extends ConsumerState<MelodizeApp>
     // Android audio_service owns the handler beyond the Activity lifecycle;
     // never dispose it when the UI is detached or backgrounded. Linux has no
     // equivalent background audio service, so release its player/MPRIS
-    // resources when the desktop app is actually detached. macOS gets a
-    // background Now Playing service through audio_service (MPRemoteCommandCenter)
-    // and terminates on last-window-close, so it needs no disposal here.
+    // resources when the desktop app is actually detached.
     if (Platform.isLinux &&
         state == AppLifecycleState.detached &&
         !_handlerDisposed) {

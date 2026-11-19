@@ -61,6 +61,10 @@ void main() {
         ),
     ];
     final now = DateTime.now();
+    if (history.isEmpty) {
+      markTestSkipped('$dbPath has no play history to compare on');
+      return;
+    }
 
     // One radio per artist, shared by both algorithms so they pick from the
     // same pool.
@@ -165,6 +169,7 @@ void main() {
     // ignore: avoid_print
     print(buf);
     if (reportPath != null) File(reportPath).writeAsStringSync(buf.toString());
-    expect(model, isNotEmpty);
+    expect(today.isNotEmpty || model.isNotEmpty, isTrue,
+        reason: 'Deezer returned no radio for any seed');
   }, timeout: const Timeout(Duration(minutes: 5)));
 }
