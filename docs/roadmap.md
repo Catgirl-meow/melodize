@@ -24,15 +24,9 @@ playback rework, the queue rewrite) is in git history and the release notes.
 |---|---|---|
 | Remaining raw font sizes | small | Home cards (`_kCardTitleSize`), tiny badges (9 px) and a few banners still set `fontSize:` directly; the layout math depends on them, so move them to text styles together with that math. |
 
-## Features
-
-| Item | Effort | Notes |
-|---|---|---|
-| Prebuilt macOS app | needs an Apple Developer ID | Without signing and notarization a downloaded build won't open on other Macs. |
-
 ## Not planned
 
-Starred songs and favourites, CarPlay / Android Auto, and recommendations from Navidrome's
+Starred songs and favourites, CarPlay / Android Auto, macOS and iOS (macOS support was removed in November 2026), and recommendations from Navidrome's
 similar-songs API (Deezer finds music you don't already have).
 
 Dropped for now (October 2026): a wavy progress bar, haptics, "not interested" on
