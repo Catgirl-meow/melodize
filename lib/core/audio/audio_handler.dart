@@ -1661,6 +1661,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       // positionStream ticks even when paused — only scrobble while actually playing.
       if (!player.playing) return;
 
+      _trackListen(song, position);
+
       if (!_nowPlayingReported && position.inSeconds >= 1) {
         _nowPlayingReported = true;
         _clientFor(cfg).scrobble(song.id, submission: false);
@@ -1682,6 +1684,33 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   final _historyController = StreamController<Song>.broadcast();
   Stream<Song> get playHistoryStream => _historyController.stream;
+
+  // How far each song got, for the recommendations' skip signal. The
+  // finished song is reported when the next one starts playing.
+  Song? _listenSong;
+  Duration _listenFurthest = Duration.zero;
+  Duration? _listenDuration;
+  final _listenEndController = StreamController<ListenEnd>.broadcast();
+
+  /// One event per song that stopped being the playing song, with how far
+  /// it got. The last song of a session is never reported.
+  Stream<ListenEnd> get listenEndStream => _listenEndController.stream;
+
+  void _trackListen(Song song, Duration position) {
+    final current = _listenSong;
+    if (current == null || current.id != song.id) {
+      if (current != null) {
+        _listenEndController.add(ListenEnd(
+            current, _listenFurthest, _listenDuration));
+      }
+      _listenSong = song;
+      _listenFurthest = position;
+      _listenDuration = player.duration;
+      return;
+    }
+    if (position > _listenFurthest) _listenFurthest = position;
+    _listenDuration ??= player.duration;
+  }
 
   bool _canPlayOffline(Song song) {
     if (song.externalStreamUrl != null) return true;
@@ -2700,6 +2729,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     await _transitionPlayer.dispose();
     _sleepTimer?.cancel();
     _historyController.close();
+    _listenEndController.close();
     await player.dispose();
   }
 }  // Two-phase audio init: createAudioHandler() before runApp (sync),
@@ -2750,4 +2780,18 @@ void _reportPlayerError(String what, Object e) {
     return;
   }
   AppErrors.report(what, e);
+}
+
+/// A song stopped playing after reaching [furthest] of [duration].
+class ListenEnd {
+  final Song song;
+  final Duration furthest;
+  final Duration? duration;
+  const ListenEnd(this.song, this.furthest, this.duration);
+
+  /// Left within 30 s, on a song longer than a minute (so 30-second Deezer
+  /// previews never count as skips).
+  bool get isSkip =>
+      furthest < const Duration(seconds: 30) &&
+      (duration ?? Duration.zero) > const Duration(minutes: 1);
 }

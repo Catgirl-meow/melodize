@@ -257,7 +257,8 @@ class TasteProfile {
 }
 
 /// Why a seed was picked; shown on the card as the reason.
-enum SeedReason { topArtist, recent, liked }
+/// [requested] is the artist of a "More like this" tap.
+enum SeedReason { topArtist, recent, liked, requested }
 
 class TasteSeed {
   /// Display name of the artist.
@@ -407,7 +408,8 @@ List<ScoredTrack> rankCandidates(
   final overflow = <ScoredTrack>[];
   for (final (t, _) in keyed) {
     if (out.length >= limit) break;
-    if (!families.add(songFamily(t.track.title))) continue;
+    final family = songFamily(t.track.title);
+    if (families.contains(family)) continue;
     final a = normalize(t.track.artist);
     final n = perArtistCount[a] ?? 0;
     if (n >= perArtist) continue;
@@ -415,6 +417,7 @@ List<ScoredTrack> rankCandidates(
       overflow.add(t);
       continue;
     }
+    families.add(family);
     perArtistCount[a] = n + 1;
     perSeedCount[t.because] = (perSeedCount[t.because] ?? 0) + 1;
     out.add(t);
@@ -424,6 +427,7 @@ List<ScoredTrack> rankCandidates(
     final a = normalize(t.track.artist);
     final n = perArtistCount[a] ?? 0;
     if (n >= perArtist) continue;
+    if (!families.add(songFamily(t.track.title))) continue;
     perArtistCount[a] = n + 1;
     out.add(t);
   }
@@ -485,6 +489,16 @@ class NoRadioTracks extends RecsFailure {
       'Play or like a few other artists and refresh.';
 }
 
+/// The radio of the artist the user asked for ("More like this") failed.
+class FocusRadioFailed extends RecsFailure {
+  final String artist;
+  final Object error;
+  const FocusRadioFailed(this.artist, this.error);
+  @override
+  String get message =>
+      "Couldn't load songs like $artist from Deezer: $error";
+}
+
 /// Radios came back, but every track was owned or hidden.
 class NothingNew extends RecsFailure {
   final int candidates;
@@ -511,6 +525,10 @@ class RecommendationResult {
 /// empty list, or "Deezer is down" would look like "no music"). Throws a
 /// [RecsFailure] when no list can be made; one failing seed only shows up in
 /// [RecommendationResult.failedSeeds].
+///
+/// [focusArtist] ("More like this") always seeds, first and at full weight,
+/// even for an artist never played; if its radio fails the whole call fails,
+/// since the user asked for exactly that artist.
 Future<RecommendationResult> recommend({
   required TasteSignals signals,
   required DateTime now,
@@ -518,9 +536,17 @@ Future<RecommendationResult> recommend({
   required math.Random rng,
   TasteWeights weights = const TasteWeights(),
   int limit = 30,
+  String? focusArtist,
 }) async {
   final profile = TasteProfile.build(signals, now: now, w: weights);
-  final seeds = pickSeeds(profile, rng);
+  final focusKey = focusArtist == null ? null : normalize(focusArtist);
+  final seeds = [
+    if (focusArtist != null)
+      TasteSeed(focusArtist, SeedReason.requested,
+          math.max(1.0, profile.maxAffinity)),
+    ...pickSeeds(profile, rng, count: focusArtist == null ? 8 : 7)
+        .where((s) => normalize(s.artist) != focusKey),
+  ];
   if (seeds.isEmpty) throw const NoTasteYet();
 
   final failed = <String, Object>{};
@@ -533,6 +559,12 @@ Future<RecommendationResult> recommend({
     }
   }));
   if (failed.length == seeds.length) throw AllRadiosFailed(failed);
+  if (focusArtist != null && failed.containsKey(focusArtist)) {
+    throw FocusRadioFailed(focusArtist, failed[focusArtist]!);
+  }
+  if (focusArtist != null && radios[seeds.first]!.isEmpty) {
+    throw NoRadioTracks([focusArtist]);
+  }
   final candidates = radios.values.fold<int>(0, (n, l) => n + l.length);
   if (candidates == 0) {
     throw NoRadioTracks([for (final s in radios.keys) s.artist]);
@@ -548,4 +580,5 @@ String reasonLabel(TasteSeed seed) => switch (seed.reason) {
       SeedReason.liked => 'You like ${seed.artist}',
       SeedReason.recent => 'You played ${seed.artist} this week',
       SeedReason.topArtist => 'Because you listen to ${seed.artist}',
+      SeedReason.requested => 'More like ${seed.artist}',
     };

@@ -9,7 +9,10 @@ import '../../core/models/recommendations_state.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/theme/app_theme.dart';
+import '../../core/errors/app_errors.dart' show describeError;
+import '../../core/recs/taste_model.dart' show SeedReason, TasteSeed;
 import '../../shared/utils/download_polling_mixin.dart';
+import '../../shared/utils/rec_feedback.dart';
 import '../../shared/widgets/like_button.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/offline_banner.dart';
@@ -421,7 +424,11 @@ class HomeScreen extends ConsumerWidget {
         backgroundColor: Colors.transparent,
         elevation: 0,
         shape: const RoundedRectangleBorder(),
-        overlayColor: WidgetStateProperty.all(Colors.transparent),
+        // No splash: CarouselView would lay its InkWell over the whole
+        // card, above the ⋮ button, so tapping ⋮ played the song instead of
+        // opening the menu. Without it, taps go through a GestureDetector
+        // that loses to the button's own InkWell.
+        enableSplash: false,
         onTap: onItemTap,
         children: children,
       ),
@@ -462,7 +469,7 @@ class HomeScreen extends ConsumerWidget {
     return recsAsync.when(
       skipLoadingOnRefresh: true,
       loading: () => const SliverToBoxAdapter(child: SizedBox.shrink()),
-      error: (_, __) => SliverToBoxAdapter(
+      error: (e, __) => SliverToBoxAdapter(
         child: _Section(
           title: 'Recommended for You',
           trailing: IconButton.filledTonal(
@@ -471,7 +478,7 @@ class HomeScreen extends ConsumerWidget {
             onPressed: refresh,
           ),
           child: _RecsInlineError(
-            message: 'Recommendations failed to load.',
+            message: "Recommendations failed to load: ${describeError(e)}",
             onRetry: refresh,
           ),
         ),
@@ -499,7 +506,46 @@ class HomeScreen extends ConsumerWidget {
                 child: _RecsInlineError(message: reason, onRetry: refresh),
               ),
             );
-          case RecsReady(songs: final songs):
+          case RecsReady(
+              songs: final all,
+              reasons: final reasons,
+              failedSeeds: final failedSeeds,
+            ):
+            // "Not interested" takes the card out at once (and Undo brings
+            // it back) without rebuilding the list.
+            final dismissedAsync = ref.watch(dismissedRecsProvider);
+            if (dismissedAsync.hasError) {
+              return SliverToBoxAdapter(
+                child: _Section(
+                  title: 'Recommended for You',
+                  child: _RecsInlineError(
+                    message: "Couldn't read your hidden recommendations: "
+                        '${describeError(dismissedAsync.error!)}',
+                    onRetry: () => ref.invalidate(dismissedRecsProvider),
+                  ),
+                ),
+              );
+            }
+            final dismissed = dismissedAsync.valueOrNull ?? const [];
+            final songs = [
+              for (final s in all)
+                if (!isDismissed(s, dismissed)) s
+            ];
+            if (songs.isEmpty) {
+              return SliverToBoxAdapter(
+                child: _Section(
+                  title: 'Recommended for You',
+                  trailing: IconButton.filledTonal(
+                    tooltip: 'Refresh recommendations',
+                    icon: const Icon(Icons.refresh_rounded),
+                    onPressed: refresh,
+                  ),
+                  child: const _RecsNote(
+                      'You hid everything in this list. Refresh for new '
+                      'suggestions.'),
+                ),
+              );
+            }
             return SliverToBoxAdapter(
               child: _fadeIn(
                 delay: _kStagger3,
@@ -510,17 +556,28 @@ class HomeScreen extends ConsumerWidget {
                     icon: const Icon(Icons.refresh_rounded),
                     onPressed: refresh,
                   ),
-                  child: SizedBox(
-                    height: _carouselHeight(context),
-                    child: _buildCarousel(
-                      context: context,
-                      onItemTap: (i) => ref
-                          .read(audioHandlerNotifierProvider)
-                          ?.loadQueue(songs, startIndex: i),
-                      children: [
-                        for (final s in songs) _RecommendationCard(song: s),
-                      ],
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        height: _carouselHeight(context),
+                        child: _buildCarousel(
+                          context: context,
+                          onItemTap: (i) => ref
+                              .read(audioHandlerNotifierProvider)
+                              ?.loadQueue(songs, startIndex: i),
+                          children: [
+                            for (final s in songs)
+                              _RecommendationCard(
+                                  key: ValueKey(s.id),
+                                  song: s,
+                                  reason: reasons[s.id]),
+                          ],
+                        ),
+                      ),
+                      if (failedSeeds.isNotEmpty)
+                        _RecsNote(_failedSeedsNote(failedSeeds)),
+                    ],
                   ),
                 ),
               ),
@@ -528,6 +585,14 @@ class HomeScreen extends ConsumerWidget {
         }
       },
     );
+  }
+
+  static String _failedSeedsNote(List<String> seeds) {
+    final names = seeds.length <= 3
+        ? seeds.join(', ')
+        : '${seeds.take(3).join(', ')} and ${seeds.length - 3} more';
+    return "Couldn't load suggestions based on $names from Deezer, so this "
+        'list is shorter. Refresh to try again.';
   }
 
   String _greeting(String? username) {
@@ -748,7 +813,10 @@ class _PlaylistCard extends ConsumerWidget {
 // Play is triggered via CarouselView.onTap at the carousel level.
 class _RecommendationCard extends ConsumerStatefulWidget {
   final Song song;
-  const _RecommendationCard({required this.song});
+
+  /// The seed artist behind this pick, shown as a label on the cover.
+  final TasteSeed? reason;
+  const _RecommendationCard({super.key, required this.song, this.reason});
 
   @override
   ConsumerState<_RecommendationCard> createState() =>
@@ -760,14 +828,11 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
   Future<void> _addToLibrary() =>
       addDeezerTrackToServer(deezerIdOf(widget.song)!);
 
-  void _moreLikeThis() {
-    ref.read(recommendationsSeedOverrideProvider.notifier).state = (
-      artist: widget.song.artist,
-      title: widget.song.title,
-      genre: null,
-    );
-    ref.invalidate(recommendationsProvider);
-  }
+  void _moreLikeThis() => requestMoreLikeThis(ref, widget.song);
+
+  void _notInterested({required bool wholeArtist}) =>
+      dismissRecommendation(context, ref, widget.song,
+          wholeArtist: wholeArtist);
 
   void _openMenu() {
     final canDownload = ref.read(canDeleteFromServerProvider);
@@ -865,6 +930,13 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
                 _moreLikeThis();
               },
             ),
+            _NotInterestedTile(
+              artist: widget.song.artist,
+              onChoose: (wholeArtist) {
+                Navigator.pop(ctx);
+                _notInterested(wholeArtist: wholeArtist);
+              },
+            ),
             const SizedBox(height: 8),
           ],
         ),
@@ -909,9 +981,21 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
               fit: StackFit.expand,
               children: [
               cover,
+              if (widget.reason != null)
+                Positioned(
+                  left: 6,
+                  right: 6,
+                  bottom: 6,
+                  child: IgnorePointer(
+                    child: Align(
+                      alignment: Alignment.bottomLeft,
+                      child: _ReasonPill(seed: widget.reason!),
+                    ),
+                  ),
+                ),
               if (isPreview)
                 Positioned(
-                  bottom: 6,
+                  top: 6,
                   left: 6,
                   child: IgnorePointer(
                     child: Container(
@@ -985,6 +1069,146 @@ class _RecommendationCardState extends ConsumerState<_RecommendationCard>
               size: 52, color: scheme.onSurfaceVariant),
         ),
       );
+}
+
+/// Why a recommendation was picked, on its cover: "You like Kaito Ren".
+class _ReasonPill extends StatelessWidget {
+  final TasteSeed seed;
+  const _ReasonPill({required this.seed});
+
+  static (IconData, String) describe(TasteSeed seed) => switch (seed.reason) {
+        SeedReason.liked => (Icons.favorite_rounded, 'You like ${seed.artist}'),
+        SeedReason.recent => (Icons.history_rounded, 'Lately: ${seed.artist}'),
+        SeedReason.topArtist => (
+            Icons.graphic_eq_rounded,
+            'Similar to ${seed.artist}'
+          ),
+        SeedReason.requested => (
+            Icons.auto_awesome_rounded,
+            'More like ${seed.artist}'
+          ),
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final (icon, label) = describe(seed);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(6, 3, 8, 3),
+      decoration: BoxDecoration(
+        color: scheme.secondaryContainer.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: scheme.onSecondaryContainer),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+                color: scheme.onSecondaryContainer,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "Not interested" row of a recommendation's menu. Tapping it reveals a
+/// choice: hide just this song, or every song by the artist.
+class _NotInterestedTile extends StatefulWidget {
+  final String artist;
+  final ValueChanged<bool> onChoose; // true = whole artist
+  const _NotInterestedTile({required this.artist, required this.onChoose});
+
+  @override
+  State<_NotInterestedTile> createState() => _NotInterestedTileState();
+}
+
+class _NotInterestedTileState extends State<_NotInterestedTile> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ListTile(
+          leading: Icon(Icons.block_rounded, color: scheme.error),
+          title: Text('Not interested', style: TextStyle(color: scheme.error)),
+          subtitle: const Text('Hide it and show less like it'),
+          onTap: () => setState(() => _open = !_open),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          child: !_open
+              ? const SizedBox(width: double.infinity)
+              : Padding(
+                  padding: const EdgeInsets.fromLTRB(72, 0, 16, 8),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<bool>(
+                      segments: [
+                        const ButtonSegment(
+                            value: false, label: Text('This song')),
+                        ButtonSegment(
+                          value: true,
+                          label: Text(widget.artist,
+                              maxLines: 1, overflow: TextOverflow.ellipsis),
+                        ),
+                      ],
+                      selected: const {},
+                      emptySelectionAllowed: true,
+                      showSelectedIcon: false,
+                      onSelectionChanged: (sel) {
+                        if (sel.isNotEmpty) widget.onChoose(sel.first);
+                      },
+                    ),
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+/// A quiet one-line note under the recommendations (not an error).
+class _RecsNote extends StatelessWidget {
+  final String text;
+  const _RecsNote(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline_rounded,
+              size: 16, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(text,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: scheme.onSurfaceVariant)),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
