@@ -61,4 +61,31 @@ void main() {
     );
     expect(picks.map((p) => p.track.artist), ['Fine']);
   });
+
+  test('songFamily folds edits of the same song together', () {
+    expect(songFamily('?К0N3Ц.. - Slowed'), songFamily('?К0N3Ц.. - Mega Slowed'));
+    expect(songFamily('I Kissed A Girl'), songFamily('I Kissed A Girl (Slowed)'));
+    expect(songFamily('Skins (Sped Up)'), songFamily('Skins (Slowed + Reverb)'));
+    expect(songFamily('Rock Your Body'), isNot(songFamily('Rock Your Soul')));
+    expect(songFamily('(Slowed)'), isNotEmpty);
+  });
+
+  test('two edits of one song never both make the list', () {
+    const s = TasteSeed('Seed', SeedReason.topArtist, 1);
+    final picks = rankCandidates(
+      {
+        s: const [
+          RecommendedTrack(deezerId: 1, title: 'Skins (Sped Up)', artist: 'A',
+              album: '', durationSeconds: 1),
+          RecommendedTrack(deezerId: 2, title: 'Skins (Slowed + Reverb)',
+              artist: 'B', album: '', durationSeconds: 1),
+        ]
+      },
+      const TasteProfile(affinity: {}, displayName: {}, genreShare: {},
+          recentArtists: [], likedArtists: []),
+      const TasteSignals(),
+      math.Random(1),
+    );
+    expect(picks, hasLength(1));
+  });
 }

@@ -366,10 +366,12 @@ List<ScoredTrack> rankCandidates(
   final seedCap = math.max(1, (limit * maxSeedShare).ceil());
   final perArtistCount = <String, int>{};
   final perSeedCount = <TasteSeed, int>{};
+  final families = <String>{};
   final out = <ScoredTrack>[];
   final overflow = <ScoredTrack>[];
   for (final (t, _) in keyed) {
     if (out.length >= limit) break;
+    if (!families.add(songFamily(t.track.title))) continue;
     final a = normalize(t.track.artist);
     final n = perArtistCount[a] ?? 0;
     if (n >= perArtist) continue;
@@ -390,6 +392,22 @@ List<ScoredTrack> rankCandidates(
     out.add(t);
   }
   return out;
+}
+
+final _versionWords = RegExp(
+    r'\b(super|ultra|mega|extremely|very|slowed|slow|sped|speed|up|reverb|'
+    r'reverbed|nightcore|hardtekk|hardstyle|jumpstyle|remix|edit|version|'
+    r'phonk|bass ?boosted)\b');
+
+/// The song behind a title, ignoring versions like "(Super Slowed)",
+/// "- Sped Up" or "Hardtekk Remix", so the list doesn't carry the same song
+/// twice in different edits or by different uploaders.
+String songFamily(String title) {
+  var s = title.toLowerCase().replaceAll(RegExp(r'[\(\[][^\)\]]*[\)\]]'), ' ');
+  s = s.replaceAll(RegExp(r'\s+[-–—]\s+.*$'), ' ');
+  s = s.replaceAll(_versionWords, ' ').replaceAll(RegExp(r'[^\p{L}\p{N}]+', unicode: true), ' ');
+  s = s.trim();
+  return s.isEmpty ? title.toLowerCase().trim() : s;
 }
 
 /// Short reason label for a recommendation card.
