@@ -89,11 +89,13 @@ class AppTheme {
 
   /// The app theme re-seeded from [seed], e.g. an artist photo's colour, so
   /// a page can carry its own tint with every component theme intact.
+  /// Vibrant keeps the primary on the seed's hue (expressive rotates it, which
+  /// turned a purple photo's buttons green).
   static ThemeData seeded(Color seed, Brightness brightness) =>
       _build(ColorScheme.fromSeed(
         seedColor: seed,
         brightness: brightness,
-        dynamicSchemeVariant: DynamicSchemeVariant.expressive,
+        dynamicSchemeVariant: DynamicSchemeVariant.vibrant,
       ));
 
   static ThemeData _build(ColorScheme scheme) {

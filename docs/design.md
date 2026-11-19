@@ -61,7 +61,7 @@ track number in the cover slot.
 
 `lib/features/library/artist_detail_screen.dart`, sections in `lib/features/library/artist/`.
 
-- **Tint:** the page re-seeds the theme (`AppTheme.seeded`, expressive variant) from the artist
+- **Tint:** the page re-seeds the theme (`AppTheme.seeded`, vibrant variant so the buttons keep the photo's hue) from the artist
   photo's palette, so every artist page has its own colours.
 - **Hero:** the photo (server `getArtistInfo2` image, then Deezer, then the artist cover art) in
   the 9-lobe `CookieShape` over a blurred copy of itself; `displaySmall` w800 name, top two

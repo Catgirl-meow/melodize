@@ -120,8 +120,9 @@ class _Carousel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return SizedBox(
+    return Container(
       height: 220,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       child: CarouselView.weighted(
         flexWeights: const [5, 3, 1],
         itemSnapping: true,

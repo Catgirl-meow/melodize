@@ -35,8 +35,7 @@ class ArtistDetailScreen extends ConsumerWidget {
         ? null
         : ref.watch(dominantColorProvider(seedUrl)).valueOrNull;
     final base = Theme.of(context);
-    final theme =
-        seed == null ? base : AppTheme.seeded(seed, base.brightness);
+    final theme = seed == null ? base : AppTheme.seeded(seed, base.brightness);
 
     return AnimatedTheme(
       data: theme,
@@ -215,15 +214,18 @@ class _ArtistHero extends ConsumerWidget {
           return Stack(
             fit: StackFit.expand,
             children: [
-              // Backdrop: the portrait, blurred and faded into the page.
-              Opacity(
-                opacity: (1 - t) * 0.6,
-                child: ImageFiltered(
-                  imageFilter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
-                  child: ArtistImage(
-                    imageUrl: imageUrl,
-                    coverArtId: artist.coverArt,
-                    size: double.infinity,
+              // Backdrop: the portrait, blurred and faded into the page. Clipped,
+              // or the blur bleeds below the hero.
+              ClipRect(
+                child: Opacity(
+                  opacity: (1 - t) * 0.6,
+                  child: ImageFiltered(
+                    imageFilter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+                    child: ArtistImage(
+                      imageUrl: imageUrl,
+                      coverArtId: artist.coverArt,
+                      size: double.infinity,
+                    ),
                   ),
                 ),
               ),
@@ -468,7 +470,8 @@ class _WideLayout extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(flex: 3, child: popular),
-                SizedBox(width: (c.maxWidth * 0.32).clamp(240, 340), child: latest),
+                SizedBox(
+                    width: (c.maxWidth * 0.32).clamp(240, 340), child: latest),
               ],
             );
           }),
