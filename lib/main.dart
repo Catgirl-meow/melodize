@@ -13,6 +13,8 @@ import 'core/audio/audio_handler.dart';
 import 'core/db/database.dart';
 import 'core/models/song.dart';
 import 'core/providers.dart';
+import 'core/errors/app_errors.dart';
+import 'core/utils/title_normalize.dart';
 import 'features/setup/setup_screen.dart';
 import 'features/shell/main_shell.dart';
 import 'shared/theme/app_theme.dart';
@@ -49,8 +51,7 @@ void main() {
     ),
   );
 
-  // Phase 2: connect audio_service — Android MediaSession/lock-screen, macOS
-  // Now Playing + remote commands — and register MPRIS on Linux so that
+  // Phase 2: connect audio_service — Android MediaSession/lock-screen — and register MPRIS on Linux so that
   // playerctl / niri XF86 keybindings work.
   WidgetsBinding.instance.addPostFrameCallback((_) {
     connectAudioService(audioHandler);
@@ -67,7 +68,7 @@ class _AppScrollBehavior extends ScrollBehavior {
   @override
   ScrollPhysics getScrollPhysics(BuildContext context) {
     // Android's clamping physics avoids the extra overscroll animation and
-    // matches native list behavior; desktop (Linux/macOS) gets the expressive
+    // matches native list behavior; desktop (Linux) gets the expressive
     // bounce that matches the rest of the desktop platform.
     if (isDesktopPlatform) {
       return const BouncingScrollPhysics(
@@ -110,9 +111,7 @@ class _MelodizeAppState extends ConsumerState<MelodizeApp>
     // Android audio_service owns the handler beyond the Activity lifecycle;
     // never dispose it when the UI is detached or backgrounded. Linux has no
     // equivalent background audio service, so release its player/MPRIS
-    // resources when the desktop app is actually detached. macOS gets a
-    // background Now Playing service through audio_service (MPRemoteCommandCenter)
-    // and terminates on last-window-close, so it needs no disposal here.
+    // resources when the desktop app is actually detached.
     if (Platform.isLinux &&
         state == AppLifecycleState.detached &&
         !_handlerDisposed) {
@@ -181,6 +180,7 @@ class _StartupRouter extends ConsumerStatefulWidget {
 
 class _StartupRouterState extends ConsumerState<_StartupRouter> {
   StreamSubscription<Song>? _historySubscription;
+  StreamSubscription<ListenEnd>? _listenEndSubscription;
   // Signature of last allSongs list passed to _downloadAll. Guards against
   // refiring on every cache/fresh emission with the same content.
   int? _lastAutoDownloadSig;
@@ -208,8 +208,22 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
       }
     });
 
+    _listenEndSubscription = handler?.listenEndStream.listen((end) async {
+      try {
+        await ref.read(databaseProvider).finishLatestPlay(end.song.id,
+            listenedMs: end.furthest.inMilliseconds, skipped: end.isSkip);
+      } catch (e) {
+        AppErrors.report("Couldn't save how long a song played", e);
+      }
+    });
     _historySubscription = handler?.playHistoryStream.listen((song) async {
       if (!mounted) return;
+      // Played: it's no longer an ignored recommendation.
+      ref
+          .read(databaseProvider)
+          .clearImpression(keyFor(song.title, song.artist))
+          .catchError((Object e) =>
+              AppErrors.report("Couldn't update recommendation history", e));
       // Save play history to DB
       ref.read(databaseProvider).addToHistory(
             PlayHistoryCompanion.insert(
@@ -237,6 +251,7 @@ class _StartupRouterState extends ConsumerState<_StartupRouter> {
   @override
   void dispose() {
     _historySubscription?.cancel();
+    _listenEndSubscription?.cancel();
     super.dispose();
   }
 

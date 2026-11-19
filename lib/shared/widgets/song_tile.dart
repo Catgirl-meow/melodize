@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'like_button.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../utils/snack.dart';
@@ -215,6 +216,20 @@ class _MoreButton extends ConsumerWidget {
                 Navigator.pop(context);
               },
             ),
+            if (!song.isExternal)
+              Consumer(builder: (_, ref, __) {
+                final liked = ref.watch(isLikedProvider(song.id));
+                return ListTile(
+                  leading: Icon(liked
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded),
+                  title: Text(liked ? 'Unlike' : 'Like'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    toggleLibraryLike(ref, song);
+                  },
+                );
+              }),
             if (isDownloaded)
               ListTile(
                 leading: const Icon(Icons.delete_outline_rounded),

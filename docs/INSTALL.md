@@ -33,25 +33,6 @@ If it fails to start, GTK 3 is missing (`apt install libgtk-3-0` or `pacman -S g
 Settings, the library cache and downloads live in `~/.local/share/com.catgirl.melodize/`.
 Playback shows up in MPRIS, so `playerctl` and your desktop's media keys work.
 
-## macOS
-
-macOS 12 or later. There is no prebuilt app yet; build it on a Mac with
-Xcode 15+:
-
-```sh
-xcode-select --install
-flutter pub get
-flutter build macos --release   # build/macos/Build/Products/Release/melodize.app
-```
-
-The build is ad-hoc signed, so it runs on the Mac that built it; giving it to others needs a
-Developer ID signature and notarization. The app is sandboxed and keeps its data in
-`~/Library/Containers/com.catgirl.melodize/Data/`.
-
-- Plain-HTTP servers work (there is an App Transport Security exception).
-- macOS playback (AVFoundation) does not accept self-signed HTTPS certificates. Use plain HTTP on
-  your LAN or a trusted certificate.
-
 ## Building from source
 
 Flutter 3.44 (the repo expects it at `./flutter/`, but a system Flutter works too).
@@ -60,7 +41,6 @@ Flutter 3.44 (the repo expects it at `./flutter/`, but a system Flutter works to
 |---|---|---|---|
 | Android | Android SDK | `flutter build apk` | `build/app/outputs/flutter-apk/` |
 | Linux | GTK 3 headers, CMake, Ninja, clang, libmpv-dev | `flutter build linux --release` | `build/linux/x64/release/bundle/` |
-| macOS | a Mac with Xcode 15+ | `flutter build macos --release` | `build/macos/Build/Products/Release/` |
 
 `scripts/package-linux-release.sh` packs the Linux bundle into the release tarball.
 
@@ -76,7 +56,7 @@ account. Downloading full FLAC tracks into your library needs the
 
 Melodize checks the ARL and shows a banner on Home when it expires.
 
-## Keyboard shortcuts (Linux and macOS)
+## Keyboard shortcuts (Linux)
 
 | Key | Action |
 |---|---|
@@ -89,4 +69,4 @@ Melodize checks the ARL and shows a banner on Home when it expires.
 | `S` | Cycle shuffle mode |
 | `R` | Cycle repeat mode |
 
-Shortcuts are ignored while a text field has focus or Ctrl, Cmd or Alt is held.
+Shortcuts are ignored while a text field has focus or Ctrl, Super or Alt is held.

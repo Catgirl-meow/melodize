@@ -1,7 +1,7 @@
 # Melodize
 
 A music player for [Navidrome](https://www.navidrome.org/) and other Subsonic servers, for
-Android, Linux and macOS. Lossless streaming, offline downloads, synced lyrics, a DJ-style smart
+Android and Linux. Lossless streaming, offline downloads, synced lyrics, a DJ-style smart
 shuffle with automatic crossfades, and Deezer-powered discovery, in a Material 3 Expressive UI.
 
 <p>
@@ -19,11 +19,12 @@ shuffle with automatic crossfades, and Deezer-powered discovery, in a Material 3
 - Queue: drag to reorder, play next, add to queue, swipe to remove, in every shuffle mode.
 - Shuffle and **smart shuffle**, which orders the upcoming songs like a DJ set (tempo, key,
   energy, genre) and crossfades each pair automatically.
-- Discovery from Deezer: recommendations from your listening history, "more like this",
+- Discovery from Deezer: recommendations that learn from your likes, plays, skips and
+  "Not interested", each with a reason ("You like …"); "more like this"; a Discovery slider;
   catalog search with 30-second previews.
 - Light, dark and Material You themes; Now Playing takes its colors from the cover art.
-- Scrobbling, sleep timer, lock-screen and media-key controls (MediaSession on Android, Now
-  Playing on macOS, MPRIS on Linux) and keyboard shortcuts on desktop.
+- Scrobbling, sleep timer, lock-screen and media-key controls (MediaSession on Android, MPRIS
+  on Linux) and keyboard shortcuts on desktop.
 
 The optional [companion](docs/companion.md), a small Python service next to Navidrome, adds real
 audio analysis for smart shuffle, server-rendered DJ transitions, deleting songs from the server,
@@ -33,7 +34,7 @@ and downloading Deezer tracks into the library. Melodize works fully without it.
 
 Download the APK (Android 8+) or the Linux tarball from
 [Releases](https://github.com/Catgirl-meow/melodize/releases), then enter your server URL,
-username and password. Linux needs libmpv. macOS is built from source for now.
+username and password. Linux needs libmpv.
 Details per platform: [docs/INSTALL.md](docs/INSTALL.md).
 
 ## Develop
@@ -47,7 +48,11 @@ The repo expects a Flutter 3.44 SDK checkout at `./flutter/` (git-ignored).
 ./flutter/bin/flutter test
 scripts/test-navidrome.sh up               # throwaway Navidrome + test library (podman)
 eval "$(scripts/test-navidrome.sh env)"    # flutter test then also runs test/live/
+scripts/test-linux.sh                      # integration tests, headless (Xvfb in a container)
+scripts/test-android.sh                    # integration tests on a headless emulator
 ```
+
+How to test each platform: [docs/testing.md](docs/testing.md).
 
 More: [architecture and gotchas](CLAUDE.md), [roadmap](docs/roadmap.md),
 [design conventions](docs/design.md), [security audit (Oct 2026)](docs/audit-2026-10.md).

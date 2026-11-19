@@ -16,6 +16,8 @@ import '../../core/audio/shuffle_mode.dart';
 import '../../core/utils/platform_info.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/utils/download_polling_mixin.dart';
+import '../../shared/utils/rec_feedback.dart';
+import '../../shared/widgets/like_button.dart';
 import '../../shared/utils/snack.dart';
 import '../../shared/utils/song_actions.dart';
 import '../../shared/widgets/cover_art_image.dart';
@@ -595,56 +597,17 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
       showStyledSnack(context, msg, isError: isError);
 
   void _moreLikeThis() {
-    ref.read(recommendationsSeedOverrideProvider.notifier).state = (
-      artist: song.artist,
-      title: song.title,
-      genre: song.genre,
-    );
-    ref.invalidate(recommendationsProvider);
+    requestMoreLikeThis(ref, song);
     _snack('Refreshing recommendations from "${song.title}"');
   }
 
   Future<void> _addToLibraryViaCompanion() async {
-    final companion = ref.read(companionClientProvider);
-    if (companion == null) {
-      _snack('Companion not configured — set it up in Settings', isError: true);
-      return;
-    }
-    final prefs = ref.read(preferencesNotifierProvider);
-
-    if (!song.id.startsWith('deezer:')) {
+    final deezerId = deezerIdOf(song);
+    if (deezerId == null) {
       _snack('No Deezer source for this track', isError: true);
       return;
     }
-    final deezerTrackId = song.id.substring('deezer:'.length);
-    final url = 'https://www.deezer.com/track/$deezerTrackId';
-
-    if (!prefs.hasDeezerArl) {
-      _snack('Add Deezer ARL in Settings — required for server downloads',
-          isError: true);
-      return;
-    }
-    final arlStatus = ref.read(deezerArlStatusProvider).valueOrNull;
-    if (arlStatus == DeezerArlStatus.invalid) {
-      _snack('Deezer session expired — update ARL in Settings', isError: true);
-      return;
-    }
-    if (arlStatus == DeezerArlStatus.unreachable) {
-      _snack('Can\'t verify Deezer session — download will attempt anyway');
-    }
-
-    _snack('Sending to server (FLAC)…');
-
-    try {
-      final jobId =
-          await companion.startDownload(url, deezerArl: prefs.deezerArl);
-      if (!mounted) return;
-      startDownloadPolling(companion, jobId);
-    } catch (e) {
-      if (!mounted) return;
-      _snack('Download could not start: ${companionStartError(e)}',
-          isError: true);
-    }
+    await addDeezerTrackToServer(deezerId);
   }
 }
 
@@ -688,7 +651,7 @@ class _PlayerPage extends StatelessWidget {
           const SizedBox(height: 16),
           const RepaintBoundary(child: _SeekSlider()),
           // Desktop only: on mobile the hardware volume keys control the app,
-          // while on Linux/macOS they control the output device.
+          // while on Linux they control the output device.
           if (isDesktopPlatform) ...[
             const SizedBox(height: 8),
             const RepaintBoundary(child: _VolumeSlider()),
@@ -809,33 +772,45 @@ class _SongInfoRow extends StatelessWidget {
                       fontWeight: FontWeight.bold,
                     ),
               ),
-              MarqueeText(
-                song.artist,
-                key: ValueKey('artist-${song.id}'),
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: scheme.onSurface.withValues(alpha: 0.7),
+              Row(
+                children: [
+                  Flexible(
+                    child: MarqueeText(
+                      song.artist,
+                      key: ValueKey('artist-${song.id}'),
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: scheme.onSurface.withValues(alpha: 0.7),
+                          ),
                     ),
+                  ),
+                  // The quality badge sits after the artist so the heart
+                  // gets the end of the row.
+                  if (song.suffix != null) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: fgAccent.withValues(alpha: 0.12),
+                        border:
+                            Border.all(color: fgAccent.withValues(alpha: 0.4)),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        song.suffix!.toUpperCase(),
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: fgAccent, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ],
           ),
         ),
-        if (song.suffix != null) ...[
-          // Keeps a scrolling title from running into the badge.
-          const SizedBox(width: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-            decoration: BoxDecoration(
-              color: fgAccent.withValues(alpha: 0.12),
-              border: Border.all(color: fgAccent.withValues(alpha: 0.4)),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              song.suffix!.toUpperCase(),
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: fgAccent, fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
+        // Keeps a scrolling title from running into the heart.
+        const SizedBox(width: 12),
+        LikeButton(song: song, color: fgAccent),
       ],
     );
   }

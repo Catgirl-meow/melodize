@@ -1,3 +1,4 @@
+import '../recs/taste_model.dart' show TasteSeed;
 import 'song.dart';
 
 // States for the Home "Recommended for You" section.
@@ -11,8 +12,17 @@ class RecsLoading extends RecommendationsState {
 
 class RecsReady extends RecommendationsState {
   final List<Song> songs;
-  final int failedSeeds;
-  const RecsReady(this.songs, {this.failedSeeds = 0});
+
+  /// The seed artist that contributed most to each song, by [Song.id]:
+  /// the card's "why" label.
+  final Map<String, TasteSeed> reasons;
+
+  /// Seed artists whose Deezer radio failed this time, so a partial list
+  /// says so instead of looking complete.
+  final List<String> failedSeeds;
+
+  const RecsReady(this.songs,
+      {this.reasons = const {}, this.failedSeeds = const []});
 }
 
 class RecsEmptyNoHistory extends RecommendationsState {

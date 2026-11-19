@@ -25,7 +25,7 @@ import 'smart_shuffle_engine.dart';
 // shuffle indices diverge from mpv's internal order. Fix: never call
 // setShuffleModeEnabled at all. Instead, re-order the list at loadQueue()
 // time and use a virtual playback index for mid-playback toggles. The same
-// virtual-order path is used on Android and macOS, so shuffle behaves
+// virtual-order path is used on Android too, so shuffle behaves
 // identically on every platform.
 //
 // On Android the virtual order is also handed to ExoPlayer as its shuffle
@@ -42,8 +42,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     _initScrobbling();
     _initCrossfade();
     _initVirtualAdvance();
-    // Desktop keyboard shortcuts. MPRIS (Linux) and the Now Playing service
-    // (macOS) handle the media keys; this covers the rest of the keyboard.
+    // Desktop keyboard shortcuts. MPRIS (Linux) handles the media keys; this
+    // covers the rest of the keyboard.
     if (isDesktopPlatform) {
       HardwareKeyboard.instance.addHandler(_handleMediaKey);
     }
@@ -59,17 +59,13 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         minBufferDuration: Duration(seconds: 20),
         maxBufferDuration: Duration(seconds: 60),
       ),
-      darwinLoadControl: DarwinLoadControl(
-        // AVQueuePlayer buffers automatically.
-        preferredForwardBufferDuration: Duration(seconds: 30),
-      ),
     ),
   );
 
   /// Separate deck for companion-rendered transitions. It is deliberately
   /// not part of [_playlistSource]: transition WAVs are implementation
   /// details, not queue entries, so song indices and media metadata remain
-  /// one-to-one on Android, Linux and macOS.
+  /// one-to-one on Android and Linux.
   final AudioPlayer _transitionPlayer = AudioPlayer(
     audioLoadConfiguration: const AudioLoadConfiguration(
       androidLoadControl: AndroidLoadControl(
@@ -77,9 +73,6 @@ class MelodizeAudioHandler extends BaseAudioHandler {
         bufferForPlaybackAfterRebufferDuration: Duration(seconds: 1),
         minBufferDuration: Duration(seconds: 10),
         maxBufferDuration: Duration(seconds: 30),
-      ),
-      darwinLoadControl: DarwinLoadControl(
-        preferredForwardBufferDuration: Duration(seconds: 10),
       ),
     ),
   );
@@ -92,8 +85,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     shuffleOrder: _nativeShuffleOrder,
   );
 
-  // just_audio_media_kit (Linux) has no setShuffleOrder, and the macOS path
-  // is untested, so only Android uses the player's own shuffle order.
+  // just_audio_media_kit (Linux) has no setShuffleOrder, so only Android
+  // uses the player's own shuffle order.
   static final bool _useNativeShuffleOrder = Platform.isAndroid;
 
   SubsonicConfig? _config;
@@ -491,7 +484,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   int _mediaItemGeneration = 0;
 
   /// Publishes [song] to the system media controls (Android notification and
-  /// lock screen, macOS Now Playing, MPRIS).
+  /// lock screen, MPRIS).
   ///
   /// For a streamed song the art is handed over as the image cache's file
   /// when the cover is already on disk (shown in the app, or prefetched by
@@ -818,7 +811,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
     // Build the source upfront on every platform. Linux needs the full source
     // because media_kit/libmpv does not reliably support playlist moves;
-    // Android and macOS benefit from lazy preparation and preload:false so the
+    // Android benefits from lazy preparation and preload:false so the
     // first track can start without preparing the entire queue.
     // A fresh order starts as the identity, so the player follows the
     // physical queue until the virtual order is calculated below.
@@ -1593,7 +1586,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   // ---------------------------------------------------------------------------
   // Scrobbling via Subsonic
 
-  /// Linux and macOS: the platform player cannot follow the virtual order,
+  /// Linux: the platform player cannot follow the virtual order,
   /// and media_kit prefetches and plays physical index + 1 the moment the
   /// current song ends. Jump to the planned next song just before the end
   /// instead, so that other song never starts. The correction in the
@@ -1668,6 +1661,8 @@ class MelodizeAudioHandler extends BaseAudioHandler {
       // positionStream ticks even when paused — only scrobble while actually playing.
       if (!player.playing) return;
 
+      _trackListen(song, position);
+
       if (!_nowPlayingReported && position.inSeconds >= 1) {
         _nowPlayingReported = true;
         _clientFor(cfg).scrobble(song.id, submission: false);
@@ -1689,6 +1684,33 @@ class MelodizeAudioHandler extends BaseAudioHandler {
 
   final _historyController = StreamController<Song>.broadcast();
   Stream<Song> get playHistoryStream => _historyController.stream;
+
+  // How far each song got, for the recommendations' skip signal. The
+  // finished song is reported when the next one starts playing.
+  Song? _listenSong;
+  Duration _listenFurthest = Duration.zero;
+  Duration? _listenDuration;
+  final _listenEndController = StreamController<ListenEnd>.broadcast();
+
+  /// One event per song that stopped being the playing song, with how far
+  /// it got. The last song of a session is never reported.
+  Stream<ListenEnd> get listenEndStream => _listenEndController.stream;
+
+  void _trackListen(Song song, Duration position) {
+    final current = _listenSong;
+    if (current == null || current.id != song.id) {
+      if (current != null) {
+        _listenEndController.add(ListenEnd(
+            current, _listenFurthest, _listenDuration));
+      }
+      _listenSong = song;
+      _listenFurthest = position;
+      _listenDuration = player.duration;
+      return;
+    }
+    if (position > _listenFurthest) _listenFurthest = position;
+    _listenDuration ??= player.duration;
+  }
 
   bool _canPlayOffline(Song song) {
     if (song.externalStreamUrl != null) return true;
@@ -2534,8 +2556,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   }
 
   // Linux MPRIS (playerctl / media keys). Other platforms rely on
-  // audio_service: Android's MediaSession and macOS's Now Playing info +
-  // remote command center are wired up by connectAudioService().
+  // audio_service: Android's MediaSession is wired up by connectAudioService().
 
   Future<void> setupMpris() async {
     if (!Platform.isLinux || _disposed) return;
@@ -2604,8 +2625,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
   bool _handleMediaKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
 
-    // Never intercept OS/menu chords. macOS in particular maps Cmd+M to
-    // Minimize, Cmd+S to Save, Cmd+R to Reload and so on.
+    // Never intercept OS/menu chords (Super, Ctrl and Alt combinations).
     if (HardwareKeyboard.instance.isMetaPressed ||
         HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isAltPressed) {
@@ -2709,6 +2729,7 @@ class MelodizeAudioHandler extends BaseAudioHandler {
     await _transitionPlayer.dispose();
     _sleepTimer?.cancel();
     _historyController.close();
+    _listenEndController.close();
     await player.dispose();
   }
 }  // Two-phase audio init: createAudioHandler() before runApp (sync),
@@ -2759,4 +2780,18 @@ void _reportPlayerError(String what, Object e) {
     return;
   }
   AppErrors.report(what, e);
+}
+
+/// A song stopped playing after reaching [furthest] of [duration].
+class ListenEnd {
+  final Song song;
+  final Duration furthest;
+  final Duration? duration;
+  const ListenEnd(this.song, this.furthest, this.duration);
+
+  /// Left within 30 s, on a song longer than a minute (so 30-second Deezer
+  /// previews never count as skips).
+  bool get isSkip =>
+      furthest < const Duration(seconds: 30) &&
+      (duration ?? Duration.zero) > const Duration(minutes: 1);
 }

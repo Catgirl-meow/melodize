@@ -24,6 +24,10 @@ class AppPreferences {
       floatingNavBar; // true = floating pill dock, false = classic nav bar
   final String themeMode; // 'dark' | 'light' | 'system'
   final String shuffleMode; // 'off' | 'shuffle' | 'smartShuffle'
+  final bool downloadLikedOffline; // liking a song also saves it on device
+  /// Recommendations: boost for artists never played, 0 (familiar) – 2
+  /// (adventurous). See TasteWeights.discovery.
+  final double recDiscovery;
 
   const AppPreferences({
     this.streamQuality = 'lossless',
@@ -41,6 +45,8 @@ class AppPreferences {
     this.floatingNavBar = true,
     this.themeMode = 'dark',
     this.shuffleMode = 'off',
+    this.downloadLikedOffline = false,
+    this.recDiscovery = 0.5,
   });
 
   bool get hasCompanion =>
@@ -63,6 +69,8 @@ class AppPreferences {
     bool? floatingNavBar,
     String? themeMode,
     String? shuffleMode,
+    bool? downloadLikedOffline,
+    double? recDiscovery,
   }) =>
       AppPreferences(
         streamQuality: streamQuality ?? this.streamQuality,
@@ -82,12 +90,16 @@ class AppPreferences {
         floatingNavBar: floatingNavBar ?? this.floatingNavBar,
         themeMode: themeMode ?? this.themeMode,
         shuffleMode: shuffleMode ?? this.shuffleMode,
+        downloadLikedOffline: downloadLikedOffline ?? this.downloadLikedOffline,
+        recDiscovery: recDiscovery ?? this.recDiscovery,
       );
 
   // Tolerant field readers: one field with an unexpected type must not make
   // fromJson throw, because load() would then reset every setting.
   static String _str(Object? v, String fallback) => v is String ? v : fallback;
   static bool _bool(Object? v, bool fallback) => v is bool ? v : fallback;
+  static double _discovery(Object? v) =>
+      v is num && v.isFinite && v >= 0 && v <= 2 ? v.toDouble() : 0.5;
 
   factory AppPreferences.fromJson(Map<String, dynamic> j) => AppPreferences(
         streamQuality: _str(j['streamQuality'], 'lossless'),
@@ -105,6 +117,8 @@ class AppPreferences {
         floatingNavBar: _bool(j['floatingNavBar'], true),
         themeMode: _str(j['themeMode'], 'dark'),
         shuffleMode: _str(j['shuffleMode'], 'off'),
+        downloadLikedOffline: _bool(j['downloadLikedOffline'], false),
+        recDiscovery: _discovery(j['recDiscovery']),
       );
 
   Map<String, dynamic> toJson() => {
@@ -123,6 +137,8 @@ class AppPreferences {
         'floatingNavBar': floatingNavBar,
         'themeMode': themeMode,
         'shuffleMode': shuffleMode,
+        'downloadLikedOffline': downloadLikedOffline,
+        'recDiscovery': recDiscovery,
       };
 
   static Future<File> get _file async {

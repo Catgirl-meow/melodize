@@ -14,8 +14,6 @@ class AppTheme {
     return SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: dark ? Brightness.light : Brightness.dark,
-      // iOS/macOS naming: the brightness of the bar background.
-      statusBarBrightness: brightness,
       systemNavigationBarColor: Colors.transparent,
       systemNavigationBarDividerColor: Colors.transparent,
       systemNavigationBarIconBrightness:

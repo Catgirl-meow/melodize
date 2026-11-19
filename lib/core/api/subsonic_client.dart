@@ -321,9 +321,6 @@ class SubsonicClient {
     final params = <String, dynamic>{..._authParams(), 'id': song.id};
     if (quality != 'lossless') {
       params['maxBitRate'] = quality;
-      // Navidrome's default downsampling format is Opus-in-Ogg, which
-      // AVFoundation can't play. Ask for MP3 on Apple platforms.
-      if (Platform.isMacOS || Platform.isIOS) params['format'] = 'mp3';
     }
 
     String? contentType;
@@ -398,6 +395,21 @@ class SubsonicClient {
     final part = File(partPathFor(destPath));
     await part.writeAsBytes(bytes, flush: true);
     await part.rename(destPath);
+  }
+
+  // --- Likes (Subsonic star) ---
+  /// Stars [songId] on the server, which Melodize shows as "liked". Throws on
+  /// failure so the caller can undo its optimistic heart.
+  Future<void> star(String songId) => _get('star', {'id': songId});
+
+  Future<void> unstar(String songId) => _get('unstar', {'id': songId});
+
+  /// Every song the user starred, from any client.
+  Future<List<Song>> getStarredSongs() async {
+    final resp = await _get('getStarred2');
+    return (resp['starred2']?['song'] as List? ?? [])
+        .map((s) => Song.fromSubsonicJson(s as Map<String, dynamic>))
+        .toList();
   }
 
   // --- Scrobble ---

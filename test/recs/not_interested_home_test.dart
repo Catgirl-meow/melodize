@@ -1,0 +1,94 @@
+// Home's recommendation cards: the "why" label, and "Not interested" taking
+// a card out at once with Undo bringing it back.
+import 'package:drift/native.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:melodize/core/api/subsonic_client.dart';
+import 'package:melodize/core/db/database.dart';
+import 'package:melodize/core/models/app_preferences.dart';
+import 'package:melodize/core/models/recommendations_state.dart';
+import 'package:melodize/core/models/song.dart';
+import 'package:melodize/core/providers.dart';
+import 'package:melodize/core/recs/taste_model.dart';
+import 'package:melodize/features/home/home_screen.dart';
+
+void main() {
+  testWidgets('Not interested hides a card; Undo brings it back',
+      (tester) async {
+    tester.view.physicalSize = const Size(500, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    Song rec(int id, String title, String artist) => Song.fromRecommendation(
+        deezerId: id, title: title, artist: artist, album: 'A',
+        durationSeconds: 200);
+    final songs = [
+      rec(1, 'Neon Harbor', 'Lumen Drift'),
+      rec(2, 'Low Orbit', 'Satellite Ghosts'),
+    ];
+    const seed = TasteSeed('Kaito Ren', SeedReason.liked, 5);
+
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        databaseProvider.overrideWithValue(db),
+        isOnlineProvider.overrideWith((_) => Stream.value(true)),
+        subsonicClientProvider.overrideWithValue(SubsonicClient(
+            const SubsonicConfig(
+                serverUrl: 'http://127.0.0.1:9',
+                username: 'u',
+                password: 'p'))),
+        deezerArlStatusProvider
+            .overrideWith((_) async => DeezerArlStatus.unreachable),
+        downloadedPathsProvider.overrideWithValue(const {}),
+        preferencesNotifierProvider.overrideWith(
+            (_) => PreferencesNotifier.inMemory(const AppPreferences())),
+        recommendationsProvider.overrideWith((_) async => RecsReady(songs,
+            reasons: {for (final s in songs) s.id: seed},
+            failedSeeds: const ['Orbit Theory'])),
+      ],
+      child: const MaterialApp(
+        home: MediaQuery(
+          data: MediaQueryData(size: Size(500, 1600)),
+          child: Scaffold(body: HomeScreen()),
+        ),
+      ),
+    ));
+    Future<void> settle() async {
+      for (var i = 0; i < 5; i++) {
+        await tester
+            .runAsync(() => Future.delayed(const Duration(milliseconds: 50)));
+        await tester.pump(const Duration(milliseconds: 300));
+      }
+    }
+
+    await settle();
+    expect(find.text('Neon Harbor'), findsOneWidget);
+    expect(find.text('You like Kaito Ren'), findsNWidgets(2));
+    expect(find.textContaining('based on Orbit Theory'), findsOneWidget);
+
+    // Open the first card's menu and hide just this song.
+    await tester.tap(find.byIcon(Icons.more_vert_rounded).first);
+    await settle();
+    await tester.tap(find.text('Not interested'));
+    await settle();
+    await tester.tap(find.text('This song'));
+    await settle();
+    expect(find.text('Neon Harbor'), findsNothing);
+    expect(find.text('Low Orbit'), findsOneWidget);
+    expect(find.text("Hidden. You'll see less like this."), findsOneWidget);
+    expect(
+        (await tester.runAsync(db.getDismissedRecs))!.single.title, 'Neon Harbor');
+
+    await tester.tap(find.text('Undo'));
+    await settle();
+    expect(find.text('Neon Harbor'), findsOneWidget);
+    expect(await tester.runAsync(db.getDismissedRecs), isEmpty);
+
+    // Drift closes its query streams on a zero-length timer; let it run.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 1));
+  });
+}

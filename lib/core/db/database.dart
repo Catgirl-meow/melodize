@@ -27,6 +27,9 @@ class CachedSongs extends Table {
   BoolColumn get isDownloaded => boolean().withDefault(const Constant(false))();
   TextColumn get localPath => text().nullable()();
   DateTimeColumn get created => dateTime().nullable()();
+  // When the song was starred ("liked") on the server; null = not liked.
+  DateTimeColumn get starred => dateTime().nullable()();
+  IntColumn get playCount => integer().nullable()();
   DateTimeColumn get cachedAt => dateTime().withDefault(currentDateAndTime)();
 
   @override
@@ -40,6 +43,11 @@ class PlayHistory extends Table {
   TextColumn get artist => text()();
   TextColumn get coverArt => text().nullable()();
   DateTimeColumn get playedAt => dateTime().withDefault(currentDateAndTime)();
+  // How long the song played before it ended or was left, and whether that
+  // counts as a skip (< 30 s of a song longer than a minute). Null/false for
+  // rows from before schema v7 and while the song is still playing.
+  IntColumn get listenedMs => integer().nullable()();
+  BoolColumn get skipped => boolean().withDefault(const Constant(false))();
 }
 
 class ServerConfig extends Table {
@@ -78,6 +86,59 @@ class LyricsCache extends Table {
   Set<Column> get primaryKey => {songId};
 }
 
+/// Deezer recommendations the user liked that aren't in the server library
+/// yet. Liking one asks the companion to add it; once a song with the same
+/// title and artist shows up in the library it is starred there and the row
+/// is removed. Rows stay (and show under Library → Liked) while the add is
+/// pending or failed, so a like is never lost.
+class PendingLikes extends Table {
+  IntColumn get deezerId => integer()();
+  TextColumn get title => text()();
+  TextColumn get artist => text()();
+  TextColumn get album => text()();
+  IntColumn get duration => integer().nullable()();
+  TextColumn get coverUrl => text().nullable()();
+  TextColumn get previewUrl => text().nullable()();
+  DateTimeColumn get likedAt => dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  Set<Column> get primaryKey => {deezerId};
+}
+
+/// "Not interested" on recommendations. [key] is `track:<keyFor>` for one
+/// song or `artist:<normalized artist>` for a whole artist.
+class DismissedRecs extends Table {
+  TextColumn get key => text()();
+  TextColumn get kind => text()(); // 'track' | 'artist'
+  TextColumn get artist => text()();
+  TextColumn get title => text().nullable()();
+  TextColumn get coverUrl => text().nullable()();
+  DateTimeColumn get dismissedAt =>
+      dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  Set<Column> get primaryKey => {key};
+}
+
+/// How often a recommended track ([keyFor] key) was shown on Home without
+/// being played. Played tracks are removed.
+class RecImpressions extends Table {
+  TextColumn get trackKey => text()();
+  IntColumn get shown => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {trackKey};
+}
+
+/// "More like this" taps per artist (as written).
+class MoreLikeThisTaps extends Table {
+  TextColumn get artist => text()();
+  IntColumn get taps => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {artist};
+}
+
 // --- Database ---
 
 @DriftDatabase(tables: [
@@ -86,6 +147,10 @@ class LyricsCache extends Table {
   ServerConfig,
   DownloadQueue,
   LyricsCache,
+  PendingLikes,
+  DismissedRecs,
+  RecImpressions,
+  MoreLikeThisTaps,
 ])
 class AppDatabase extends _$AppDatabase {
   AppDatabase._internal() : super(_openConnection());
@@ -97,7 +162,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -116,6 +181,20 @@ class AppDatabase extends _$AppDatabase {
             // Persisted download queue: resume after restart, keep failures.
             await m.addColumn(downloadQueue, downloadQueue.quality);
             await m.addColumn(downloadQueue, downloadQueue.errorMessage);
+          }
+          if (from < 6) {
+            // Likes: server star + play count cache, pending Deezer likes.
+            await m.addColumn(cachedSongs, cachedSongs.starred);
+            await m.addColumn(cachedSongs, cachedSongs.playCount);
+            await m.createTable(pendingLikes);
+          }
+          if (from < 7) {
+            // Taste model: listen length/skips, Not interested, impressions.
+            await m.addColumn(playHistory, playHistory.listenedMs);
+            await m.addColumn(playHistory, playHistory.skipped);
+            await m.createTable(dismissedRecs);
+            await m.createTable(recImpressions);
+            await m.createTable(moreLikeThisTaps);
           }
         },
       );
@@ -162,6 +241,115 @@ class AppDatabase extends _$AppDatabase {
           localPath: Value(null),
         ),
       );
+
+  /// Sets or clears the cached star on [id] without touching anything else.
+  Future<void> setSongStarred(String id, DateTime? when) =>
+      (update(cachedSongs)..where((t) => t.id.equals(id)))
+          .write(CachedSongsCompanion(starred: Value(when)));
+
+  // --- Pending likes ---
+  Stream<List<PendingLike>> watchPendingLikes() => (select(pendingLikes)
+        ..orderBy([(t) => OrderingTerm.desc(t.likedAt)]))
+      .watch();
+
+  Future<List<PendingLike>> getPendingLikes() => select(pendingLikes).get();
+
+  Future<void> addPendingLike(PendingLikesCompanion like) =>
+      into(pendingLikes).insertOnConflictUpdate(like);
+
+  Future<void> removePendingLike(int deezerId) =>
+      (delete(pendingLikes)..where((t) => t.deezerId.equals(deezerId))).go();
+
+  // --- Recommendation feedback ---
+  /// Records how long the latest play of [songId] lasted. Only touches a
+  /// row from the last 12 hours still missing its length, so a late report
+  /// can't overwrite an older play.
+  Future<void> finishLatestPlay(String songId,
+      {required int listenedMs, required bool skipped}) async {
+    final row = await (select(playHistory)
+          ..where((t) =>
+              t.songId.equals(songId) &
+              t.listenedMs.isNull() &
+              t.playedAt.isBiggerThanValue(
+                  DateTime.now().subtract(const Duration(hours: 12))))
+          ..orderBy([(t) => OrderingTerm.desc(t.playedAt)])
+          ..limit(1))
+        .getSingleOrNull();
+    if (row == null) return;
+    await (update(playHistory)
+          ..where((t) => t.historyId.equals(row.historyId)))
+        .write(PlayHistoryCompanion(
+            listenedMs: Value(listenedMs), skipped: Value(skipped)));
+  }
+
+  Stream<List<DismissedRec>> watchDismissedRecs() => (select(dismissedRecs)
+        ..orderBy([(t) => OrderingTerm.desc(t.dismissedAt)]))
+      .watch();
+
+  Future<List<DismissedRec>> getDismissedRecs() => select(dismissedRecs).get();
+
+  Future<void> addDismissedRec(DismissedRecsCompanion rec) =>
+      into(dismissedRecs).insertOnConflictUpdate(rec);
+
+  Future<void> removeDismissedRec(String key) =>
+      (delete(dismissedRecs)..where((t) => t.key.equals(key))).go();
+
+  Future<Map<String, int>> getImpressions() async => {
+        for (final r in await select(recImpressions).get()) r.trackKey: r.shown
+      };
+
+  /// Adds one showing to each of [trackKeys].
+  Future<void> countImpressions(Iterable<String> trackKeys) =>
+      transaction(() async {
+        for (final k in trackKeys) {
+          await customStatement(
+              'INSERT INTO rec_impressions (track_key, shown) VALUES (?, 1) '
+              'ON CONFLICT(track_key) DO UPDATE SET shown = shown + 1',
+              [k]);
+        }
+      });
+
+  Future<void> clearImpression(String trackKey) =>
+      (delete(recImpressions)..where((t) => t.trackKey.equals(trackKey))).go();
+
+  Future<Map<String, int>> getMoreLikeThis() async => {
+        for (final r in await select(moreLikeThisTaps).get()) r.artist: r.taps
+      };
+
+  Future<void> addMoreLikeThis(String artist) => customStatement(
+      'INSERT INTO more_like_this_taps (artist, taps) VALUES (?, 1) '
+      'ON CONFLICT(artist) DO UPDATE SET taps = taps + 1',
+      [artist]);
+
+  /// Forgets hides, impressions and "more like this" (Settings → Reset).
+  /// Play history and likes stay.
+  /// Settings → Recommendations → Reset: forgets hidden items, "More like
+  /// this" taps, card impressions and skip flags. Play history itself and
+  /// likes (stars on the server) stay.
+  Future<void> resetRecommendationFeedback() => transaction(() async {
+        await delete(dismissedRecs).go();
+        await delete(recImpressions).go();
+        await delete(moreLikeThisTaps).go();
+        await update(playHistory).write(const PlayHistoryCompanion(
+            skipped: Value(false), listenedMs: Value(null)));
+      });
+
+  // --- Debug export ---
+  /// Writes a consistent copy of the database to [path] for offline
+  /// analysis (Settings → Debug), with the server login removed: the copy
+  /// holds play history, the library cache and likes, never credentials.
+  Future<void> exportForAnalysis(String path) async {
+    final file = File(path);
+    if (await file.exists()) await file.delete();
+    final quoted = path.replaceAll("'", "''");
+    await customStatement("VACUUM INTO '$quoted'");
+    await customStatement("ATTACH DATABASE '$quoted' AS export_copy");
+    try {
+      await customStatement('DELETE FROM export_copy.server_config');
+    } finally {
+      await customStatement('DETACH DATABASE export_copy');
+    }
+  }
 
   // --- History ---
   Future<List<PlayHistoryData>> getRecentHistory({int limit = 30}) =>

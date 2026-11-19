@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:io';
+import 'dart:math' show Random;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -49,6 +50,8 @@ import 'models/lyrics_result.dart';
 import 'models/search_results.dart';
 import 'utils/title_normalize.dart';
 import 'library/local_search.dart';
+import 'likes/pending_like_match.dart';
+import 'recs/taste_model.dart';
 
 // --- Database ---
 final databaseProvider = Provider<AppDatabase>((_) => AppDatabase());
@@ -566,6 +569,170 @@ final allSongsProvider = StreamProvider<List<Song>>((ref) async* {
 /// say that they may be out of date.
 final librarySyncErrorProvider = StateProvider<Object?>((_) => null);
 
+// --- Likes ---
+// A like is a Subsonic star, so it syncs with Navidrome's web UI and other
+// clients. Deezer recommendations can't be starred until they're in the
+// library: liking one stores a pending like and asks the companion to add
+// it; the next library sync that contains it stars it and drops the row.
+
+/// Liked Deezer tracks that are not in the server library yet.
+final pendingLikesProvider = StreamProvider<List<PendingLike>>(
+    (ref) => ref.watch(databaseProvider).watchPendingLikes());
+
+/// Ids of liked library songs. Kept alive by MainShell so pending likes are
+/// reconciled on every library sync, whichever screen is open.
+final likesProvider = StateNotifierProvider<LikesNotifier, Set<String>>(
+    (ref) => LikesNotifier(ref));
+
+/// Whether [songId] (a library id or `deezer:<id>`) is liked.
+final isLikedProvider = Provider.family<bool, String>((ref, songId) {
+  if (songId.startsWith('deezer:')) {
+    final id = int.tryParse(songId.substring('deezer:'.length));
+    final pending = ref.watch(pendingLikesProvider).valueOrNull ?? const [];
+    return pending.any((p) => p.deezerId == id);
+  }
+  return ref.watch(likesProvider.select((ids) => ids.contains(songId)));
+});
+
+/// Liked library songs, newest like first.
+final likedSongsProvider = Provider<AsyncValue<List<Song>>>((ref) {
+  final ids = ref.watch(likesProvider);
+  final likes = ref.read(likesProvider.notifier);
+  return ref.watch(allSongsProvider).whenData((songs) {
+    final liked = [
+      for (final s in songs)
+        if (ids.contains(s.id)) s.withStarred(likes.likedAt(s) ?? s.starred)
+    ]..sort((a, b) {
+        final at = a.starred, bt = b.starred;
+        if (at == null || bt == null) return at == null ? 1 : -1;
+        return bt.compareTo(at);
+      });
+    return liked;
+  });
+});
+
+class LikesNotifier extends StateNotifier<Set<String>> {
+  final Ref _ref;
+  // Like (true) / unlike (false) requests still waiting for the server.
+  final _inFlight = <String, bool>{};
+  // Likes made in this session; the library list still carries the old
+  // server timestamp until its next sync.
+  final _likedAt = <String, DateTime>{};
+  bool _reconciling = false;
+
+  /// When [song] was liked in this session, if it was.
+  DateTime? likedAt(Song song) => _likedAt[song.id];
+
+  LikesNotifier(this._ref) : super(const {}) {
+    _ref.listen<AsyncValue<List<Song>>>(allSongsProvider, (_, next) {
+      final songs = next.valueOrNull;
+      if (songs == null) return;
+      state = mergeLikes(songs, _inFlight);
+      _reconcilePending(songs);
+    }, fireImmediately: true);
+  }
+
+  /// Likes or unlikes a library song. The heart flips at once and flips back
+  /// if the server refuses; that failure is reported as an error snackbar.
+  /// Returns the new state.
+  Future<bool> toggle(Song song) async {
+    if (song.isExternal) {
+      throw ArgumentError.value(
+          song.id, 'song', 'is a Deezer track; use likeRecommendation');
+    }
+    final like = !state.contains(song.id);
+    await _setLiked(song, like);
+    return like;
+  }
+
+  Future<void> _setLiked(Song song, bool like) async {
+    final client = _ref.read(subsonicClientProvider);
+    if (client == null) {
+      AppErrors.report('Connect a server to like songs');
+      return;
+    }
+    _inFlight[song.id] = like;
+    if (like) {
+      _likedAt[song.id] = DateTime.now();
+    } else {
+      _likedAt.remove(song.id);
+    }
+    state = like ? {...state, song.id} : ({...state}..remove(song.id));
+    try {
+      if (like) {
+        await client.star(song.id);
+      } else {
+        await client.unstar(song.id);
+      }
+      await _ref
+          .read(databaseProvider)
+          .setSongStarred(song.id, like ? DateTime.now() : null);
+      if (like && _ref.read(preferencesNotifierProvider).downloadLikedOffline) {
+        await _ref.read(downloadNotifierProvider.notifier).download(song);
+      }
+    } catch (e) {
+      if (mounted) {
+        state = like ? ({...state}..remove(song.id)) : {...state, song.id};
+      }
+      AppErrors.report(
+          like ? "Couldn't like \"${song.title}\"" : "Couldn't unlike \"${song.title}\"",
+          e);
+    } finally {
+      _inFlight.remove(song.id);
+    }
+  }
+
+  /// Saves a like on a Deezer track. The caller then asks the companion to
+  /// add it to the server library; the like is applied when it arrives.
+  Future<void> likeRecommendation(Song song) async {
+    final deezerId = deezerIdOf(song);
+    if (deezerId == null) {
+      throw ArgumentError.value(song.id, 'song', 'is not a Deezer track');
+    }
+    await _ref.read(databaseProvider).addPendingLike(PendingLikesCompanion.insert(
+          deezerId: Value(deezerId),
+          title: song.title,
+          artist: song.artist,
+          album: song.album,
+          duration: Value(song.duration),
+          coverUrl: Value(song.externalCoverUrl),
+          previewUrl: Value(song.externalStreamUrl),
+        ));
+  }
+
+  Future<void> unlikeRecommendation(int deezerId) =>
+      _ref.read(databaseProvider).removePendingLike(deezerId);
+
+  /// Stars every pending like that has arrived in [library].
+  Future<void> _reconcilePending(List<Song> library) async {
+    if (_reconciling) return;
+    _reconciling = true;
+    try {
+      final db = _ref.read(databaseProvider);
+      final pending = await db.getPendingLikes();
+      if (pending.isEmpty) return;
+      final matches = matchPendingLikes(
+        [
+          for (final p in pending)
+            (deezerId: p.deezerId, title: p.title, artist: p.artist)
+        ],
+        library,
+      );
+      for (final (like, song) in matches) {
+        if (!mounted) return;
+        if (!state.contains(song.id)) await _setLiked(song, true);
+        // Only drop the pending row once the star stuck; a failed star was
+        // reported and is retried on the next sync.
+        if (state.contains(song.id)) await db.removePendingLike(like.deezerId);
+      }
+    } catch (e) {
+      AppErrors.report("Couldn't apply likes to newly added songs", e);
+    } finally {
+      _reconciling = false;
+    }
+  }
+}
+
 /// Whether the device has no network at all. Watching it makes a provider
 /// re-run when the connection comes back, so a section that failed offline
 /// fills itself in without a manual refresh.
@@ -590,50 +757,112 @@ final randomSongsProvider = FutureProvider<List<Song>>((ref) async {
 
 final deezerClientProvider = Provider<DeezerClient>((_) => DeezerClient());
 
-/// When set, [recommendationsProvider] uses this single seed instead of
-/// pulling from play history. Wired to the "More like this" action on a
-/// recommendation card's 3-dot menu.
+/// When set, [recommendationsProvider] builds the next list around this
+/// artist ("More like this" on a recommendation card or in the player).
 ///
-/// The consumer is responsible for clearing this back to null after its
-/// invalidate, so a subsequent refresh falls back to the history-based
-/// flow rather than re-forcing the same seed forever.
+/// The consumer clears it back to null before a plain refresh, so the next
+/// refresh goes back to the user's whole taste.
 typedef RecommendationSeed = ({String artist, String title, String? genre});
 
 final recommendationsSeedOverrideProvider =
     StateProvider<RecommendationSeed?>((_) => null);
 
-/// Discovers NEW tracks the user doesn't already have via Deezer artist
-/// radios. Explicit [RecommendationsState] so Home can distinguish
-/// loading / empty-history / error / ready — the previous version
-/// silently returned `[]` for every failure mode.
+/// "Not interested" choices, newest first. Home hides matching cards at once
+/// (and shows them again on Undo) without rebuilding the list.
+final dismissedRecsProvider = StreamProvider<List<DismissedRec>>(
+    (ref) => ref.watch(databaseProvider).watchDismissedRecs());
+
+/// Key of a "Not interested: this song" row.
+String dismissedTrackKey(String title, String artist) =>
+    'track:${keyFor(title, artist)}';
+
+/// Key of a "Not interested: this artist" row.
+String dismissedArtistKey(String artist) => 'artist:${normalize(artist)}';
+
+/// Whether [song] is hidden by any of [dismissed].
+bool isDismissed(Song song, Iterable<DismissedRec> dismissed) {
+  final track = dismissedTrackKey(song.title, song.artist);
+  final artist = dismissedArtistKey(song.artist);
+  return dismissed.any((d) => d.key == track || d.key == artist);
+}
+
+/// Collects everything the taste model reads from the local database:
+/// play history (with skips), likes, server play counts, "Not interested",
+/// "More like this" taps and how often each card was shown.
+Future<TasteSignals> loadTasteSignals(AppDatabase db) async {
+  final library = await db.getAllCachedSongs();
+  final genreByArtist = <String, String>{};
+  final plays = <String, int>{};
+  final likes = <LikedTrack>[];
+  final owned = <String>{};
+  for (final s in library) {
+    owned.add(keyFor(s.title, s.artist));
+    final g = s.genre;
+    if (g != null && g.isNotEmpty) genreByArtist.putIfAbsent(s.artist, () => g);
+    final n = s.playCount ?? 0;
+    if (n > 0) plays[s.artist] = (plays[s.artist] ?? 0) + n;
+    if (s.starred != null) {
+      likes.add(LikedTrack(artist: s.artist, title: s.title, genre: s.genre));
+    }
+  }
+  for (final p in await db.getPendingLikes()) {
+    likes.add(LikedTrack(artist: p.artist, title: p.title));
+  }
+  final history = [
+    for (final h in await db.getRecentHistory(limit: 5000))
+      ListenEvent(
+        artist: h.artist,
+        title: h.songTitle,
+        at: h.playedAt,
+        genre: genreByArtist[h.artist],
+        skipped: h.skipped,
+      ),
+  ];
+  final dismissedTracks = <String>{};
+  final dismissedArtists = <String>{};
+  final dismissalsByArtist = <String, int>{};
+  for (final d in await db.getDismissedRecs()) {
+    if (d.kind == 'artist') {
+      dismissedArtists.add(d.artist);
+    } else {
+      dismissedTracks.add(keyFor(d.title ?? '', d.artist));
+      dismissalsByArtist[d.artist] = (dismissalsByArtist[d.artist] ?? 0) + 1;
+    }
+  }
+  return TasteSignals(
+    history: history,
+    likes: likes,
+    serverPlaysByArtist: plays,
+    genreByArtist: genreByArtist,
+    dismissedTracks: dismissedTracks,
+    dismissedArtists: dismissedArtists,
+    dismissalsByArtist: dismissalsByArtist,
+    moreLikeThis: await db.getMoreLikeThis(),
+    impressions: await db.getImpressions(),
+    ownedTracks: owned,
+  );
+}
+
+/// Discovers NEW tracks for Home with the taste model
+/// (`lib/core/recs/taste_model.dart`): seed artists come from likes, recent
+/// and long-term listening; their Deezer artist radios are ranked by how
+/// well each track fits the user's taste, minus anything owned or hidden.
 ///
-/// Pipeline:
-///   1. Build up to 6 seeds (override takes precedence; otherwise dedupe
-///      recent history by artist, shuffle, take 6).
-///   2. For each seed run [DeezerClient.searchBestArtist] (fuzzy match,
-///      genre-biased) then [DeezerClient.artistRadio] — all seeds in
-///      parallel via Future.wait.
-///   3. If every seed returned empty, retry the whole fan-out once
-///      (transient network hits tend to be correlated).
-///   4. Merge + dedupe by Deezer ID.
-///   5. Filter out anything whose normalized title+artist matches a
-///      library track — recommendations are for music the user doesn't
-///      own yet. Uses the local [allSongsProvider] snapshot, not a
-///      per-candidate Subsonic search (the old impl did N searches per
-///      refresh, which was both slow and brittle).
-///   6. Cap at 2 tracks per artist (bucket-interleave), shuffle, take 30.
-///   7. Warm the cover-art disk cache so the list doesn't pop in.
+/// Failures are explicit: no taste yet → [RecsEmptyNoHistory]; Deezer down,
+/// no radio, or nothing new → [RecsError] with the reason. A partial list
+/// lists the seed artists whose radio failed in [RecsReady.failedSeeds].
 ///
-/// Intentionally NOT autoDispose: a fail-empty state used to stick
-/// across navigation because rebuilding with the same seed reproduced
-/// the same failure. Keeping the provider alive lets explicit
-/// `ref.invalidate` from the refresh button be the only retry trigger.
+/// Intentionally NOT autoDispose: the refresh button's `ref.invalidate` is
+/// the only retry trigger, so navigating doesn't reshuffle the list.
 final recommendationsProvider =
     FutureProvider<RecommendationsState>((ref) async {
   final db = ref.watch(databaseProvider);
   final client = ref.watch(subsonicClientProvider);
   final deezer = ref.watch(deezerClientProvider);
   final override = ref.watch(recommendationsSeedOverrideProvider);
+  // read, not watch: moving the slider applies on the next refresh instead
+  // of reshuffling the list under the user's finger.
+  final discovery = ref.read(preferencesNotifierProvider).recDiscovery;
 
   if (client == null) {
     return const RecsError(
@@ -646,170 +875,91 @@ final recommendationsProvider =
     return const RecsError('Recommendations need an internet connection.');
   }
 
-  // Library snapshot used for the already-owned cross-check. ref.read,
-  // not watch — we don't want a rec rebuild every time the library
-  // stream re-emits (stale-then-fresh).
-  final library = ref.read(allSongsProvider).valueOrNull ?? const <Song>[];
-  final libraryKeys = <String>{
-    for (final s in library) keyFor(s.title, s.artist),
+  final signals = await loadTasteSignals(db);
+  final titleOf = <String, String>{
+    for (final e in signals.history.reversed) normalize(e.artist): e.title,
+    for (final l in signals.likes) normalize(l.artist): l.title,
+    if (override != null) normalize(override.artist): override.title,
   };
-  final genreBySongId = <String, String?>{
-    for (final s in library) s.id: s.genre,
+  final genreOf = <String, String>{
+    for (final e in signals.genreByArtist.entries) normalize(e.key): e.value,
+    if (override?.genre != null) normalize(override!.artist): override.genre!,
   };
 
-  // Build history seeds (always — used both for normal mode and as fallback
-  // when "More like this" override exhausts its candidates).
-  final history = await db.getRecentHistory(limit: 30);
-  final byArtist = <String, PlayHistoryData>{};
-  for (final h in history) {
-    byArtist.putIfAbsent(h.artist, () => h);
-  }
-  final distinctHistory = byArtist.values.toList()..shuffle();
-
-  final seeds = <RecommendationSeed>[];
-  if (override != null) {
-    // Override artist goes first so it dominates the mix.
-    seeds.add(override);
-    // Add 3 history seeds from different artists as resilience backup:
-    // if the override artist isn't on Deezer, or all their radio tracks
-    // are already owned, history seeds fill the gap instead of erroring.
-    final overrideNorm = normalize(override.artist);
-    for (final h in distinctHistory) {
-      if (seeds.length >= 4) break;
-      if (normalize(h.artist) == overrideNorm) continue;
-      seeds.add((
-        artist: h.artist,
-        title: h.songTitle,
-        genre: genreBySongId[h.songId],
-      ));
-    }
-    // If there's no history at all and the override also fails, return
-    // a graceful empty rather than crashing.
-    if (seeds.length == 1 && history.isEmpty) {
-      return const RecsEmptyNoHistory();
-    }
-  } else {
-    if (history.isEmpty) return const RecsEmptyNoHistory();
-    // Dedupe by artist so 6 seeds cover 6 different artists; avoids the
-    // "played the same track 6 times today = 6 identical seeds = 1 radio"
-    // degenerate case.
-    for (final h in distinctHistory.take(6)) {
-      seeds.add((
-        artist: h.artist,
-        title: h.songTitle,
-        genre: genreBySongId[h.songId],
-      ));
-    }
-    if (seeds.isEmpty) return const RecsEmptyNoHistory();
-  }
-
-  // Fetch radio for each seed in parallel. Use a larger limit so the
-  // library cross-check (below) has more candidates to work with —
-  // users with large libraries need more raw tracks to find new ones.
-  Future<List<RecommendedTrack>> fanOut(RecommendationSeed seed) async {
+  // Throws on failure: the model tells "Deezer is down" apart from "no
+  // radio" only if errors reach it.
+  Future<List<RecommendedTrack>> radio(TasteSeed seed) async {
+    final key = normalize(seed.artist);
     final id = await deezer.searchBestArtist(
       artistName: seed.artist,
-      trackTitle: seed.title,
-      genreHint: seed.genre,
+      trackTitle: titleOf[key],
+      genreHint: genreOf[key],
     );
     if (id == null) return const [];
     return deezer.artistRadio(id, limit: 20);
   }
 
-  // One seed failing (e.g. an artist Deezer can't resolve) must not sink
-  // the whole list, so per-seed errors are collected rather than thrown.
-  // They decide the error message when nothing at all came back.
-  Object? lastError;
-  Future<List<RecommendedTrack>> guardedFanOut(RecommendationSeed seed) async {
-    try {
-      return await fanOut(seed);
-    } catch (e) {
-      lastError = e;
-      return const [];
-    }
+  final RecommendationResult result;
+  try {
+    result = await recommend(
+      signals: signals,
+      now: DateTime.now(),
+      radio: radio,
+      rng: Random(),
+      weights: TasteWeights(discovery: discovery),
+      focusArtist: override?.artist,
+    );
+  } on NoTasteYet {
+    return const RecsEmptyNoHistory();
+  } on AllRadiosFailed catch (e) {
+    return RecsError(
+        'Could not reach Deezer: ${describeError(e.errors.values.first)}');
+  } on FocusRadioFailed catch (e) {
+    return RecsError("Couldn't load songs like ${e.artist} from Deezer: "
+        '${describeError(e.error)}');
+  } on RecsFailure catch (e) {
+    return RecsError(e.message);
   }
 
-  var results = await Future.wait(seeds.map(guardedFanOut));
-  if (results.every((r) => r.isEmpty)) {
-    lastError = null;
-    results = await Future.wait(seeds.map(guardedFanOut));
-  }
-  final failedSeeds = results.where((r) => r.isEmpty).length;
-
-  final byDeezerId = <int, RecommendedTrack>{};
-  for (final list in results) {
-    for (final t in list) {
-      byDeezerId.putIfAbsent(t.deezerId, () => t);
-    }
-  }
-  if (byDeezerId.isEmpty) {
-    final error = lastError;
-    if (error != null) {
-      return RecsError('Could not reach Deezer: ${describeError(error)}');
-    }
-    return const RecsError(
-        'Deezer found no artist radio for your recent artists — play a few '
-        'other artists and retry.');
-  }
-
-  final discoveries = byDeezerId.values
-      .where((t) => !libraryKeys.contains(keyFor(t.title, t.artist)))
-      .toList();
-
-  // Artist diversity: at most 2 per artist, interleaved so same-artist
-  // tracks aren't clustered at the top of the list.
-  final buckets = <String, List<RecommendedTrack>>{};
-  for (final t in discoveries) {
-    buckets.putIfAbsent(normalize(t.artist), () => []).add(t);
-  }
-  final shuffledBuckets = buckets.values.map((b) {
-    final list = b.toList()..shuffle();
-    return list.take(2).toList();
-  }).toList()
-    ..shuffle();
-  final capped = <RecommendedTrack>[];
-  for (var round = 0; capped.length < 30; round++) {
-    var anyLeft = false;
-    for (final bucket in shuffledBuckets) {
-      if (round < bucket.length) {
-        capped.add(bucket[round]);
-        anyLeft = true;
-        if (capped.length >= 30) break;
-      }
-    }
-    if (!anyLeft) break;
-  }
-  if (capped.isEmpty) {
-    return const RecsError(
-        'All discoveries matched your library — try refreshing for new suggestions.');
-  }
-
+  final tracks = result.tracks;
   // Warm cover-art disk cache. CachedNetworkImageProvider writes through
   // to disk on resolve; fire-and-forget so a slow image host can't stall
   // the whole provider.
-  for (final t in capped) {
-    final url = t.coverUrl;
+  for (final t in tracks) {
+    final url = t.track.coverUrl;
     if (url != null && url.isNotEmpty) {
       CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
     }
   }
+  // Shown once more; fatigue lowers a card the user keeps ignoring. Playing
+  // it clears the count (see the history listener in main.dart).
+  try {
+    await db.countImpressions(
+        [for (final t in tracks) keyFor(t.track.title, t.track.artist)]);
+  } catch (e) {
+    AppErrors.report("Couldn't save which recommendations were shown", e);
+  }
 
-  final songs = [
-    for (final t in capped)
-      Song.fromRecommendation(
-        deezerId: t.deezerId,
-        title: t.title,
-        artist: t.artist,
-        album: t.album,
-        durationSeconds: t.durationSeconds,
-        previewUrl: t.previewUrl,
-        coverUrl: t.coverUrl,
-        bpm: t.bpm,
-        genre: t.genre,
-      ),
-  ];
-
-  return RecsReady(songs, failedSeeds: failedSeeds);
+  final songs = <Song>[];
+  final reasons = <String, TasteSeed>{};
+  for (final s in tracks) {
+    final t = s.track;
+    final song = Song.fromRecommendation(
+      deezerId: t.deezerId,
+      title: t.title,
+      artist: t.artist,
+      album: t.album,
+      durationSeconds: t.durationSeconds,
+      previewUrl: t.previewUrl,
+      coverUrl: t.coverUrl,
+      bpm: t.bpm,
+      genre: t.genre,
+    );
+    songs.add(song);
+    reasons[song.id] = s.because;
+  }
+  return RecsReady(songs,
+      reasons: reasons, failedSeeds: result.failedSeeds.keys.toList());
 });
 
 // Deezer catalog search — powers the "From Deezer" section in the search tab.
@@ -1215,6 +1365,11 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
     _load();
   }
 
+  /// Fixed preferences that are never loaded from or saved to disk (tests).
+  PreferencesNotifier.inMemory(super.prefs) : _inMemory = true;
+
+  bool _inMemory = false;
+
   Future<void> _load() async {
     final prefs = await AppPreferences.load();
     if (mounted) state = prefs;
@@ -1222,6 +1377,7 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
 
   Future<void> update(AppPreferences prefs) async {
     state = prefs;
+    if (_inMemory) return;
     try {
       await prefs.save();
     } catch (e) {
@@ -2025,6 +2181,8 @@ Song _rowToSong(CachedSong row) => Song(
       isDownloaded: row.isDownloaded,
       localPath: row.localPath,
       created: row.created,
+      starred: row.starred,
+      playCount: row.playCount,
     );
 
 // Intentionally omits isDownloaded and localPath so server syncs
@@ -2046,4 +2204,6 @@ CachedSongsCompanion _songToCompanion(Song s) => CachedSongsCompanion(
       bitRate: Value(s.bitRate),
       size: Value(s.size),
       created: Value(s.created),
+      starred: Value(s.starred),
+      playCount: Value(s.playCount),
     );
