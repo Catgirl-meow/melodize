@@ -893,8 +893,10 @@ final recommendationsProvider =
       trackTitle: titleOf[key],
       genreHint: genreOf[key],
     );
-    if (id == null) return const [];
-    return deezer.artistRadio(id, limit: 20);
+    if (id == null) throw NoDeezerRadio(seed.artist);
+    final tracks = await deezer.artistRadio(id, limit: 20);
+    if (tracks.isEmpty) throw NoDeezerRadio(seed.artist);
+    return tracks;
   }
 
   final RecommendationResult result;
@@ -910,8 +912,15 @@ final recommendationsProvider =
   } on NoTasteYet {
     return const RecsEmptyNoHistory();
   } on AllRadiosFailed catch (e) {
-    return RecsError(
-        'Could not reach Deezer: ${describeError(e.errors.values.first)}');
+    final reached = e.errors.values.whereType<NoDeezerRadio>();
+    final network =
+        e.errors.values.where((err) => err is! NoDeezerRadio).toList();
+    if (network.isEmpty) {
+      return RecsError(NoRadioTracks([for (final r in reached) r.artist])
+          .message);
+    }
+    return RecsError('Could not reach Deezer for ${network.length} of '
+        '${e.errors.length} artists: ${describeError(network.first)}');
   } on FocusRadioFailed catch (e) {
     return RecsError("Couldn't load songs like ${e.artist} from Deezer: "
         '${describeError(e.error)}');

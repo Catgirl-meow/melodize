@@ -468,6 +468,16 @@ class NoTasteYet extends RecsFailure {
       'Play or like a few songs — recommendations start from what you enjoy.';
 }
 
+/// Thrown by a radio fetcher when Deezer has no artist (or no radio) for a
+/// seed. It counts as that seed failing, so a partial list names the artist
+/// instead of quietly dropping it.
+class NoDeezerRadio implements Exception {
+  final String artist;
+  const NoDeezerRadio(this.artist);
+  @override
+  String toString() => 'Deezer has no radio for $artist';
+}
+
 /// Every seed's radio failed. [errors] maps seed artist → cause.
 class AllRadiosFailed extends RecsFailure {
   final Map<String, Object> errors;
