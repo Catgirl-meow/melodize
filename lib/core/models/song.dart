@@ -25,6 +25,9 @@ class Song {
   // BPM from Deezer API. Only set for recommendations; null for library songs.
   final int? bpm;
 
+  /// Server-side play count (OpenSubsonic). Not cached, so null offline.
+  final int? playCount;
+
   const Song({
     required this.id,
     required this.title,
@@ -47,6 +50,7 @@ class Song {
     this.externalStreamUrl,
     this.externalCoverUrl,
     this.bpm,
+    this.playCount,
   });
 
   // Placeholder for out-of-bounds fallback. Never displayed.
@@ -77,6 +81,7 @@ class Song {
       created: json['created'] != null
           ? DateTime.tryParse(json['created'].toString())
           : null,
+      playCount: (json['playCount'] as num?)?.toInt(),
     );
   }
 
@@ -110,6 +115,7 @@ class Song {
       externalStreamUrl: externalStreamUrl,
       externalCoverUrl: externalCoverUrl,
       bpm: bpm,
+      playCount: playCount,
     );
   }
 

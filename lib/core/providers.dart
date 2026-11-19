@@ -43,6 +43,8 @@ import 'models/song.dart';
 import 'models/album.dart';
 import 'models/playlist.dart';
 import 'models/artist.dart';
+import 'models/artist_info.dart';
+import 'library/artist_profile.dart';
 import 'models/lyrics_result.dart';
 import 'models/search_results.dart';
 import 'utils/title_normalize.dart';
@@ -824,6 +826,17 @@ final deezerSearchProvider =
   return ref.watch(deezerClientProvider).search(query);
 });
 
+/// Deezer's id for an artist name, or null when Deezer has no match.
+/// Shared by the artist page's Deezer sections so the name is resolved once.
+final deezerArtistIdProvider =
+    FutureProvider.autoDispose.family<int?, String>((ref, artistName) async {
+  if (artistName.trim().isEmpty) return null;
+  if (_deviceOffline(ref)) throw const DeviceOfflineException();
+  return ref
+      .watch(deezerClientProvider)
+      .searchBestArtist(artistName: artistName);
+});
+
 // Deezer top tracks for a specific artist — used on the artist detail page to
 // surface songs the user doesn't own yet. Resolves the artist name → Deezer ID
 // first (searchBestArtist), then fetches real top tracks (not the radio mix).
@@ -831,12 +844,9 @@ final deezerSearchProvider =
 // only; library tracks are already visible in Albums / Songs.
 final deezerArtistTracksProvider = FutureProvider.autoDispose
     .family<List<RecommendedTrack>, String>((ref, artistName) async {
-  if (artistName.trim().isEmpty) return [];
-  if (_deviceOffline(ref)) throw const DeviceOfflineException();
-  final deezer = ref.watch(deezerClientProvider);
-
-  final artistId = await deezer.searchBestArtist(artistName: artistName);
+  final artistId = await ref.watch(deezerArtistIdProvider(artistName).future);
   if (artistId == null) return [];
+  final deezer = ref.watch(deezerClientProvider);
 
   final tracks = await deezer.artistTopTracks(artistId, limit: 15);
   if (tracks.isEmpty) return [];
@@ -850,6 +860,22 @@ final deezerArtistTracksProvider = FutureProvider.autoDispose
   return tracks
       .where((t) => !owned.contains(keyFor(t.title, t.artist)))
       .toList();
+});
+
+/// The Deezer artist (picture, fan count), or null when Deezer has no match.
+final deezerArtistProvider = FutureProvider.autoDispose
+    .family<DeezerArtist?, String>((ref, artistName) async {
+  final id = await ref.watch(deezerArtistIdProvider(artistName).future);
+  if (id == null) return null;
+  return ref.watch(deezerClientProvider).artist(id);
+});
+
+/// Deezer's related artists for an artist name.
+final deezerRelatedArtistsProvider = FutureProvider.autoDispose
+    .family<List<DeezerArtist>, String>((ref, artistName) async {
+  final id = await ref.watch(deezerArtistIdProvider(artistName).future);
+  if (id == null) return const [];
+  return ref.watch(deezerClientProvider).relatedArtists(id);
 });
 
 final downloadedSongsProvider = FutureProvider<List<Song>>((ref) async {
@@ -935,6 +961,40 @@ final artistTopSongsProvider =
   if (client == null) return [];
   if (_deviceOffline(ref)) throw const DeviceOfflineException();
   return client.getTopSongs(artistName);
+});
+
+/// Biography, image and similar artists from the server (Last.fm backed).
+/// Online only; the page hides the sections that need it while offline.
+final artistInfoProvider = FutureProvider.autoDispose
+    .family<ArtistInfo, String>((ref, artistId) async {
+  final client = ref.watch(subsonicClientProvider);
+  if (client == null) return ArtistInfo.empty;
+  if (_deviceOffline(ref)) throw const DeviceOfflineException();
+  return client.getArtistInfo2(artistId);
+});
+
+/// The whole local play history as [PlayRecord]s, newest first. autoDispose
+/// so reopening an artist page picks up plays made since.
+final playRecordsProvider =
+    FutureProvider.autoDispose<List<PlayRecord>>((ref) async {
+  final rows = await ref.watch(databaseProvider).getAllHistory();
+  return [
+    for (final h in rows)
+      (
+        songId: h.songId,
+        title: h.songTitle,
+        artist: h.artist,
+        coverArt: h.coverArt,
+        playedAt: h.playedAt,
+      ),
+  ];
+});
+
+/// The "Your listening" card for an artist name; null below 3 plays.
+final artistListeningStatsProvider = FutureProvider.autoDispose
+    .family<ArtistListeningStats?, String>((ref, artistName) async {
+  final history = await ref.watch(playRecordsProvider.future);
+  return listeningStats(artistName, history);
 });
 
 // All songs by an artist — fetches each album's tracks in parallel.

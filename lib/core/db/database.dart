@@ -170,6 +170,11 @@ class AppDatabase extends _$AppDatabase {
             ..limit(limit))
           .get();
 
+  /// Every play, newest first. For per-artist stats on the artist page.
+  Future<List<PlayHistoryData>> getAllHistory() =>
+      (select(playHistory)..orderBy([(t) => OrderingTerm.desc(t.playedAt)]))
+          .get();
+
   Future<void> addToHistory(PlayHistoryCompanion entry) =>
       into(playHistory).insert(entry);
 

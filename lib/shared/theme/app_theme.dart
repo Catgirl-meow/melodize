@@ -87,6 +87,15 @@ class AppTheme {
   static ThemeData light(ColorScheme? dynamicScheme) =>
       _build(schemeFor(Brightness.light, dynamicScheme));
 
+  /// The app theme re-seeded from [seed], e.g. an artist photo's colour, so
+  /// a page can carry its own tint with every component theme intact.
+  static ThemeData seeded(Color seed, Brightness brightness) =>
+      _build(ColorScheme.fromSeed(
+        seedColor: seed,
+        brightness: brightness,
+        dynamicSchemeVariant: DynamicSchemeVariant.expressive,
+      ));
+
   static ThemeData _build(ColorScheme scheme) {
     final base = ThemeData(
       useMaterial3: true,

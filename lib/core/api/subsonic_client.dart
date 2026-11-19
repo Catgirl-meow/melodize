@@ -6,6 +6,7 @@ import '../downloads/download_files.dart';
 import '../models/song.dart';
 import '../models/album.dart';
 import '../models/artist.dart';
+import '../models/artist_info.dart';
 import '../models/playlist.dart';
 import '../models/search_results.dart';
 
@@ -206,6 +207,24 @@ class SubsonicClient {
   }
 
   // --- Artists ---
+  /// Biography, image and similar artists. [count] caps the similar list;
+  /// [includeNotPresent] also returns similar artists missing from the
+  /// library (without an id).
+  Future<ArtistInfo> getArtistInfo2(
+    String artistId, {
+    int count = 20,
+    bool includeNotPresent = true,
+  }) async {
+    final resp = await _get('getArtistInfo2', {
+      'id': artistId,
+      'count': count,
+      'includeNotPresent': includeNotPresent,
+    });
+    final info = resp['artistInfo2'];
+    if (info is! Map<String, dynamic>) return ArtistInfo.empty;
+    return ArtistInfo.fromSubsonicJson(info);
+  }
+
   Future<List<Artist>> getArtists() async {
     final resp = await _get('getArtists');
     final indices = resp['artists']?['index'] as List? ?? [];

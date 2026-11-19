@@ -15,6 +15,9 @@ class SongTile extends ConsumerWidget {
   /// Replaces the cover thumbnail (album pages show the track number).
   final Widget? leading;
 
+  /// Replaces the artist (· album) line, e.g. "Glasshouse · 38 plays".
+  final String? subtitle;
+
   const SongTile({
     super.key,
     required this.song,
@@ -22,6 +25,7 @@ class SongTile extends ConsumerWidget {
     this.showAlbum = false,
     this.trailing,
     this.leading,
+    this.subtitle,
   });
 
   @override
@@ -59,7 +63,8 @@ class SongTile extends ConsumerWidget {
         ),
       ),
       subtitle: Text(
-        showAlbum ? '${song.artist} · ${song.album}' : song.artist,
+        subtitle ??
+            (showAlbum ? '${song.artist} · ${song.album}' : song.artist),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: Theme.of(context)
