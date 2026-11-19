@@ -11,6 +11,7 @@ import '../../shared/utils/song_actions.dart';
 import '../../core/utils/platform_dirs.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../widgets/grouped_list_tile.dart';
+import 'debug_screen.dart';
 import 'downloaded_songs_screen.dart';
 
 const _streamQualityOptions = [
@@ -271,6 +272,21 @@ class SettingsScreen extends ConsumerWidget {
             ),
             const _DeezerOverviewTile(),
             const _CompanionOverviewTile(),
+          ],
+        ),
+        const _SectionHeader('Advanced'),
+        GroupedSection(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.bug_report_rounded),
+              title: const Text('Debug'),
+              subtitle: const Text('Export data for troubleshooting'),
+              trailing: const _TileTrailing(),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const DebugScreen()),
+              ),
+            ),
           ],
         ),
       ],

@@ -28,41 +28,67 @@ import '../recs/recommenders.dart';
 void main() {
   final dbPath = Platform.environment['MELODIZE_REC_DB'];
   final reportPath = Platform.environment['MELODIZE_REC_REPORT'];
-  final skip = dbPath == null ? 'set MELODIZE_REC_DB to a copy of melodize.db' : null;
+  final csvPath = Platform.environment['MELODIZE_REC_NAVIDROME_CSV'];
+  final skip = dbPath == null && csvPath == null
+      ? 'set MELODIZE_REC_DB (copy of melodize.db) or '
+          'MELODIZE_REC_NAVIDROME_CSV (Navidrome play counts export)'
+      : null;
 
   test('real history: today vs taste model', skip: skip, () async {
-    final db = AppDatabase.forTesting(NativeDatabase(File(dbPath!)));
-    addTearDown(db.close);
-    final rows = await db.getRecentHistory(limit: 100000);
-    final songs = await db.getAllCachedSongs();
     final genreByArtist = <String, String>{};
     final plays = <String, int>{};
     final likes = <LikedTrack>[];
     final owned = <String>{};
-    for (final s in songs) {
-      owned.add(keyFor(s.title, s.artist));
-      if (s.genre != null && s.genre!.isNotEmpty) {
-        genreByArtist.putIfAbsent(s.artist, () => s.genre!);
+    final history = <ListenEvent>[];
+    var songCount = 0;
+    void addSong(String artist, String title, String? genre, int playCount,
+        bool starred) {
+      songCount++;
+      owned.add(keyFor(title, artist));
+      if (genre != null && genre.isNotEmpty) {
+        genreByArtist.putIfAbsent(artist, () => genre);
       }
-      if ((s.playCount ?? 0) > 0) {
-        plays[s.artist] = (plays[s.artist] ?? 0) + s.playCount!;
+      if (playCount > 0) plays[artist] = (plays[artist] ?? 0) + playCount;
+      if (starred) likes.add(LikedTrack(artist: artist, title: title, genre: genre));
+    }
+
+    final String source;
+    if (dbPath != null) {
+      source = 'the app\'s play history';
+      final db = AppDatabase.forTesting(NativeDatabase(File(dbPath)));
+      addTearDown(db.close);
+      for (final s in await db.getAllCachedSongs()) {
+        addSong(s.artist, s.title, s.genre, s.playCount ?? 0, s.starred != null);
       }
-      if (s.starred != null) {
-        likes.add(LikedTrack(artist: s.artist, title: s.title, genre: s.genre));
+      for (final h in await db.getRecentHistory(limit: 100000)) {
+        history.add(ListenEvent(
+            artist: h.artist,
+            title: h.songTitle,
+            at: h.playedAt,
+            genre: genreByArtist[h.artist]));
+      }
+    } else {
+      // Navidrome keeps a play count and the last play per song, not every
+      // play, so each played song becomes one history entry at its last
+      // play. CSV columns: artist,title,genre,play_count,play_date,starred
+      // (tab-separated, play_date ISO 8601 or empty, starred 0/1).
+      source = 'Navidrome play counts (last play per song)';
+      final lines = File(csvPath!).readAsLinesSync().skip(1);
+      for (final line in lines) {
+        final c = line.split('\t');
+        if (c.length < 6) continue;
+        final count = int.tryParse(c[3]) ?? 0;
+        addSong(c[0], c[1], c[2], count, c[5] == '1');
+        final at = DateTime.tryParse(c[4]);
+        if (at != null && count > 0) {
+          history.add(ListenEvent(
+              artist: c[0], title: c[1], at: at, genre: c[2].isEmpty ? null : c[2]));
+        }
       }
     }
-    final history = [
-      for (final h in rows)
-        ListenEvent(
-          artist: h.artist,
-          title: h.songTitle,
-          at: h.playedAt,
-          genre: genreByArtist[h.artist],
-        ),
-    ];
     final now = DateTime.now();
     if (history.isEmpty) {
-      markTestSkipped('$dbPath has no play history to compare on');
+      markTestSkipped('no play history to compare on');
       return;
     }
 
@@ -95,7 +121,8 @@ void main() {
         );
 
     final buf = StringBuffer('# Recommendations on your real history\n\n')
-      ..writeln('${history.length} plays, ${songs.length} library songs, '
+      ..writeln('Source: $source.\n')
+      ..writeln('${history.length} plays, $songCount library songs, '
           '${likes.length} liked, ${plays.length} artists with server play '
           'counts.\n');
 

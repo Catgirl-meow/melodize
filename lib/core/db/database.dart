@@ -210,6 +210,23 @@ class AppDatabase extends _$AppDatabase {
   Future<void> removePendingLike(int deezerId) =>
       (delete(pendingLikes)..where((t) => t.deezerId.equals(deezerId))).go();
 
+  // --- Debug export ---
+  /// Writes a consistent copy of the database to [path] for offline
+  /// analysis (Settings → Debug), with the server login removed: the copy
+  /// holds play history, the library cache and likes, never credentials.
+  Future<void> exportForAnalysis(String path) async {
+    final file = File(path);
+    if (await file.exists()) await file.delete();
+    final quoted = path.replaceAll("'", "''");
+    await customStatement("VACUUM INTO '$quoted'");
+    await customStatement("ATTACH DATABASE '$quoted' AS export_copy");
+    try {
+      await customStatement('DELETE FROM export_copy.server_config');
+    } finally {
+      await customStatement('DETACH DATABASE export_copy');
+    }
+  }
+
   // --- History ---
   Future<List<PlayHistoryData>> getRecentHistory({int limit = 30}) =>
       (select(playHistory)

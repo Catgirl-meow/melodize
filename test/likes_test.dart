@@ -1,6 +1,7 @@
 // Likes: Subsonic star sync, the optimistic heart, and Deezer likes that wait
 // for the companion to add the track before they are starred.
 import 'dart:async';
+import 'dart:io';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
@@ -274,6 +275,26 @@ void main() {
       final liked = c.read(likedSongsProvider).value!;
       expect(liked.map((s) => s.id), ['1', '2']);
     });
+  });
+
+  test('the debug export copies history but never the server login',
+      () async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    await db.addToHistory(PlayHistoryCompanion.insert(
+        songId: '1', songTitle: 'T', artist: 'A'));
+    await db.into(db.serverConfig).insert(ServerConfigCompanion.insert(
+        serverUrl: 'http://s', username: 'u', password: 'secret'));
+    final dir = Directory.systemTemp.createTempSync('melodize-export');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final path = '${dir.path}/export.db';
+    await db.exportForAnalysis(path);
+    await db.exportForAnalysis(path); // overwrites an earlier export
+    final copy = AppDatabase.forTesting(NativeDatabase(File(path)));
+    addTearDown(copy.close);
+    expect(await copy.getRecentHistory(), hasLength(1));
+    expect(await copy.select(copy.serverConfig).get(), isEmpty);
+    expect(await db.select(db.serverConfig).get(), hasLength(1));
   });
 
   test('schema v6 migration adds the like columns and pending likes table',
