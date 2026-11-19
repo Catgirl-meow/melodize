@@ -27,6 +27,9 @@ class CachedSongs extends Table {
   BoolColumn get isDownloaded => boolean().withDefault(const Constant(false))();
   TextColumn get localPath => text().nullable()();
   DateTimeColumn get created => dateTime().nullable()();
+  // When the song was starred ("liked") on the server; null = not liked.
+  DateTimeColumn get starred => dateTime().nullable()();
+  IntColumn get playCount => integer().nullable()();
   DateTimeColumn get cachedAt => dateTime().withDefault(currentDateAndTime)();
 
   @override
@@ -78,6 +81,25 @@ class LyricsCache extends Table {
   Set<Column> get primaryKey => {songId};
 }
 
+/// Deezer recommendations the user liked that aren't in the server library
+/// yet. Liking one asks the companion to add it; once a song with the same
+/// title and artist shows up in the library it is starred there and the row
+/// is removed. Rows stay (and show under Library → Liked) while the add is
+/// pending or failed, so a like is never lost.
+class PendingLikes extends Table {
+  IntColumn get deezerId => integer()();
+  TextColumn get title => text()();
+  TextColumn get artist => text()();
+  TextColumn get album => text()();
+  IntColumn get duration => integer().nullable()();
+  TextColumn get coverUrl => text().nullable()();
+  TextColumn get previewUrl => text().nullable()();
+  DateTimeColumn get likedAt => dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  Set<Column> get primaryKey => {deezerId};
+}
+
 // --- Database ---
 
 @DriftDatabase(tables: [
@@ -86,6 +108,7 @@ class LyricsCache extends Table {
   ServerConfig,
   DownloadQueue,
   LyricsCache,
+  PendingLikes,
 ])
 class AppDatabase extends _$AppDatabase {
   AppDatabase._internal() : super(_openConnection());
@@ -97,7 +120,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -116,6 +139,12 @@ class AppDatabase extends _$AppDatabase {
             // Persisted download queue: resume after restart, keep failures.
             await m.addColumn(downloadQueue, downloadQueue.quality);
             await m.addColumn(downloadQueue, downloadQueue.errorMessage);
+          }
+          if (from < 6) {
+            // Likes: server star + play count cache, pending Deezer likes.
+            await m.addColumn(cachedSongs, cachedSongs.starred);
+            await m.addColumn(cachedSongs, cachedSongs.playCount);
+            await m.createTable(pendingLikes);
           }
         },
       );
@@ -162,6 +191,24 @@ class AppDatabase extends _$AppDatabase {
           localPath: Value(null),
         ),
       );
+
+  /// Sets or clears the cached star on [id] without touching anything else.
+  Future<void> setSongStarred(String id, DateTime? when) =>
+      (update(cachedSongs)..where((t) => t.id.equals(id)))
+          .write(CachedSongsCompanion(starred: Value(when)));
+
+  // --- Pending likes ---
+  Stream<List<PendingLike>> watchPendingLikes() => (select(pendingLikes)
+        ..orderBy([(t) => OrderingTerm.desc(t.likedAt)]))
+      .watch();
+
+  Future<List<PendingLike>> getPendingLikes() => select(pendingLikes).get();
+
+  Future<void> addPendingLike(PendingLikesCompanion like) =>
+      into(pendingLikes).insertOnConflictUpdate(like);
+
+  Future<void> removePendingLike(int deezerId) =>
+      (delete(pendingLikes)..where((t) => t.deezerId.equals(deezerId))).go();
 
   // --- History ---
   Future<List<PlayHistoryData>> getRecentHistory({int limit = 30}) =>

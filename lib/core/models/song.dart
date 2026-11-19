@@ -18,6 +18,13 @@ class Song {
   final String? localPath;
   final DateTime? created;
 
+  /// When the user starred ("liked") the song on the server; null when not
+  /// liked. Read from Subsonic's `starred` field and cached locally.
+  final DateTime? starred;
+
+  /// Navidrome's play count for this user, across every client.
+  final int? playCount;
+
   // Only set for external tracks (e.g. Deezer previews). Never stored in DB.
   final String? externalStreamUrl;
   final String? externalCoverUrl;
@@ -44,6 +51,8 @@ class Song {
     this.isDownloaded = false,
     this.localPath,
     this.created,
+    this.starred,
+    this.playCount,
     this.externalStreamUrl,
     this.externalCoverUrl,
     this.bpm,
@@ -77,17 +86,30 @@ class Song {
       created: json['created'] != null
           ? DateTime.tryParse(json['created'].toString())
           : null,
+      starred: json['starred'] != null
+          ? DateTime.tryParse(json['starred'].toString())
+          : null,
+      playCount: json['playCount'] is int ? json['playCount'] as int : null,
     );
   }
 
-  Song copyWith({bool? isDownloaded, String? localPath}) =>
-      _copy(isDownloaded ?? this.isDownloaded, localPath ?? this.localPath);
+  bool get isStarred => starred != null;
+
+  /// True for Deezer recommendations and previews, which aren't on the
+  /// server (yet).
+  bool get isExternal => id.startsWith('deezer:');
+
+  Song copyWith({bool? isDownloaded, String? localPath}) => _copy(
+      isDownloaded ?? this.isDownloaded, localPath ?? this.localPath, starred);
 
   /// This song with its download state cleared ([copyWith] cannot null
   /// [localPath]).
-  Song withoutDownload() => _copy(false, null);
+  Song withoutDownload() => _copy(false, null, starred);
 
-  Song _copy(bool isDownloaded, String? localPath) {
+  /// This song with its like set to [when], or cleared when null.
+  Song withStarred(DateTime? when) => _copy(isDownloaded, localPath, when);
+
+  Song _copy(bool isDownloaded, String? localPath, DateTime? starred) {
     return Song(
       id: id,
       title: title,
@@ -107,6 +129,8 @@ class Song {
       isDownloaded: isDownloaded,
       localPath: localPath,
       created: created,
+      starred: starred,
+      playCount: playCount,
       externalStreamUrl: externalStreamUrl,
       externalCoverUrl: externalCoverUrl,
       bpm: bpm,
@@ -150,3 +174,9 @@ class Song {
     return '';
   }
 }
+
+/// The Deezer track id behind a recommendation or preview, or null for a
+/// library song.
+int? deezerIdOf(Song song) => song.id.startsWith('deezer:')
+    ? int.tryParse(song.id.substring('deezer:'.length))
+    : null;

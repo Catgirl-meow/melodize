@@ -47,6 +47,7 @@ import 'models/lyrics_result.dart';
 import 'models/search_results.dart';
 import 'utils/title_normalize.dart';
 import 'library/local_search.dart';
+import 'likes/pending_like_match.dart';
 
 // --- Database ---
 final databaseProvider = Provider<AppDatabase>((_) => AppDatabase());
@@ -563,6 +564,165 @@ final allSongsProvider = StreamProvider<List<Song>>((ref) async* {
 /// succeeded. The library still shows the cached songs; the UI uses this to
 /// say that they may be out of date.
 final librarySyncErrorProvider = StateProvider<Object?>((_) => null);
+
+// --- Likes ---
+// A like is a Subsonic star, so it syncs with Navidrome's web UI and other
+// clients. Deezer recommendations can't be starred until they're in the
+// library: liking one stores a pending like and asks the companion to add
+// it; the next library sync that contains it stars it and drops the row.
+
+/// Liked Deezer tracks that are not in the server library yet.
+final pendingLikesProvider = StreamProvider<List<PendingLike>>(
+    (ref) => ref.watch(databaseProvider).watchPendingLikes());
+
+/// Ids of liked library songs. Kept alive by MainShell so pending likes are
+/// reconciled on every library sync, whichever screen is open.
+final likesProvider = StateNotifierProvider<LikesNotifier, Set<String>>(
+    (ref) => LikesNotifier(ref));
+
+/// Whether [songId] (a library id or `deezer:<id>`) is liked.
+final isLikedProvider = Provider.family<bool, String>((ref, songId) {
+  if (songId.startsWith('deezer:')) {
+    final id = int.tryParse(songId.substring('deezer:'.length));
+    final pending = ref.watch(pendingLikesProvider).valueOrNull ?? const [];
+    return pending.any((p) => p.deezerId == id);
+  }
+  return ref.watch(likesProvider.select((ids) => ids.contains(songId)));
+});
+
+/// Liked library songs, newest like first.
+final likedSongsProvider = Provider<AsyncValue<List<Song>>>((ref) {
+  final ids = ref.watch(likesProvider);
+  final likes = ref.read(likesProvider.notifier);
+  return ref.watch(allSongsProvider).whenData((songs) {
+    final liked = [
+      for (final s in songs)
+        if (ids.contains(s.id)) s.withStarred(likes.likedAt(s) ?? s.starred)
+    ]..sort((a, b) {
+        final at = a.starred, bt = b.starred;
+        if (at == null || bt == null) return at == null ? 1 : -1;
+        return bt.compareTo(at);
+      });
+    return liked;
+  });
+});
+
+class LikesNotifier extends StateNotifier<Set<String>> {
+  final Ref _ref;
+  // Like (true) / unlike (false) requests still waiting for the server.
+  final _inFlight = <String, bool>{};
+  // Likes made in this session; the library list still carries the old
+  // server timestamp until its next sync.
+  final _likedAt = <String, DateTime>{};
+  bool _reconciling = false;
+
+  /// When [song] was liked in this session, if it was.
+  DateTime? likedAt(Song song) => _likedAt[song.id];
+
+  LikesNotifier(this._ref) : super(const {}) {
+    _ref.listen<AsyncValue<List<Song>>>(allSongsProvider, (_, next) {
+      final songs = next.valueOrNull;
+      if (songs == null) return;
+      state = mergeLikes(songs, _inFlight);
+      _reconcilePending(songs);
+    }, fireImmediately: true);
+  }
+
+  /// Likes or unlikes a library song. The heart flips at once and flips back
+  /// if the server refuses; that failure is reported as an error snackbar.
+  /// Returns the new state.
+  Future<bool> toggle(Song song) async {
+    assert(!song.isExternal, 'Use likeRecommendation for Deezer tracks');
+    final like = !state.contains(song.id);
+    await _setLiked(song, like);
+    return like;
+  }
+
+  Future<void> _setLiked(Song song, bool like) async {
+    final client = _ref.read(subsonicClientProvider);
+    if (client == null) {
+      AppErrors.report('Connect a server to like songs');
+      return;
+    }
+    _inFlight[song.id] = like;
+    if (like) {
+      _likedAt[song.id] = DateTime.now();
+    } else {
+      _likedAt.remove(song.id);
+    }
+    state = like ? {...state, song.id} : ({...state}..remove(song.id));
+    try {
+      if (like) {
+        await client.star(song.id);
+      } else {
+        await client.unstar(song.id);
+      }
+      await _ref
+          .read(databaseProvider)
+          .setSongStarred(song.id, like ? DateTime.now() : null);
+      if (like && _ref.read(preferencesNotifierProvider).downloadLikedOffline) {
+        await _ref.read(downloadNotifierProvider.notifier).download(song);
+      }
+    } catch (e) {
+      if (mounted) {
+        state = like ? ({...state}..remove(song.id)) : {...state, song.id};
+      }
+      AppErrors.report(
+          like ? "Couldn't like \"${song.title}\"" : "Couldn't unlike \"${song.title}\"",
+          e);
+    } finally {
+      _inFlight.remove(song.id);
+    }
+  }
+
+  /// Saves a like on a Deezer track. The caller then asks the companion to
+  /// add it to the server library; the like is applied when it arrives.
+  Future<void> likeRecommendation(Song song) async {
+    final deezerId = deezerIdOf(song);
+    if (deezerId == null) return;
+    await _ref.read(databaseProvider).addPendingLike(PendingLikesCompanion.insert(
+          deezerId: Value(deezerId),
+          title: song.title,
+          artist: song.artist,
+          album: song.album,
+          duration: Value(song.duration),
+          coverUrl: Value(song.externalCoverUrl),
+          previewUrl: Value(song.externalStreamUrl),
+        ));
+  }
+
+  Future<void> unlikeRecommendation(int deezerId) =>
+      _ref.read(databaseProvider).removePendingLike(deezerId);
+
+  /// Stars every pending like that has arrived in [library].
+  Future<void> _reconcilePending(List<Song> library) async {
+    if (_reconciling) return;
+    _reconciling = true;
+    try {
+      final db = _ref.read(databaseProvider);
+      final pending = await db.getPendingLikes();
+      if (pending.isEmpty) return;
+      final matches = matchPendingLikes(
+        [
+          for (final p in pending)
+            (deezerId: p.deezerId, title: p.title, artist: p.artist)
+        ],
+        library,
+      );
+      for (final (like, song) in matches) {
+        if (!mounted) return;
+        if (!state.contains(song.id)) await _setLiked(song, true);
+        // Only drop the pending row once the star stuck; a failed star was
+        // reported and is retried on the next sync.
+        if (state.contains(song.id)) await db.removePendingLike(like.deezerId);
+      }
+    } catch (e) {
+      AppErrors.report("Couldn't apply likes to newly added songs", e);
+    } finally {
+      _reconciling = false;
+    }
+  }
+}
 
 /// Whether the device has no network at all. Watching it makes a provider
 /// re-run when the connection comes back, so a section that failed offline
@@ -1965,6 +2125,8 @@ Song _rowToSong(CachedSong row) => Song(
       isDownloaded: row.isDownloaded,
       localPath: row.localPath,
       created: row.created,
+      starred: row.starred,
+      playCount: row.playCount,
     );
 
 // Intentionally omits isDownloaded and localPath so server syncs
@@ -1986,4 +2148,6 @@ CachedSongsCompanion _songToCompanion(Song s) => CachedSongsCompanion(
       bitRate: Value(s.bitRate),
       size: Value(s.size),
       created: Value(s.created),
+      starred: Value(s.starred),
+      playCount: Value(s.playCount),
     );

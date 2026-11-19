@@ -26,6 +26,49 @@ mixin DownloadPollingMixin<T extends ConsumerStatefulWidget>
     super.dispose();
   }
 
+  /// Asks the companion to download Deezer track [deezerId] into the
+  /// Navidrome library (FLAC, needs the Deezer ARL), then polls the job and
+  /// refreshes the library when it lands. Every precondition that fails is
+  /// shown as a snackbar.
+  Future<void> addDeezerTrackToServer(int deezerId) async {
+    void snack(String msg, {bool isError = false}) => showStyledSnack(
+        context, msg,
+        isError: isError, bottomOffset: snackBottomOffset);
+
+    final companion = ref.read(companionClientProvider);
+    if (companion == null) {
+      snack('Companion not configured — set it up in Settings',
+          isError: true);
+      return;
+    }
+    final prefs = ref.read(preferencesNotifierProvider);
+    if (!prefs.hasDeezerArl) {
+      snack('Add Deezer ARL in Settings — required for server downloads',
+          isError: true);
+      return;
+    }
+    final arlStatus = ref.read(deezerArlStatusProvider).valueOrNull;
+    if (arlStatus == DeezerArlStatus.invalid) {
+      snack('Deezer session expired — update ARL in Settings', isError: true);
+      return;
+    }
+    if (arlStatus == DeezerArlStatus.unreachable) {
+      snack("Can't verify Deezer session — download will attempt anyway");
+    }
+    snack('Sending to server (FLAC)…');
+    try {
+      final jobId = await companion.startDownload(
+          'https://www.deezer.com/track/$deezerId',
+          deezerArl: prefs.deezerArl);
+      if (!mounted) return;
+      startDownloadPolling(companion, jobId);
+    } catch (e) {
+      if (!mounted) return;
+      snack('Download could not start: ${companionStartError(e)}',
+          isError: true);
+    }
+  }
+
   void startDownloadPolling(CompanionClient companion, String jobId) {
     var attempts = 0;
     _pollTimer?.cancel();

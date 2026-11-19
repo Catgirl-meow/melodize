@@ -281,6 +281,9 @@ class _MainShellState extends ConsumerState<MainShell>
     // Instantiate the download manager with the shell: it resumes the
     // persisted queue and checks downloaded files on creation.
     ref.listen(downloadNotifierProvider, (_, __) {});
+    // Keep likes alive so pending Deezer likes are applied on every library
+    // sync, whichever screen is open.
+    ref.listen(likesProvider, (_, __) {});
     ref.listen<DownloadNotice?>(downloadNoticeProvider, (_, notice) {
       if (notice == null) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {

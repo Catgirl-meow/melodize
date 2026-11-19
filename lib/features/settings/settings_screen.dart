@@ -7,6 +7,7 @@ import '../../core/api/subsonic_client.dart' show SubsonicConfig;
 import '../../core/models/app_preferences.dart';
 import '../../core/errors/app_errors.dart';
 import '../../core/providers.dart';
+import '../../shared/utils/song_actions.dart';
 import '../../core/utils/platform_dirs.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../widgets/grouped_list_tile.dart';
@@ -209,6 +210,22 @@ class SettingsScreen extends ConsumerWidget {
                     ),
                   ),
                 );
+              },
+            ),
+            SwitchListTile.adaptive(
+              title: const Text('Download liked songs'),
+              subtitle: const Text('Save every liked song on this device'),
+              secondary: const Icon(Icons.favorite_rounded),
+              value: prefs.downloadLikedOffline,
+              onChanged: (value) async {
+                ref.read(preferencesNotifierProvider.notifier).update(
+                      prefs.copyWith(downloadLikedOffline: value),
+                    );
+                if (!value) return;
+                // Turning it on catches up on songs liked before.
+                final liked =
+                    ref.read(likedSongsProvider).valueOrNull ?? const [];
+                await downloadSongs(context, ref, liked);
               },
             ),
             ListTile(

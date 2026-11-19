@@ -113,6 +113,22 @@ void main() {
       }
     });
 
+    test('star, getStarred2 and unstar round-trip (likes)', () async {
+      final song = (await client.getAllSongs()).first;
+      try {
+        await client.star(song.id);
+        expect((await client.getStarredSongs()).map((s) => s.id),
+            contains(song.id));
+        final fresh = (await client.getAllSongs())
+            .firstWhere((s) => s.id == song.id);
+        expect(fresh.isStarred, isTrue);
+      } finally {
+        await client.unstar(song.id);
+      }
+      expect((await client.getStarredSongs()).map((s) => s.id),
+          isNot(contains(song.id)));
+    });
+
     test('unknown ids fail cleanly', () async {
       expect(() => client.getAlbumSongs('does-not-exist'), throwsException);
       expect(await client.getSimilarSongs('does-not-exist'), isEmpty);
