@@ -57,7 +57,7 @@ class TasteSignals {
   /// Count of dismissed songs per artist (song-level hides).
   final Map<String, int> dismissalsByArtist;
 
-  /// "More like this" taps per artist.
+  /// "Song radio" starts per artist.
   final Map<String, int> moreLikeThis;
 
   /// How many times each track ([keyFor] key) was shown on Home without
@@ -277,9 +277,8 @@ class TasteProfile {
   }
 }
 
-/// Why a seed was picked; shown on the card as the reason.
-/// [requested] is the artist of a "More like this" tap.
-enum SeedReason { topArtist, recent, liked, requested }
+/// Why a seed was picked; shown in the player as the reason.
+enum SeedReason { topArtist, recent, liked }
 
 class TasteSeed {
   /// Display name of the artist.
@@ -526,16 +525,6 @@ class NoRadioTracks extends RecsFailure {
       'Play or like a few other artists and refresh.';
 }
 
-/// The radio of the artist the user asked for ("More like this") failed.
-class FocusRadioFailed extends RecsFailure {
-  final String artist;
-  final Object error;
-  const FocusRadioFailed(this.artist, this.error);
-  @override
-  String get message =>
-      "Couldn't load songs like $artist from Deezer: $error";
-}
-
 /// Radios came back, but every track was owned or hidden.
 class NothingNew extends RecsFailure {
   final int candidates;
@@ -573,10 +562,6 @@ class RecommendationResult {
 /// artist) is replaced by the next artist the profile would pick, so a few
 /// obscure artists in the history don't shorten every list. It is listed in
 /// [RecommendationResult.unknownArtists].
-///
-/// [focusArtist] ("More like this") always seeds, first and at full weight,
-/// even for an artist never played; if its radio fails the whole call fails,
-/// since the user asked for exactly that artist.
 Future<RecommendationResult> recommend({
   required TasteSignals signals,
   required DateTime now,
@@ -584,17 +569,9 @@ Future<RecommendationResult> recommend({
   required math.Random rng,
   TasteWeights weights = const TasteWeights(),
   int limit = 30,
-  String? focusArtist,
 }) async {
   final profile = TasteProfile.build(signals, now: now, w: weights);
-  final focusKey = focusArtist == null ? null : normalize(focusArtist);
-  final seeds = [
-    if (focusArtist != null)
-      TasteSeed(focusArtist, SeedReason.requested,
-          math.max(1.0, profile.maxAffinity)),
-    ...pickSeeds(profile, rng, count: focusArtist == null ? 8 : 7)
-        .where((s) => normalize(s.artist) != focusKey),
-  ];
+  final seeds = pickSeeds(profile, rng);
   if (seeds.isEmpty) throw const NoTasteYet();
   // Drawn only when a seed turns out unknown, so lists without one use the
   // random stream exactly as before.
@@ -608,10 +585,6 @@ Future<RecommendationResult> recommend({
     try {
       radios[seed] = await radio(seed);
     } on NoDeezerRadio catch (e) {
-      if (seed.reason == SeedReason.requested) {
-        failed[seed.artist] = e;
-        return;
-      }
       unknown[seed.artist] = e;
       final r = reserve ??= pickSeeds(profile, rng,
           count: 8, exclude: {for (final s in seeds) normalize(s.artist)});
@@ -627,12 +600,6 @@ Future<RecommendationResult> recommend({
 
   await Future.wait(seeds.map(fetch));
   if (radios.isEmpty) throw AllRadiosFailed({...unknown, ...failed});
-  if (focusArtist != null && failed.containsKey(focusArtist)) {
-    throw FocusRadioFailed(focusArtist, failed[focusArtist]!);
-  }
-  if (focusArtist != null && radios[seeds.first]!.isEmpty) {
-    throw NoRadioTracks([focusArtist]);
-  }
   final candidates = radios.values.fold<int>(0, (n, l) => n + l.length);
   if (candidates == 0) {
     throw NoRadioTracks([for (final s in radios.keys) s.artist]);
@@ -647,10 +614,9 @@ Future<RecommendationResult> recommend({
       unknown.keys.toList());
 }
 
-/// Short reason label for a recommendation card.
+/// Short reason label for a recommendation.
 String reasonLabel(TasteSeed seed) => switch (seed.reason) {
       SeedReason.liked => 'You like ${seed.artist}',
       SeedReason.recent => 'You played ${seed.artist} this week',
       SeedReason.topArtist => 'Because you listen to ${seed.artist}',
-      SeedReason.requested => 'More like ${seed.artist}',
     };

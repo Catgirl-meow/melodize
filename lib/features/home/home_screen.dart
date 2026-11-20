@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/subsonic_client.dart' show ServerReachability;
@@ -10,10 +9,6 @@ import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../core/errors/app_errors.dart' show describeError;
-import '../../core/recs/taste_model.dart' show SeedReason, TasteSeed;
-import '../../shared/utils/download_polling_mixin.dart';
-import '../../shared/utils/rec_feedback.dart';
-import '../../shared/widgets/like_button.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/offline_banner.dart';
 import '../../shared/widgets/error_notice.dart';
@@ -99,8 +94,6 @@ class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   Future<void> _refresh(WidgetRef ref) async {
-    // Clear "More like this" override so pull-to-refresh uses history seeds.
-    ref.read(recommendationsSeedOverrideProvider.notifier).state = null;
     ref.invalidate(newestAlbumsProvider);
     ref.invalidate(randomSongsProvider);
     ref.invalidate(recentlyPlayedProvider);
@@ -462,7 +455,6 @@ class HomeScreen extends ConsumerWidget {
     AsyncValue<RecommendationsState> recsAsync,
   ) {
     void refresh() {
-      ref.read(recommendationsSeedOverrideProvider.notifier).state = null;
       ref.invalidate(recommendationsProvider);
     }
 
@@ -508,7 +500,6 @@ class HomeScreen extends ConsumerWidget {
             );
           case RecsReady(
               songs: final all,
-              reasons: final reasons,
               failedSeeds: final failedSeeds,
             ):
             // "Not interested" takes the card out at once (and Undo brings
@@ -551,10 +542,25 @@ class HomeScreen extends ConsumerWidget {
                 delay: _kStagger3,
                 child: _Section(
                   title: 'Recommended for You',
-                  trailing: IconButton.filledTonal(
-                    tooltip: 'Refresh recommendations',
-                    icon: const Icon(Icons.refresh_rounded),
-                    onPressed: refresh,
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Starts the whole list, for listening to it as a
+                      // radio; tapping a card starts from that card.
+                      FilledButton.tonalIcon(
+                        onPressed: () => ref
+                            .read(audioHandlerNotifierProvider)
+                            ?.loadQueue(songs, startIndex: 0),
+                        icon: const Icon(Icons.play_arrow_rounded),
+                        label: const Text('Play'),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton.filledTonal(
+                        tooltip: 'Refresh recommendations',
+                        icon: const Icon(Icons.refresh_rounded),
+                        onPressed: refresh,
+                      ),
+                    ],
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -567,11 +573,11 @@ class HomeScreen extends ConsumerWidget {
                               .read(audioHandlerNotifierProvider)
                               ?.loadQueue(songs, startIndex: i),
                           children: [
+                            // Same card as every other row: why it was
+                            // picked, like and "Not interested" live in
+                            // the player.
                             for (final s in songs)
-                              _RecommendationCard(
-                                  key: ValueKey(s.id),
-                                  song: s,
-                                  reason: reasons[s.id]),
+                              _SongCard(key: ValueKey(s.id), song: s),
                           ],
                         ),
                       ),
@@ -657,7 +663,7 @@ class _Section extends StatelessWidget {
 
 class _SongCard extends ConsumerWidget {
   final Song song;
-  const _SongCard({required this.song});
+  const _SongCard({super.key, required this.song});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -675,6 +681,8 @@ class _SongCard extends ConsumerWidget {
             width: double.infinity,
             child: CoverArtImage(
               coverArtId: song.coverArt,
+              // A Deezer recommendation has only a cover URL.
+              externalUrl: song.externalCoverUrl,
               // Lets a downloaded song show its saved cover offline.
               songId: song.id,
               size: _kCardImageSize,
@@ -808,379 +816,6 @@ class _PlaylistCard extends ConsumerWidget {
 }
 
 // ---------------------------------------------------------------------------
-
-// Recommendation card — only handles the 3-dot context menu.
-// Play is triggered via CarouselView.onTap at the carousel level.
-class _RecommendationCard extends ConsumerStatefulWidget {
-  final Song song;
-
-  /// The seed artist behind this pick, shown as a label on the cover.
-  final TasteSeed? reason;
-  const _RecommendationCard({super.key, required this.song, this.reason});
-
-  @override
-  ConsumerState<_RecommendationCard> createState() =>
-      _RecommendationCardState();
-}
-
-class _RecommendationCardState extends ConsumerState<_RecommendationCard>
-    with DownloadPollingMixin {
-  Future<void> _addToLibrary() =>
-      addDeezerTrackToServer(deezerIdOf(widget.song)!);
-
-  void _moreLikeThis() => requestMoreLikeThis(ref, widget.song);
-
-  void _notInterested({required bool wholeArtist}) =>
-      dismissRecommendation(context, ref, widget.song,
-          wholeArtist: wholeArtist);
-
-  void _openMenu() {
-    final canDownload = ref.read(canDeleteFromServerProvider);
-    final scheme = Theme.of(context).colorScheme;
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Song header
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Row(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: widget.song.externalCoverUrl != null
-                        ? CachedNetworkImage(
-                            imageUrl: widget.song.externalCoverUrl!,
-                            width: 44,
-                            height: 44,
-                            fit: BoxFit.cover,
-                          )
-                        : Consumer(
-                            builder: (_, ref, __) => CoverArtImage(
-                              coverArtId: widget.song.coverArt,
-                              size: 44,
-                              borderRadius: 6,
-                            ),
-                          ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(widget.song.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(ctx).textTheme.titleSmall),
-                        Text(widget.song.artist,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                                  color: scheme.onSurfaceVariant,
-                                )),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Divider(
-                height: 1,
-                indent: 16,
-                endIndent: 16,
-                color: scheme.outlineVariant),
-            const SizedBox(height: 4),
-            Consumer(builder: (_, ref, __) {
-              final liked = ref.watch(isLikedProvider(widget.song.id));
-              return ListTile(
-                leading: Icon(
-                    liked
-                        ? Icons.favorite_rounded
-                        : Icons.favorite_border_rounded,
-                    color: liked ? scheme.primary : null),
-                title: Text(liked ? 'Unlike' : 'Like'),
-                subtitle: liked
-                    ? null
-                    : const Text('Add to your library and like it'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  toggleRecommendationLike(this, widget.song, liked: liked);
-                },
-              );
-            }),
-            if (canDownload)
-              ListTile(
-                leading: const Icon(Icons.library_add_rounded),
-                title: const Text('Add to library'),
-                subtitle: const Text('Download to Navidrome server'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _addToLibrary();
-                },
-              ),
-            ListTile(
-              leading: const Icon(Icons.auto_awesome_rounded),
-              title: const Text('More like this'),
-              subtitle: const Text('Rebuild recommendations from this track'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _moreLikeThis();
-              },
-            ),
-            _NotInterestedTile(
-              artist: widget.song.artist,
-              onChoose: (wholeArtist) {
-                Navigator.pop(ctx);
-                _notInterested(wholeArtist: wholeArtist);
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final isPreview = widget.song.externalStreamUrl != null;
-
-    Widget cover;
-    if (widget.song.externalCoverUrl != null) {
-      cover = ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: CachedNetworkImage(
-          imageUrl: widget.song.externalCoverUrl!,
-          width: _kCardImageSize,
-          height: _kCardImageSize,
-          fit: BoxFit.cover,
-          placeholder: (_, __) => _coverPlaceholder(scheme),
-          errorWidget: (_, __, ___) => _coverPlaceholder(scheme),
-        ),
-      );
-    } else {
-      cover = CoverArtImage(
-        coverArtId: widget.song.coverArt,
-        size: _kCardImageSize,
-        borderRadius: 12,
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          AspectRatio(
-            aspectRatio: 1,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-              cover,
-              if (widget.reason != null)
-                Positioned(
-                  left: 6,
-                  right: 6,
-                  bottom: 6,
-                  child: IgnorePointer(
-                    child: Align(
-                      alignment: Alignment.bottomLeft,
-                      child: _ReasonPill(seed: widget.reason!),
-                    ),
-                  ),
-                ),
-              if (isPreview)
-                Positioned(
-                  top: 6,
-                  left: 6,
-                  child: IgnorePointer(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 5, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: scheme.inverseSurface,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        'PREVIEW',
-                        style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                            color: scheme.onInverseSurface),
-                      ),
-                    ),
-                  ),
-                ),
-              // 3-dot button — has its own Material so its InkWell wins
-              // the gesture arena when tapped, preventing CarouselView.onTap
-              // from firing a play action for a menu tap.
-              Positioned(
-                top: 2,
-                right: 2,
-                child: Material(
-                  color: Colors.black54,
-                  shape: const CircleBorder(),
-                  clipBehavior: Clip.antiAlias,
-                  child: InkWell(
-                    customBorder: const CircleBorder(),
-                    onTap: _openMenu,
-                    child: const Padding(
-                      padding: EdgeInsets.all(4),
-                      child: Icon(Icons.more_vert_rounded,
-                          size: 18, color: Colors.white),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(widget.song.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  fontSize: _kCardTitleSize,
-                  height: _kCardLineHeight,
-                  fontWeight: FontWeight.w600)),
-          Text(widget.song.artist,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: _kCardSubtitleSize,
-                  height: _kCardLineHeight,
-                  color: scheme.onSurfaceVariant)),
-        ],
-      ),
-    );
-  }
-
-  Widget _coverPlaceholder(ColorScheme scheme) => ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          width: _kCardImageSize,
-          height: _kCardImageSize,
-          color: scheme.surfaceContainerHigh,
-          child: Icon(Icons.music_note_rounded,
-              size: 52, color: scheme.onSurfaceVariant),
-        ),
-      );
-}
-
-/// Why a recommendation was picked, on its cover: "You like Kaito Ren".
-class _ReasonPill extends StatelessWidget {
-  final TasteSeed seed;
-  const _ReasonPill({required this.seed});
-
-  static (IconData, String) describe(TasteSeed seed) => switch (seed.reason) {
-        SeedReason.liked => (Icons.favorite_rounded, 'You like ${seed.artist}'),
-        SeedReason.recent => (Icons.history_rounded, 'Lately: ${seed.artist}'),
-        SeedReason.topArtist => (
-            Icons.graphic_eq_rounded,
-            'Similar to ${seed.artist}'
-          ),
-        SeedReason.requested => (
-            Icons.auto_awesome_rounded,
-            'More like ${seed.artist}'
-          ),
-      };
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final (icon, label) = describe(seed);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(6, 3, 8, 3),
-      decoration: BoxDecoration(
-        color: scheme.secondaryContainer.withValues(alpha: 0.92),
-        borderRadius: BorderRadius.circular(99),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: scheme.onSecondaryContainer),
-          const SizedBox(width: 4),
-          Flexible(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w600,
-                color: scheme.onSecondaryContainer,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// "Not interested" row of a recommendation's menu. Tapping it reveals a
-/// choice: hide just this song, or every song by the artist.
-class _NotInterestedTile extends StatefulWidget {
-  final String artist;
-  final ValueChanged<bool> onChoose; // true = whole artist
-  const _NotInterestedTile({required this.artist, required this.onChoose});
-
-  @override
-  State<_NotInterestedTile> createState() => _NotInterestedTileState();
-}
-
-class _NotInterestedTileState extends State<_NotInterestedTile> {
-  bool _open = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        ListTile(
-          leading: Icon(Icons.block_rounded, color: scheme.error),
-          title: Text('Not interested', style: TextStyle(color: scheme.error)),
-          subtitle: const Text('Hide it and show less like it'),
-          onTap: () => setState(() => _open = !_open),
-        ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
-          child: !_open
-              ? const SizedBox(width: double.infinity)
-              : Padding(
-                  padding: const EdgeInsets.fromLTRB(72, 0, 16, 8),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: SegmentedButton<bool>(
-                      segments: [
-                        const ButtonSegment(
-                            value: false, label: Text('This song')),
-                        ButtonSegment(
-                          value: true,
-                          label: Text(widget.artist,
-                              maxLines: 1, overflow: TextOverflow.ellipsis),
-                        ),
-                      ],
-                      selected: const {},
-                      emptySelectionAllowed: true,
-                      showSelectedIcon: false,
-                      onSelectionChanged: (sel) {
-                        if (sel.isNotEmpty) widget.onChoose(sel.first);
-                      },
-                    ),
-                  ),
-                ),
-        ),
-      ],
-    );
-  }
-}
 
 /// A quiet one-line note under the recommendations (not an error).
 class _RecsNote extends StatelessWidget {

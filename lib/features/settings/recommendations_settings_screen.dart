@@ -40,8 +40,8 @@ class RecommendationsSettingsScreen extends ConsumerWidget {
       builder: (dialogContext) => AlertDialog.adaptive(
         title: const Text('Reset taste profile?'),
         content: const Text(
-            'Shows hidden songs and artists again and forgets "More like '
-            'this" taps and skips. Your play history and likes stay.'),
+            'Shows hidden songs and artists again and forgets song radio '
+            'starts and skips. Your play history and likes stay.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -203,7 +203,7 @@ class RecommendationsSettingsScreen extends ConsumerWidget {
                           title: Text('Reset taste profile',
                               style: TextStyle(color: scheme.error)),
                           subtitle: const Text(
-                              'Clears hidden items, "More like this" and '
+                              'Clears hidden items, song radio starts and '
                               'skips. Play history and likes stay.'),
                           onTap: () => _reset(context, ref),
                         ),

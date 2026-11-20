@@ -1,5 +1,7 @@
-// Home's recommendation cards: the "why" label, and "Not interested" taking
-// a card out at once with Undo bringing it back.
+// Home's recommendation row: plain cards like every other row (the "why",
+// like and "Not interested" live in the player), and a song hidden from the
+// player leaving the row at once, Undo bringing it back.
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,7 +16,7 @@ import 'package:melodize/core/recs/taste_model.dart';
 import 'package:melodize/features/home/home_screen.dart';
 
 void main() {
-  testWidgets('Not interested hides a card; Undo brings it back',
+  testWidgets('plain cards; a hidden song leaves the row, Undo brings it back',
       (tester) async {
     tester.view.physicalSize = const Size(500, 1600);
     tester.view.devicePixelRatio = 1;
@@ -66,26 +68,26 @@ void main() {
 
     await settle();
     expect(find.text('Neon Harbor'), findsOneWidget);
-    expect(find.text('You like Kaito Ren'), findsNWidgets(2));
+    // Nothing on the covers any more: no menu, reason or preview badge.
+    expect(find.byIcon(Icons.more_vert_rounded), findsNothing);
+    expect(find.text('You like Kaito Ren'), findsNothing);
+    expect(find.text('PREVIEW'), findsNothing);
+    expect(find.widgetWithText(FilledButton, 'Play'), findsOneWidget);
     expect(find.textContaining('based on Orbit Theory'), findsOneWidget);
 
-    // Open the first card's menu and hide just this song.
-    await tester.tap(find.byIcon(Icons.more_vert_rounded).first);
-    await settle();
-    await tester.tap(find.text('Not interested'));
-    await settle();
-    await tester.tap(find.text('This song'));
+    // "Not interested" in the player writes the row; Home drops the card.
+    final key = dismissedTrackKey('Neon Harbor', 'Lumen Drift');
+    await tester.runAsync(() => db.addDismissedRec(
+        DismissedRecsCompanion.insert(
+            key: key, kind: 'track', artist: 'Lumen Drift',
+            title: const Value('Neon Harbor'))));
     await settle();
     expect(find.text('Neon Harbor'), findsNothing);
     expect(find.text('Low Orbit'), findsOneWidget);
-    expect(find.text("Hidden. You'll see less like this."), findsOneWidget);
-    expect(
-        (await tester.runAsync(db.getDismissedRecs))!.single.title, 'Neon Harbor');
 
-    await tester.tap(find.text('Undo'));
+    await tester.runAsync(() => db.removeDismissedRec(key));
     await settle();
     expect(find.text('Neon Harbor'), findsOneWidget);
-    expect(await tester.runAsync(db.getDismissedRecs), isEmpty);
 
     // Drift closes its query streams on a zero-length timer; let it run.
     await tester.pumpWidget(const SizedBox());
