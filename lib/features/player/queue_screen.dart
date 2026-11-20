@@ -5,6 +5,7 @@ import '../../core/audio/playback_core.dart';
 import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/widgets/cover_art_image.dart';
+import '../playlists/add_to_playlist_sheet.dart';
 
 class QueueScreen extends ConsumerStatefulWidget {
   const QueueScreen({super.key});
@@ -93,6 +94,15 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                   const SizedBox(width: 12),
                   _ModeChip(mode: mode, scheme: scheme),
                   const Spacer(),
+                  if (songs.any((s) => !s.isExternal))
+                    IconButton(
+                      key: const Key('queue-save-playlist'),
+                      tooltip: 'Save queue to a playlist',
+                      icon: const Icon(Icons.playlist_add_rounded, size: 22),
+                      onPressed: () =>
+                          showAddToPlaylistSheet(context, ref, songs),
+                      visualDensity: VisualDensity.compact,
+                    ),
                   IconButton(
                     icon: const Icon(Icons.close_rounded, size: 20),
                     onPressed: () => Navigator.pop(context),

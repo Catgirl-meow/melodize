@@ -1,151 +1,211 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../core/errors/app_errors.dart';
+import '../../core/library/library_overview.dart';
 import '../../core/models/album.dart';
-import '../../core/db/database.dart' show PendingLike;
-import '../../core/models/song.dart';
+import '../../core/models/artist.dart';
+import '../../core/models/playlist.dart';
 import '../../core/providers.dart';
 import '../../shared/theme/app_theme.dart';
-import '../../shared/widgets/album_grid_tile.dart';
-import '../../shared/widgets/cover_art_image.dart';
-import '../../shared/widgets/error_notice.dart';
+import '../../shared/utils/formatting.dart';
 import '../../shared/widgets/offline_banner.dart';
-import '../../shared/utils/download_polling_mixin.dart';
-import '../../shared/widgets/section_header.dart';
-import '../../shared/widgets/song_tile.dart';
+import '../../shared/widgets/playlist_cover.dart';
+import '../../shared/widgets/song_drag.dart';
+import '../../shared/widgets/song_selection.dart';
+import '../playlists/playlist_dialogs.dart';
+import '../settings/downloaded_songs_screen.dart';
 import 'album_detail_screen.dart';
 import 'artist_detail_screen.dart';
+import 'library_views.dart';
+import 'playlist_detail_screen.dart';
+import 'song_collection_screen.dart';
 
-// ---------------------------------------------------------------------------
-// Song sorting
+/// Window width from which Library shows its sidebar layout.
+const kLibraryWideBreakpoint = 900.0;
 
-enum _SongSort { name, artist, recentlyAdded, downloaded }
-
-String _songSortLabel(_SongSort s) => switch (s) {
-      _SongSort.name => 'Name',
-      _SongSort.artist => 'Artist',
-      _SongSort.recentlyAdded => 'Recently added',
-      _SongSort.downloaded => 'Downloaded',
-    };
-
-IconData _songSortIcon(_SongSort s) => switch (s) {
-      _SongSort.name => Icons.sort_by_alpha_rounded,
-      _SongSort.artist => Icons.person_rounded,
-      _SongSort.recentlyAdded => Icons.schedule_rounded,
-      _SongSort.downloaded => Icons.download_done_rounded,
-    };
-
-List<Song> _applySongSort(
-    List<Song> songs, _SongSort sort, bool ascending, Set<String> downloadedIds) {
-  final list = List<Song>.from(songs);
-  switch (sort) {
-    case _SongSort.name:
-      list.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
-    case _SongSort.artist:
-      list.sort((a, b) {
-        final c = a.artist.toLowerCase().compareTo(b.artist.toLowerCase());
-        return c != 0 ? c : a.title.toLowerCase().compareTo(b.title.toLowerCase());
-      });
-    case _SongSort.recentlyAdded:
-      list.sort((a, b) {
-        if (a.created == null && b.created == null) return 0;
-        if (a.created == null) return 1;
-        if (b.created == null) return -1;
-        return b.created!.compareTo(a.created!);
-      });
-    case _SongSort.downloaded:
-      list.sort((a, b) {
-        final aDown = a.isDownloaded || downloadedIds.contains(a.id);
-        final bDown = b.isDownloaded || downloadedIds.contains(b.id);
-        if (aDown == bDown) {
-          return a.title.toLowerCase().compareTo(b.title.toLowerCase());
-        }
-        return aDown ? -1 : 1;
-      });
-  }
-  if (!ascending) return list.reversed.toList();
-  return list;
-}
-
-// ---------------------------------------------------------------------------
-// Album sorting
-
-enum _AlbumSort { name, artist, year, songCount }
-
-String _albumSortLabel(_AlbumSort s) => switch (s) {
-      _AlbumSort.name => 'Name',
-      _AlbumSort.artist => 'Artist',
-      _AlbumSort.year => 'Year',
-      _AlbumSort.songCount => 'Song count',
-    };
-
-IconData _albumSortIcon(_AlbumSort s) => switch (s) {
-      _AlbumSort.name => Icons.sort_by_alpha_rounded,
-      _AlbumSort.artist => Icons.person_rounded,
-      _AlbumSort.year => Icons.calendar_today_rounded,
-      _AlbumSort.songCount => Icons.music_note_rounded,
-    };
-
-List<Album> _applyAlbumSort(List<Album> albums, _AlbumSort sort, bool ascending) {
-  final list = List<Album>.from(albums);
-  switch (sort) {
-    case _AlbumSort.name:
-      list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    case _AlbumSort.artist:
-      list.sort((a, b) {
-        final c = a.artist.toLowerCase().compareTo(b.artist.toLowerCase());
-        return c != 0 ? c : a.name.toLowerCase().compareTo(b.name.toLowerCase());
-      });
-    case _AlbumSort.year:
-      list.sort((a, b) {
-        if (a.year == null && b.year == null) return 0;
-        if (a.year == null) return 1;
-        if (b.year == null) return -1;
-        return b.year!.compareTo(a.year!);
-      });
-    case _AlbumSort.songCount:
-      list.sort((a, b) => b.songCount.compareTo(a.songCount));
-  }
-  if (!ascending) return list.reversed.toList();
-  return list;
-}
-
-// ---------------------------------------------------------------------------
-
-class LibraryScreen extends ConsumerWidget {
+/// Library: one screen for everything the user owns. Phones get filter
+/// chips (All, Playlists, Albums, Artists, Songs); wide windows get a
+/// sidebar with the playlists always visible. See docs/design.md.
+class LibraryScreen extends StatelessWidget {
   const LibraryScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return DefaultTabController(
-      length: 4,
-      // Songs stays the tab the screen opens on; Liked is one swipe left.
-      initialIndex: 1,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text('Library', style: AppTheme.pageTitleStyle(context)),
-          titleSpacing: 16,
-          toolbarHeight: AppTheme.pageTitleBarHeight,
-          automaticallyImplyLeading: false,
-          scrolledUnderElevation: 0,
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'Liked'),
-              Tab(text: 'Songs'),
-              Tab(text: 'Albums'),
-              Tab(text: 'Artists'),
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, c) => c.maxWidth >= kLibraryWideBreakpoint
+          ? const _WideLibrary()
+          : const _PhoneLibrary(),
+    );
+  }
+}
+
+void _push(BuildContext context, Widget page) =>
+    Navigator.of(context, rootNavigator: true)
+        .push(MaterialPageRoute(builder: (_) => page));
+
+// ---------------------------------------------------------------------------
+// Phone
+
+class _PhoneLibrary extends ConsumerStatefulWidget {
+  const _PhoneLibrary();
+
+  @override
+  ConsumerState<_PhoneLibrary> createState() => _PhoneLibraryState();
+}
+
+class _PhoneLibraryState extends ConsumerState<_PhoneLibrary>
+    implements LibraryNavigator {
+  final _selection = SongSelection();
+  final _searchController = TextEditingController();
+  late LibraryView _view = libraryViewFromName(
+      ref.read(preferencesNotifierProvider).libraryView);
+  // Views are built the first time they're shown, then kept (scroll
+  // position, loaded data) while switching chips.
+  late final _visited = <LibraryView>{_view};
+  var _searching = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _selection.addListener(_changed);
+    _searchController.addListener(_changed);
+  }
+
+  void _changed() => setState(() {});
+
+  @override
+  void dispose() {
+    _selection.removeListener(_changed);
+    _selection.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  String get _query => _searching ? _searchController.text : '';
+
+  @override
+  void showView(LibraryView view) {
+    if (view == _view) return;
+    _selection.clear();
+    setState(() {
+      _view = view;
+      _visited.add(view);
+    });
+    final prefs = ref.read(preferencesNotifierProvider);
+    ref
+        .read(preferencesNotifierProvider.notifier)
+        .update(prefs.copyWith(libraryView: view.name));
+  }
+
+  @override
+  void openPlaylist(Playlist playlist) =>
+      _push(context, PlaylistDetailScreen(playlist: playlist));
+  @override
+  void openLiked() => _push(context, const LikedSongsScreen());
+  @override
+  void openDownloaded() => _push(context, const DownloadedSongsScreen());
+  @override
+  void openRecentlyAdded() => _push(context, const RecentlyAddedScreen());
+  @override
+  void openAlbum(Album album) => _push(context, AlbumDetailScreen(album: album));
+  @override
+  void openArtist(Artist artist) =>
+      _push(context, ArtistDetailScreen(artist: artist));
+
+  Widget _viewFor(LibraryView v) => switch (v) {
+        LibraryView.all => LibraryOverview(query: _query, nav: this),
+        LibraryView.playlists => LibraryPlaylistsView(query: _query, nav: this),
+        LibraryView.albums => LibraryAlbumsView(query: _query, nav: this),
+        LibraryView.artists => LibraryArtistsView(query: _query, nav: this),
+        LibraryView.songs =>
+          LibrarySongsView(query: _query, selection: _selection),
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final selecting = _selection.active;
+    final allSongs = ref.watch(allSongsProvider).valueOrNull ?? const [];
+
+    final PreferredSizeWidget appBar = selecting
+        ? SongSelectionAppBar(selection: _selection, songs: allSongs)
+            as PreferredSizeWidget
+        : AppBar(
+            title: Text('Library', style: AppTheme.pageTitleStyle(context)),
+            titleSpacing: 16,
+            toolbarHeight: AppTheme.pageTitleBarHeight,
+            automaticallyImplyLeading: false,
+            scrolledUnderElevation: 0,
+            actions: [
+              IconButton(
+                key: const Key('library-search'),
+                tooltip: _searching ? 'Close search' : 'Search your library',
+                icon: Icon(
+                    _searching ? Icons.search_off_rounded : Icons.search_rounded),
+                onPressed: () => setState(() {
+                  _searching = !_searching;
+                  if (!_searching) _searchController.clear();
+                }),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: IconButton.filledTonal(
+                  key: const Key('library-new-playlist'),
+                  tooltip: 'New playlist',
+                  icon: const Icon(Icons.add_rounded),
+                  onPressed: () => createPlaylistFlow(context, ref),
+                ),
+              ),
             ],
-          ),
-        ),
-        body: const Column(
+          );
+
+    return PopScope(
+      canPop: !selecting,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _selection.clear();
+      },
+      child: Scaffold(
+        appBar: appBar,
+        floatingActionButton: _view == LibraryView.playlists && !selecting
+            ? FloatingActionButton.extended(
+                heroTag: 'library-new-playlist-fab',
+                onPressed: () => createPlaylistFlow(context, ref),
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('New playlist'),
+              )
+            : null,
+        body: Column(
           children: [
-            OfflineBanner(),
+            const OfflineBanner(),
+            if (_searching)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: SearchBar(
+                  key: const Key('library-search-field'),
+                  controller: _searchController,
+                  autoFocus: true,
+                  hintText: 'Search in ${libraryViewLabel(_view) == 'All' ? 'your library' : libraryViewLabel(_view).toLowerCase()}',
+                  leading: const Icon(Icons.search_rounded),
+                  elevation: const WidgetStatePropertyAll(0),
+                  trailing: [
+                    if (_searchController.text.isNotEmpty)
+                      IconButton(
+                        tooltip: 'Clear',
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: _searchController.clear,
+                      ),
+                  ],
+                ),
+              ),
+            _Chips(current: _view, onSelected: showView),
             Expanded(
-              child: TabBarView(
+              child: IndexedStack(
+                index: _view.index,
                 children: [
-                  RepaintBoundary(child: _LikedTab()),
-                  RepaintBoundary(child: _SongsTab()),
-                  RepaintBoundary(child: _AlbumsTab()),
-                  RepaintBoundary(child: _ArtistsTab()),
+                  for (final v in LibraryView.values)
+                    _visited.contains(v)
+                        ? RepaintBoundary(child: _viewFor(v))
+                        : const SizedBox.shrink(),
                 ],
               ),
             ),
@@ -156,778 +216,518 @@ class LibraryScreen extends ConsumerWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-
-class _SongsTab extends ConsumerStatefulWidget {
-  const _SongsTab();
+class _Chips extends StatelessWidget {
+  final LibraryView current;
+  final ValueChanged<LibraryView> onSelected;
+  const _Chips({required this.current, required this.onSelected});
 
   @override
-  ConsumerState<_SongsTab> createState() => _SongsTabState();
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 48,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+        children: [
+          for (final v in LibraryView.values) ...[
+            ChoiceChip(
+              key: Key('library-chip-${v.name}'),
+              label: Text(libraryViewLabel(v)),
+              selected: v == current,
+              showCheckmark: true,
+              onSelected: (_) => onSelected(v),
+            ),
+            const SizedBox(width: 8),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
-class _SongsTabState extends ConsumerState<_SongsTab>
-    with AutomaticKeepAliveClientMixin {
-  @override
-  bool get wantKeepAlive => true;
+// ---------------------------------------------------------------------------
+// Wide (desktop)
 
-  void _showSortSheet(BuildContext context, _SongSort currentSort, bool currentAscending) {
+/// What the right pane shows.
+sealed class _Pane {
+  const _Pane();
+}
+
+class _ViewPane extends _Pane {
+  final LibraryView view;
+  const _ViewPane(this.view);
+  @override
+  bool operator ==(Object other) => other is _ViewPane && other.view == view;
+  @override
+  int get hashCode => view.hashCode;
+}
+
+class _LikedPane extends _Pane {
+  const _LikedPane();
+}
+
+class _DownloadedPane extends _Pane {
+  const _DownloadedPane();
+}
+
+class _RecentPane extends _Pane {
+  const _RecentPane();
+}
+
+class _PlaylistPane extends _Pane {
+  final Playlist playlist;
+  const _PlaylistPane(this.playlist);
+}
+
+class _WideLibrary extends ConsumerStatefulWidget {
+  const _WideLibrary();
+
+  @override
+  ConsumerState<_WideLibrary> createState() => _WideLibraryState();
+}
+
+class _WideLibraryState extends ConsumerState<_WideLibrary>
+    implements LibraryNavigator {
+  final _selection = SongSelection();
+  final _searchController = TextEditingController();
+  late _Pane _pane = _ViewPane(
+      libraryViewFromName(ref.read(preferencesNotifierProvider).libraryView));
+
+  @override
+  void initState() {
+    super.initState();
+    _selection.addListener(_changed);
+    _searchController.addListener(_changed);
+  }
+
+  void _changed() => setState(() {});
+
+  @override
+  void dispose() {
+    _selection.removeListener(_changed);
+    _selection.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _show(_Pane pane) {
+    _selection.clear();
+    setState(() => _pane = pane);
+  }
+
+  @override
+  void showView(LibraryView view) {
+    _show(_ViewPane(view));
+    final prefs = ref.read(preferencesNotifierProvider);
+    ref
+        .read(preferencesNotifierProvider.notifier)
+        .update(prefs.copyWith(libraryView: view.name));
+  }
+
+  @override
+  void openPlaylist(Playlist playlist) => _show(_PlaylistPane(playlist));
+  @override
+  void openLiked() => _show(const _LikedPane());
+  @override
+  void openDownloaded() => _show(const _DownloadedPane());
+  @override
+  void openRecentlyAdded() => _show(const _RecentPane());
+  @override
+  void openAlbum(Album album) => _push(context, AlbumDetailScreen(album: album));
+  @override
+  void openArtist(Artist artist) =>
+      _push(context, ArtistDetailScreen(artist: artist));
+
+  Widget _content() {
+    final query = _searchController.text;
+    switch (_pane) {
+      case _ViewPane(:final view):
+        final list = switch (view) {
+          LibraryView.all => LibraryOverview(query: query, nav: this),
+          LibraryView.playlists =>
+            LibraryPlaylistsView(query: query, nav: this),
+          LibraryView.albums => LibraryAlbumsView(query: query, nav: this),
+          LibraryView.artists => LibraryArtistsView(query: query, nav: this),
+          LibraryView.songs =>
+            LibrarySongsView(query: query, selection: _selection),
+        };
+        final allSongs = ref.watch(allSongsProvider).valueOrNull ?? const [];
+        return Scaffold(
+          key: ValueKey(view),
+          appBar: _selection.active
+              ? SongSelectionAppBar(selection: _selection, songs: allSongs)
+                  as PreferredSizeWidget
+              : AppBar(
+                  automaticallyImplyLeading: false,
+                  toolbarHeight: AppTheme.pageTitleBarHeight,
+                  titleSpacing: 24,
+                  scrolledUnderElevation: 0,
+                  title: Text(
+                      view == LibraryView.all
+                          ? 'Library'
+                          : libraryViewLabel(view),
+                      style: AppTheme.pageTitleStyle(context)),
+                ),
+          body: list,
+        );
+      case _LikedPane():
+        return const LikedSongsScreen(key: ValueKey('liked'));
+      case _DownloadedPane():
+        return const DownloadedSongsScreen(key: ValueKey('downloaded'));
+      case _RecentPane():
+        return const RecentlyAddedScreen(key: ValueKey('recent'));
+      case _PlaylistPane(:final playlist):
+        return PlaylistDetailScreen(
+            key: ValueKey('playlist-${playlist.id}'), playlist: playlist);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (_) => SafeArea(
-        child: StatefulBuilder(
-          builder: (ctx, setSheetState) {
-            var sheetSort = currentSort;
-            var sheetAscending = currentAscending;
-            return Column(
-              mainAxisSize: MainAxisSize.min,
+    // A playlist deleted from its page (or elsewhere) leaves the pane.
+    ref.listen<AsyncValue<List<Playlist>>>(playlistsProvider, (_, next) {
+      final pane = _pane;
+      final list = next.valueOrNull;
+      if (pane is _PlaylistPane &&
+          list != null &&
+          !list.any((p) => p.id == pane.playlist.id)) {
+        _show(const _ViewPane(LibraryView.all));
+      }
+    });
+
+    return Scaffold(
+      body: Column(
+        children: [
+          const OfflineBanner(),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                  child: Text('Sort songs',
-                      style: Theme.of(context).textTheme.titleMedium),
-                ),
-                for (final option in _SongSort.values)
-                  ListTile(
-                    leading: Icon(
-                      _songSortIcon(option),
-                      color: sheetSort == option ? scheme.primary : null,
+                SizedBox(
+                  width: 288,
+                  child: Material(
+                    color: scheme.surfaceContainerLow,
+                    child: _Sidebar(
+                      pane: _pane,
+                      searchController: _searchController,
+                      onPane: (p) => p is _ViewPane ? showView(p.view) : _show(p),
                     ),
-                    title: Text(_songSortLabel(option)),
-                    trailing: sheetSort == option
-                        ? Icon(
-                            sheetAscending
-                                ? Icons.arrow_upward_rounded
-                                : Icons.arrow_downward_rounded,
-                            color: scheme.primary,
-                            size: 20,
-                          )
-                        : null,
-                    onTap: () {
-                      if (sheetSort == option) {
-                        sheetAscending = !sheetAscending;
-                      } else {
-                        sheetSort = option;
-                        sheetAscending = true;
-                      }
-                      ref.read(preferencesNotifierProvider.notifier).update(
-                        ref.read(preferencesNotifierProvider).copyWith(
-                          librarySongSort: sheetSort.name,
-                          librarySongAscending: sheetAscending,
-                        ),
-                      );
-                      Navigator.pop(context);
-                    },
                   ),
-                const SizedBox(height: 8),
+                ),
+                Expanded(
+                  child: SongDragScope(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 180),
+                      child: _content(),
+                    ),
+                  ),
+                ),
               ],
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context); // required by AutomaticKeepAliveClientMixin
-
-    final (sortName, ascending) = ref.watch(
-      preferencesNotifierProvider.select(
-        (p) => (p.librarySongSort, p.librarySongAscending),
-      ),
-    );
-    final sort = _SongSort.values.firstWhere(
-      (s) => s.name == sortName,
-      orElse: () => _SongSort.name,
-    );
-
-    final songsAsync = ref.watch(allSongsProvider);
-
-    return songsAsync.when(
-      // Keep the existing list visible during reload (e.g. after delete) so
-      // the loading spinner never replaces the list and the scroll position
-      // is preserved.
-      skipLoadingOnReload: true,
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => ErrorNotice(
-        title: "Couldn't load songs",
-        error: e,
-        onRetry: () => ref.invalidate(allSongsProvider),
-      ),
-      data: (rawSongs) {
-        // The list is the local cache; when the server refresh failed, say
-        // so rather than presenting a stale (or empty) list as the library.
-        // The offline banner already covers the device-offline case.
-        final syncError = ref.watch(librarySyncErrorProvider);
-        final online = ref.watch(isOnlineProvider).valueOrNull ?? true;
-        final staleNotice = syncError != null && online
-            ? ErrorNotice(
-                title: rawSongs.isEmpty
-                    ? "Couldn't load your library from the server"
-                    : "Couldn't refresh from the server — showing saved songs",
-                error: syncError,
-                compact: rawSongs.isNotEmpty,
-                onRetry: () => ref.invalidate(allSongsProvider),
-              )
-            : null;
-        if (rawSongs.isEmpty) {
-          return staleNotice ?? const Center(child: Text('No songs found'));
-        }
-        final downloadedIds = ref.watch(downloadedSongIdsProvider);
-        final songs = _applySongSort(rawSongs, sort, ascending, downloadedIds);
-        return CustomScrollView(
-          slivers: [
-            if (staleNotice != null) SliverToBoxAdapter(child: staleNotice),
-            SliverToBoxAdapter(
-              child: _SortBar(
-                count: '${songs.length} songs',
-                label: _songSortLabel(sort),
-                ascending: ascending,
-                onPressed: () => _showSortSheet(context, sort, ascending),
-              ),
             ),
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (_, i) => RepaintBoundary(
-                  child: SongTile(
-                    song: songs[i],
-                    showAlbum: true,
-                    onTap: () => ref
-                        .read(audioHandlerNotifierProvider)
-                        ?.loadQueue(songs, startIndex: i),
-                  ),
-                ),
-                childCount: songs.length,
-              ),
-            ),
-            // Clear the shell's mini player + dock at the end of the list.
-            SliverPadding(
-              padding: EdgeInsets.only(
-                  bottom: MediaQuery.paddingOf(context).bottom + 16),
-            ),
-          ],
-        );
-      },
+          ),
+        ],
+      ),
     );
   }
 }
 
-// ---------------------------------------------------------------------------
-
-class _AlbumsTab extends ConsumerStatefulWidget {
-  const _AlbumsTab();
-
-  @override
-  ConsumerState<_AlbumsTab> createState() => _AlbumsTabState();
-}
-
-class _AlbumsTabState extends ConsumerState<_AlbumsTab>
-    with AutomaticKeepAliveClientMixin {
-  @override
-  bool get wantKeepAlive => true;
-
-  void _showSortSheet(BuildContext context, _AlbumSort currentSort, bool currentAscending) {
-    final scheme = Theme.of(context).colorScheme;
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (_) => SafeArea(
-        child: StatefulBuilder(
-          builder: (ctx, setSheetState) {
-            var sheetSort = currentSort;
-            var sheetAscending = currentAscending;
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                  child: Text('Sort albums',
-                      style: Theme.of(context).textTheme.titleMedium),
-                ),
-                for (final option in _AlbumSort.values)
-                  ListTile(
-                    leading: Icon(
-                      _albumSortIcon(option),
-                      color: sheetSort == option ? scheme.primary : null,
-                    ),
-                    title: Text(_albumSortLabel(option)),
-                    trailing: sheetSort == option
-                        ? Icon(
-                            sheetAscending
-                                ? Icons.arrow_upward_rounded
-                                : Icons.arrow_downward_rounded,
-                            color: scheme.primary,
-                            size: 20,
-                          )
-                        : null,
-                    onTap: () {
-                      if (sheetSort == option) {
-                        sheetAscending = !sheetAscending;
-                      } else {
-                        sheetSort = option;
-                        sheetAscending = true;
-                      }
-                      ref.read(preferencesNotifierProvider.notifier).update(
-                        ref.read(preferencesNotifierProvider).copyWith(
-                          libraryAlbumSort: sheetSort.name,
-                          libraryAlbumAscending: sheetAscending,
-                        ),
-                      );
-                      Navigator.pop(context);
-                    },
-                  ),
-                const SizedBox(height: 8),
-              ],
-            );
-          },
-        ),
-      ),
-    );
-  }
+class _Sidebar extends ConsumerWidget {
+  final _Pane pane;
+  final TextEditingController searchController;
+  final ValueChanged<_Pane> onPane;
+  const _Sidebar(
+      {required this.pane,
+      required this.searchController,
+      required this.onPane});
 
   @override
-  Widget build(BuildContext context) {
-    super.build(context);
-
-    final (sortName, ascending) = ref.watch(
-      preferencesNotifierProvider.select(
-        (p) => (p.libraryAlbumSort, p.libraryAlbumAscending),
-      ),
-    );
-    final sort = _AlbumSort.values.firstWhere(
-      (s) => s.name == sortName,
-      orElse: () => _AlbumSort.name,
-    );
-
-    final albumsAsync = ref.watch(allAlbumsProvider);
-
-    return albumsAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => ErrorNotice(
-        title: "Couldn't load albums",
-        error: e,
-        onRetry: () => ref.invalidate(allAlbumsProvider),
-      ),
-      data: (rawAlbums) {
-        if (rawAlbums.isEmpty) return const Center(child: Text('No albums'));
-        final albums = _applyAlbumSort(rawAlbums, sort, ascending);
-        return CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: _SortBar(
-                count: '${albums.length} albums',
-                label: _albumSortLabel(sort),
-                ascending: ascending,
-                onPressed: () => _showSortSheet(context, sort, ascending),
-              ),
-            ),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              // Square covers plus room for a two-line album name, so long
-              // names wrap instead of being cut to one line. Sized from the
-              // text scale so large system fonts don't overflow the tile.
-              sliver: SliverLayoutBuilder(builder: (context, constraints) {
-              final tileWidth = (constraints.crossAxisExtent - 8) / 2;
-              final tileExtent = AlbumGridTile.extent(context, tileWidth);
-              return SliverGrid(
-                delegate: SliverChildBuilderDelegate(
-                  (_, i) {
-                    final album = albums[i];
-                    return RepaintBoundary(
-                      child: AlbumGridTile(
-                        coverArtId: album.coverArt,
-                        title: album.name,
-                        subtitle: album.year != null
-                            ? '${album.artist} · ${album.year}'
-                            : album.artist,
-                        caption:
-                            '${album.songCount} ${album.songCount == 1 ? 'song' : 'songs'}',
-                        onTap: () =>
-                            Navigator.of(context, rootNavigator: true).push(
-                          MaterialPageRoute(
-                            builder: (_) => AlbumDetailScreen(album: album),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                  childCount: albums.length,
-                ),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisExtent: tileExtent,
-                  crossAxisSpacing: 8,
-                  mainAxisSpacing: 8,
-                ),
-              );
-              }),
-            ),
-            // Clear the shell's mini player + dock at the end of the list.
-            SliverPadding(
-              padding: EdgeInsets.only(
-                  bottom: MediaQuery.paddingOf(context).bottom + 16),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-
-// ---------------------------------------------------------------------------
-// Artist sorting
-
-enum _ArtistSort { name, albumCount }
-
-String _artistSortLabel(_ArtistSort s) => switch (s) {
-      _ArtistSort.name => 'Name',
-      _ArtistSort.albumCount => 'Album count',
-    };
-
-IconData _artistSortIcon(_ArtistSort s) => switch (s) {
-      _ArtistSort.name => Icons.sort_by_alpha_rounded,
-      _ArtistSort.albumCount => Icons.album_rounded,
-    };
-
-// ---------------------------------------------------------------------------
-
-class _ArtistsTab extends ConsumerStatefulWidget {
-  const _ArtistsTab();
-
-  @override
-  ConsumerState<_ArtistsTab> createState() => _ArtistsTabState();
-}
-
-class _ArtistsTabState extends ConsumerState<_ArtistsTab>
-    with AutomaticKeepAliveClientMixin {
-  @override
-  bool get wantKeepAlive => true;
-
-  void _showSortSheet(BuildContext context, _ArtistSort currentSort, bool currentAscending) {
-    final scheme = Theme.of(context).colorScheme;
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (_) => SafeArea(
-        child: StatefulBuilder(
-          builder: (ctx, setSheetState) {
-            var sheetSort = currentSort;
-            var sheetAscending = currentAscending;
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                  child: Text('Sort artists',
-                      style: Theme.of(context).textTheme.titleMedium),
-                ),
-                for (final option in _ArtistSort.values)
-                  ListTile(
-                    leading: Icon(
-                      _artistSortIcon(option),
-                      color: sheetSort == option ? scheme.primary : null,
-                    ),
-                    title: Text(_artistSortLabel(option)),
-                    trailing: sheetSort == option
-                        ? Icon(
-                            sheetAscending
-                                ? Icons.arrow_upward_rounded
-                                : Icons.arrow_downward_rounded,
-                            color: scheme.primary,
-                            size: 20,
-                          )
-                        : null,
-                    onTap: () {
-                      if (sheetSort == option) {
-                        sheetAscending = !sheetAscending;
-                      } else {
-                        sheetSort = option;
-                        sheetAscending = true;
-                      }
-                      ref.read(preferencesNotifierProvider.notifier).update(
-                        ref.read(preferencesNotifierProvider).copyWith(
-                          libraryArtistSort: sheetSort.name,
-                          libraryArtistAscending: sheetAscending,
-                        ),
-                      );
-                      Navigator.pop(context);
-                    },
-                  ),
-                const SizedBox(height: 8),
-              ],
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-
-    final (sortName, ascending) = ref.watch(
-      preferencesNotifierProvider.select(
-        (p) => (p.libraryArtistSort, p.libraryArtistAscending),
-      ),
-    );
-    final sort = _ArtistSort.values.firstWhere(
-      (s) => s.name == sortName,
-      orElse: () => _ArtistSort.name,
-    );
-
-    final artistsAsync = ref.watch(allArtistsProvider);
-    return artistsAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => ErrorNotice(
-        title: "Couldn't load artists",
-        error: e,
-        onRetry: () => ref.invalidate(allArtistsProvider),
-      ),
-      data: (rawArtists) {
-        if (rawArtists.isEmpty) return const Center(child: Text('No artists'));
-        final artists = rawArtists.toList();
-        switch (sort) {
-          case _ArtistSort.name:
-            artists.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-          case _ArtistSort.albumCount:
-            artists.sort((a, b) => b.albumCount.compareTo(a.albumCount));
-        }
-        if (!ascending) artists.setRange(0, artists.length, artists.reversed.toList());
-        final scheme = Theme.of(context).colorScheme;
-        return CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: _SortBar(
-                count: '${artists.length} artists',
-                label: _artistSortLabel(sort),
-                ascending: ascending,
-                onPressed: () => _showSortSheet(context, sort, ascending),
-              ),
-            ),
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (_, i) {
-                  final artist = artists[i];
-                  return RepaintBoundary(
-                    child: ListTile(
-                      leading: CoverArtImage(
-                        coverArtId: artist.coverArt,
-                        size: 48,
-                        borderRadius: 24,
-                      ),
-                      title: Text(artist.name),
-                      subtitle: Text(
-                        '${artist.albumCount} ${artist.albumCount == 1 ? 'album' : 'albums'}',
-                        style: TextStyle(color: scheme.onSurfaceVariant),
-                      ),
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              ArtistDetailScreen(artist: artist),
-                        ),
-                      ),
-                    ),
-                  );
-                },
-                childCount: artists.length,
-              ),
-            ),
-            // Clear the shell's mini player + dock at the end of the list.
-            SliverPadding(
-              padding: EdgeInsets.only(
-                  bottom: MediaQuery.paddingOf(context).bottom + 16),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-
-// ---------------------------------------------------------------------------
-// Liked
-
-class _LikedTab extends ConsumerStatefulWidget {
-  const _LikedTab();
-
-  @override
-  ConsumerState<_LikedTab> createState() => _LikedTabState();
-}
-
-class _LikedTabState extends ConsumerState<_LikedTab>
-    with AutomaticKeepAliveClientMixin {
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    final likedAsync = ref.watch(likedSongsProvider);
-    final pendingAsync = ref.watch(pendingLikesProvider);
-    final pending = pendingAsync.valueOrNull ?? const <PendingLike>[];
-    final handler = ref.read(audioHandlerNotifierProvider);
-    final pendingError = pendingAsync.hasError
-        ? ErrorNotice(
-            title: "Couldn't read liked recommendations",
-            error: pendingAsync.error!,
-            compact: true,
-            onRetry: () => ref.invalidate(pendingLikesProvider),
-          )
-        : null;
-
-    return likedAsync.when(
-      skipLoadingOnReload: true,
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => ErrorNotice(
-        title: "Couldn't load liked songs",
-        error: e,
-        onRetry: () => ref.invalidate(allSongsProvider),
-      ),
-      data: (songs) {
-        if (songs.isEmpty && pending.isEmpty && pendingError == null) {
-          return const _LikedEmpty();
-        }
-        return CustomScrollView(
-          slivers: [
-            if (pendingError != null) SliverToBoxAdapter(child: pendingError),
-            if (songs.isNotEmpty)
-              SliverToBoxAdapter(
-                child: _LikedHeader(
-                  songs: songs,
-                  onPlay: () => handler?.loadQueue(songs),
-                ),
-              ),
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (_, i) => RepaintBoundary(
-                  child: SongTile(
-                    song: songs[i],
-                    showAlbum: true,
-                    onTap: () => handler?.loadQueue(songs, startIndex: i),
-                  ),
-                ),
-                childCount: songs.length,
-              ),
-            ),
-            if (pending.isNotEmpty) ...[
-              SliverToBoxAdapter(
-                child: SectionHeader('Waiting to be added',
-                    count: '${pending.length}'),
-              ),
-              SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (_, i) => _PendingLikeTile(like: pending[i]),
-                  childCount: pending.length,
-                ),
-              ),
-            ],
-            SliverPadding(
-              padding: EdgeInsets.only(
-                  bottom: MediaQuery.paddingOf(context).bottom + 16),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _LikedHeader extends StatelessWidget {
-  final List<Song> songs;
-  final VoidCallback onPlay;
-  const _LikedHeader({required this.songs, required this.onPlay});
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
-    final seconds = songs.fold<int>(0, (sum, s) => sum + (s.duration ?? 0));
-    final h = seconds ~/ 3600, m = (seconds % 3600) ~/ 60;
-    final length = h > 0 ? '$h h $m min' : '$m min';
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      child: Material(
-        color: scheme.secondaryContainer,
-        borderRadius: BorderRadius.circular(16),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onPlay,
+    final liked = ref.watch(likedSongsProvider).valueOrNull?.length;
+    final downloaded = ref.watch(downloadedSongIdsProvider).length;
+    final albums = ref.watch(allAlbumsProvider).valueOrNull?.length;
+    final artists = ref.watch(allArtistsProvider).valueOrNull?.length;
+    final songs = ref.watch(allSongsProvider).valueOrNull?.length;
+    final playlistsAsync = ref.watch(playlistsProvider);
+    final sortName =
+        ref.watch(preferencesNotifierProvider.select((p) => p.libraryPlaylistSort));
+    final sort = PlaylistSort.values.firstWhere((s) => s.name == sortName,
+        orElse: () => PlaylistSort.updated);
+
+    Widget nav(_Pane target, IconData icon, String label, int? count,
+        {Key? key}) {
+      final selected = target.runtimeType == pane.runtimeType &&
+          (target is! _ViewPane || target == pane);
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 1),
+        child: Material(
+          color: selected ? scheme.secondaryContainer : Colors.transparent,
+          shape: const StadiumBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            key: key,
+            onTap: () => onPane(target),
+            child: SizedBox(
+              height: 44,
+              child: Row(
+                children: [
+                  const SizedBox(width: 16),
+                  Icon(icon,
+                      size: 20,
+                      color: selected
+                          ? scheme.onSecondaryContainer
+                          : scheme.onSurfaceVariant),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(label,
+                        style: text.labelLarge?.copyWith(
+                            color: selected
+                                ? scheme.onSecondaryContainer
+                                : scheme.onSurface)),
+                  ),
+                  if (count != null)
+                    Text('$count',
+                        style: text.labelMedium
+                            ?.copyWith(color: scheme.onSurfaceVariant)),
+                  const SizedBox(width: 16),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.fromLTRB(24, 16, 12, 8),
             child: Row(
               children: [
-                Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    color: scheme.primary,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(Icons.play_arrow_rounded,
-                      size: 32, color: scheme.onPrimary),
-                ),
-                const SizedBox(width: 16),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Liked songs',
-                          style: text.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: scheme.onSecondaryContainer)),
-                      Text(
-                          '${songs.length} song${songs.length == 1 ? '' : 's'} · $length',
-                          style: text.bodyMedium?.copyWith(
-                              color: scheme.onSecondaryContainer
-                                  .withValues(alpha: 0.8))),
-                    ],
-                  ),
+                  child: Text('Library', style: AppTheme.pageTitleStyle(context)),
+                ),
+                IconButton.filledTonal(
+                  key: const Key('library-new-playlist'),
+                  tooltip: 'New playlist',
+                  icon: const Icon(Icons.add_rounded),
+                  onPressed: () async {
+                    final p = await createPlaylistFlow(context, ref);
+                    if (p != null) onPane(_PlaylistPane(p));
+                  },
                 ),
               ],
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _LikedEmpty extends StatelessWidget {
-  const _LikedEmpty();
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final text = Theme.of(context).textTheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.favorite_border_rounded,
-                size: 48, color: scheme.onSurfaceVariant),
-            const SizedBox(height: 12),
-            Text('No liked songs yet', style: text.titleMedium),
-            const SizedBox(height: 4),
-            Text(
-              'Tap the heart on Now Playing or in a song\'s menu. Likes sync '
-              'with your Navidrome server.',
-              textAlign: TextAlign.center,
-              style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: SearchBar(
+              key: const Key('library-search-field'),
+              controller: searchController,
+              hintText: 'Search your library',
+              leading: const Icon(Icons.search_rounded),
+              elevation: const WidgetStatePropertyAll(0),
+              constraints: const BoxConstraints(minHeight: 44),
+              onTap: () {
+                // Searching a collection page isn't supported; jump to the
+                // overview, which searches everything.
+                if (pane is! _ViewPane) {
+                  onPane(const _ViewPane(LibraryView.all));
+                }
+              },
+            ),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Column(
+            children: [
+              nav(const _ViewPane(LibraryView.all), Icons.dashboard_rounded,
+                  'Overview', null),
+              nav(const _LikedPane(), Icons.favorite_rounded, 'Liked songs',
+                  liked),
+              nav(const _DownloadedPane(), Icons.download_done_rounded,
+                  'Downloaded', downloaded),
+              nav(const _RecentPane(), Icons.history_rounded,
+                  'Recently added', null),
+              nav(const _ViewPane(LibraryView.albums), Icons.album_rounded,
+                  'Albums', albums),
+              nav(const _ViewPane(LibraryView.artists), Icons.person_rounded,
+                  'Artists', artists),
+              nav(const _ViewPane(LibraryView.songs), Icons.music_note_rounded,
+                  'Songs', songs),
+            ],
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(28, 16, 12, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: () => onPane(const _ViewPane(LibraryView.playlists)),
+                    child: Text('Playlists',
+                        style: text.labelLarge?.copyWith(
+                            color: scheme.primary,
+                            fontWeight: FontWeight.w700)),
+                  ),
+                ),
+                PopupMenuButton<PlaylistSort>(
+                  tooltip: 'Sort playlists',
+                  icon: Icon(Icons.sort_rounded,
+                      size: 20, color: scheme.onSurfaceVariant),
+                  initialValue: sort,
+                  onSelected: (s) {
+                    final prefs = ref.read(preferencesNotifierProvider);
+                    ref
+                        .read(preferencesNotifierProvider.notifier)
+                        .update(prefs.copyWith(libraryPlaylistSort: s.name));
+                  },
+                  itemBuilder: (_) => [
+                    for (final s in PlaylistSort.values)
+                      PopupMenuItem(value: s, child: Text(playlistSortLabel(s))),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        ...playlistsAsync.when(
+          skipLoadingOnReload: true,
+          loading: () => const [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Center(child: CircularProgressIndicator()),
+              ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-/// A liked Deezer track that isn't in the library yet (the companion add is
-/// still running, failed, or there is no companion). Tap to preview; Add
-/// retries the server download.
-class _PendingLikeTile extends ConsumerStatefulWidget {
-  final PendingLike like;
-  const _PendingLikeTile({required this.like});
-
-  @override
-  ConsumerState<_PendingLikeTile> createState() => _PendingLikeTileState();
-}
-
-class _PendingLikeTileState extends ConsumerState<_PendingLikeTile>
-    with DownloadPollingMixin {
-  @override
-  Widget build(BuildContext context) {
-    final like = widget.like;
-    final scheme = Theme.of(context).colorScheme;
-    final canAdd = ref.watch(companionClientProvider) != null;
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-      leading: CoverArtImage(
-          coverArtId: null, externalUrl: like.coverUrl, size: 48),
-      title: Text(like.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text('${like.artist} · preview',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: scheme.onSurfaceVariant)),
-      onTap: like.previewUrl == null
-          ? null
-          : () => ref.read(audioHandlerNotifierProvider)?.loadQueue([
-                Song.fromRecommendation(
-                  deezerId: like.deezerId,
-                  title: like.title,
-                  artist: like.artist,
-                  album: like.album,
-                  durationSeconds: like.duration ?? 0,
-                  previewUrl: like.previewUrl,
-                  coverUrl: like.coverUrl,
-                ),
-              ]),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (canAdd)
-            TextButton(
-              onPressed: () => addDeezerTrackToServer(like.deezerId),
-              child: const Text('Add'),
+          error: (e, _) => [
+            SliverToBoxAdapter(
+              child: ListTile(
+                leading: Icon(Icons.error_outline_rounded, color: scheme.error),
+                title: const Text("Couldn't load playlists"),
+                subtitle: Text(describeError(e)),
+                onTap: () => ref.invalidate(playlistsProvider),
+              ),
             ),
-          IconButton(
-            tooltip: 'Unlike',
-            icon: Icon(Icons.favorite_rounded, color: scheme.primary),
-            onPressed: () => ref
-                .read(likesProvider.notifier)
-                .unlikeRecommendation(like.deezerId),
-          ),
-        ],
-      ),
+          ],
+          data: (all) {
+            final list = sortPlaylists(all, sort);
+            if (list.isEmpty) {
+              return [
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(28, 4, 16, 8),
+                    child: Text('No playlists yet',
+                        style: text.bodyMedium
+                            ?.copyWith(color: scheme.onSurfaceVariant)),
+                  ),
+                ),
+              ];
+            }
+            return [
+              SliverList.builder(
+                itemCount: list.length,
+                itemBuilder: (_, i) => _SidebarPlaylist(
+                  playlist: list[i],
+                  selected:
+                      pane is _PlaylistPane &&
+                          (pane as _PlaylistPane).playlist.id == list[i].id,
+                  onTap: () => onPane(_PlaylistPane(list[i])),
+                ),
+              ),
+            ];
+          },
+        ),
+        const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
+      ],
     );
   }
 }
 
-/// "13 albums ......  ↑ Name" row at the top of each Library tab.
-class _SortBar extends StatelessWidget {
-  final String count;
-  final String label;
-  final bool ascending;
-  final VoidCallback onPressed;
-
-  const _SortBar({
-    required this.count,
-    required this.label,
-    required this.ascending,
-    required this.onPressed,
-  });
+/// A playlist in the sidebar. Songs dragged from the content pane can be
+/// dropped on it to add them.
+class _SidebarPlaylist extends ConsumerWidget {
+  final Playlist playlist;
+  final bool selected;
+  final VoidCallback onTap;
+  const _SidebarPlaylist(
+      {required this.playlist, required this.selected, required this.onTap});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
-      child: Row(
-        children: [
-          Text(count,
-              style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant)),
-          const Spacer(),
-          TextButton.icon(
-            onPressed: onPressed,
-            icon: Icon(
-              ascending
-                  ? Icons.arrow_upward_rounded
-                  : Icons.arrow_downward_rounded,
-              size: 18,
+    final user = ref.watch(currentUsernameProvider);
+    final editable = playlist.isEditableBy(user);
+
+    return DragTarget<SongDragData>(
+      onWillAcceptWithDetails: (_) => editable,
+      onAcceptWithDetails: (d) =>
+          addSongsToPlaylistFlow(context, ref, playlist, d.data.songs),
+      builder: (context, candidates, _) {
+        final hovering = candidates.isNotEmpty;
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 1),
+          child: Material(
+            color: selected
+                ? scheme.surfaceContainerHighest
+                : hovering
+                    ? scheme.primaryContainer
+                    : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              key: ValueKey('sidebar-playlist-${playlist.id}'),
+              onTap: onTap,
+              onSecondaryTap: () => showPlaylistMenu(context, ref, playlist),
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: Row(
+                  children: [
+                    PlaylistCover(playlist: playlist, size: 40),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(playlist.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: text.bodyMedium
+                                  ?.copyWith(fontWeight: FontWeight.w500)),
+                          Text(
+                            hovering
+                                ? 'Drop to add'
+                                : !editable
+                                    ? (playlist.readonly
+                                        ? 'Smart playlist'
+                                        : 'By ${playlist.owner}')
+                                    : songCount(playlist.songCount),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: text.bodySmall
+                                ?.copyWith(color: scheme.onSurfaceVariant),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (!editable)
+                      Icon(Icons.lock_outline_rounded,
+                          size: 16, color: scheme.onSurfaceVariant),
+                  ],
+                ),
+              ),
             ),
-            label: Text(label),
-            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

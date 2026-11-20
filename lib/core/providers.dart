@@ -1179,18 +1179,15 @@ final playlistCacheProvider = Provider<PlaylistCache>((_) => PlaylistCache());
 final currentUsernameProvider = Provider<String?>(
     (ref) => ref.watch(serverConfigProvider).valueOrNull?.username);
 
-String? _playlistAccount(Ref ref) {
-  final config = ref.watch(serverConfigProvider).valueOrNull;
-  if (config == null) return null;
-  return playlistCacheAccount(config.serverUrl, config.username);
-}
+String _playlistAccount(SubsonicClient client) =>
+    playlistCacheAccount(client.config.serverUrl, client.config.username);
 
 /// The server's playlists. Saved for offline use on every successful load;
 /// offline, the saved list is shown (an error when nothing was saved yet).
 final playlistsProvider = FutureProvider<List<Playlist>>((ref) async {
   final client = ref.watch(subsonicClientProvider);
-  final account = _playlistAccount(ref);
-  if (client == null || account == null) return const [];
+  if (client == null) return const [];
+  final account = _playlistAccount(client);
   final cache = ref.read(playlistCacheProvider);
   if (_deviceOffline(ref)) {
     final saved = await cache.playlists(account);
@@ -1209,8 +1206,8 @@ final playlistsProvider = FutureProvider<List<Playlist>>((ref) async {
 final playlistSongsProvider =
     FutureProvider.family<List<Song>, String>((ref, playlistId) async {
   final client = ref.watch(subsonicClientProvider);
-  final account = _playlistAccount(ref);
-  if (client == null || account == null) return [];
+  if (client == null) return [];
+  final account = _playlistAccount(client);
   final cache = ref.read(playlistCacheProvider);
   if (_deviceOffline(ref)) {
     final ids = await cache.songIds(account, playlistId);

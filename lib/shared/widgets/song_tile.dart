@@ -6,6 +6,7 @@ import '../../core/providers.dart';
 import '../utils/snack.dart';
 import '../utils/song_actions.dart';
 import 'cover_art_image.dart';
+import 'song_drag.dart';
 import '../../features/playlists/add_to_playlist_sheet.dart';
 
 /// An extra entry in a song's ⋮ sheet, e.g. "Remove from this playlist".
@@ -81,7 +82,7 @@ class SongTile extends ConsumerWidget {
             localPath: song.localPath,
             songId: song.id,
             size: 48);
-    return ListTile(
+    final tile = ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
       selected: selected ?? false,
       selectedTileColor: scheme.secondaryContainer.withValues(alpha: 0.6),
@@ -162,6 +163,17 @@ class SongTile extends ConsumerWidget {
                 ],
               ),
       onTap: onTap,
+    );
+    // Desktop Library: drag a song onto a playlist in the sidebar.
+    if (selecting || song.isExternal || !SongDragScope.enabled(context)) {
+      return tile;
+    }
+    return Draggable<SongDragData>(
+      data: SongDragData([song]),
+      dragAnchorStrategy: pointerDragAnchorStrategy,
+      feedback: SongDragFeedback(songs: [song]),
+      childWhenDragging: Opacity(opacity: 0.5, child: tile),
+      child: tile,
     );
   }
 }

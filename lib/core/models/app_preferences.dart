@@ -20,6 +20,12 @@ class AppPreferences {
   final bool libraryAlbumAscending;
   final String libraryArtistSort; // 'name' | 'albumCount'
   final bool libraryArtistAscending;
+  /// Library chip shown when the tab opens: 'all' | 'playlists' | 'albums'
+  /// | 'artists' | 'songs'.
+  final String libraryView;
+  final String libraryPlaylistSort; // 'updated' | 'name' | 'songCount'
+  final bool libraryAlbumsGrid; // false = list
+  final bool libraryPlaylistsGrid; // false = list
   final bool
       floatingNavBar; // true = floating pill dock, false = classic nav bar
   final String themeMode; // 'dark' | 'light' | 'system'
@@ -42,6 +48,10 @@ class AppPreferences {
     this.libraryAlbumAscending = true,
     this.libraryArtistSort = 'name',
     this.libraryArtistAscending = true,
+    this.libraryView = 'all',
+    this.libraryPlaylistSort = 'updated',
+    this.libraryAlbumsGrid = true,
+    this.libraryPlaylistsGrid = false,
     this.floatingNavBar = true,
     this.themeMode = 'dark',
     this.shuffleMode = 'off',
@@ -66,6 +76,10 @@ class AppPreferences {
     bool? libraryAlbumAscending,
     String? libraryArtistSort,
     bool? libraryArtistAscending,
+    String? libraryView,
+    String? libraryPlaylistSort,
+    bool? libraryAlbumsGrid,
+    bool? libraryPlaylistsGrid,
     bool? floatingNavBar,
     String? themeMode,
     String? shuffleMode,
@@ -87,6 +101,10 @@ class AppPreferences {
         libraryArtistSort: libraryArtistSort ?? this.libraryArtistSort,
         libraryArtistAscending:
             libraryArtistAscending ?? this.libraryArtistAscending,
+        libraryView: libraryView ?? this.libraryView,
+        libraryPlaylistSort: libraryPlaylistSort ?? this.libraryPlaylistSort,
+        libraryAlbumsGrid: libraryAlbumsGrid ?? this.libraryAlbumsGrid,
+        libraryPlaylistsGrid: libraryPlaylistsGrid ?? this.libraryPlaylistsGrid,
         floatingNavBar: floatingNavBar ?? this.floatingNavBar,
         themeMode: themeMode ?? this.themeMode,
         shuffleMode: shuffleMode ?? this.shuffleMode,
@@ -114,6 +132,10 @@ class AppPreferences {
         libraryAlbumAscending: _bool(j['libraryAlbumAscending'], true),
         libraryArtistSort: _str(j['libraryArtistSort'], 'name'),
         libraryArtistAscending: _bool(j['libraryArtistAscending'], true),
+        libraryView: _str(j['libraryView'], 'all'),
+        libraryPlaylistSort: _str(j['libraryPlaylistSort'], 'updated'),
+        libraryAlbumsGrid: _bool(j['libraryAlbumsGrid'], true),
+        libraryPlaylistsGrid: _bool(j['libraryPlaylistsGrid'], false),
         floatingNavBar: _bool(j['floatingNavBar'], true),
         themeMode: _str(j['themeMode'], 'dark'),
         shuffleMode: _str(j['shuffleMode'], 'off'),
@@ -134,6 +156,10 @@ class AppPreferences {
         'libraryAlbumAscending': libraryAlbumAscending,
         'libraryArtistSort': libraryArtistSort,
         'libraryArtistAscending': libraryArtistAscending,
+        'libraryView': libraryView,
+        'libraryPlaylistSort': libraryPlaylistSort,
+        'libraryAlbumsGrid': libraryAlbumsGrid,
+        'libraryPlaylistsGrid': libraryPlaylistsGrid,
         'floatingNavBar': floatingNavBar,
         'themeMode': themeMode,
         'shuffleMode': shuffleMode,
