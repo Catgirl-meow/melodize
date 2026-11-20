@@ -8,6 +8,7 @@ import 'dart:math' as math;
 
 import '../models/recommended_track.dart';
 import '../utils/title_normalize.dart';
+import 'artist_credit.dart';
 
 /// One play from the history. [skipped] is true when the song was left in
 /// the first 30 seconds.
@@ -193,21 +194,36 @@ class TasteProfile {
     final aff = <String, double>{};
     final names = <String, String>{};
     final genreOf = <String, String>{};
-    void add(String artist, double v) {
-      final k = normalize(artist);
-      if (k.isEmpty) return;
-      names.putIfAbsent(k, () => artist);
-      aff[k] = (aff[k] ?? 0) + v;
+    // A credit with several artists ("A • B") counts for each of them:
+    // Deezer only knows single artists, so the joined name could never seed.
+    List<String> keysOf(String credit) => [
+          for (final a in splitArtistCredit(credit))
+            if (normalize(a).isNotEmpty) normalize(a)
+        ];
+    void add(String credit, double v) {
+      for (final a in splitArtistCredit(credit)) {
+        final k = normalize(a);
+        if (k.isEmpty) continue;
+        names.putIfAbsent(k, () => a);
+        aff[k] = (aff[k] ?? 0) + v;
+      }
     }
 
-    s.genreByArtist.forEach((a, g) => genreOf[normalize(a)] = g.toLowerCase());
+    s.genreByArtist.forEach((a, g) {
+      for (final k in keysOf(a)) {
+        genreOf[k] = g.toLowerCase();
+      }
+    });
 
     final likeCount = <String, int>{};
     for (final l in s.likes) {
       add(l.artist, w.like);
-      final k = normalize(l.artist);
-      likeCount[k] = (likeCount[k] ?? 0) + 1;
-      if (l.genre != null) genreOf.putIfAbsent(k, () => l.genre!.toLowerCase());
+      for (final k in keysOf(l.artist)) {
+        likeCount[k] = (likeCount[k] ?? 0) + 1;
+        if (l.genre != null) {
+          genreOf.putIfAbsent(k, () => l.genre!.toLowerCase());
+        }
+      }
     }
     s.serverPlaysByArtist.forEach((a, n) {
       if (n > 0) add(a, math.log(1 + n) / math.ln2);
@@ -220,16 +236,21 @@ class TasteProfile {
       final decay = math.pow(0.5, ageDays / w.halfLifeDays).toDouble();
       final skipped = w.useSkips && e.skipped;
       add(e.artist, decay * (skipped ? -w.skip : w.listen));
-      final k = normalize(e.artist);
-      if (e.genre != null) genreOf.putIfAbsent(k, () => e.genre!.toLowerCase());
-      if (!skipped && e.at.isAfter(weekAgo) && !recent.contains(k)) {
-        recent.add(k);
+      for (final k in keysOf(e.artist)) {
+        if (e.genre != null) {
+          genreOf.putIfAbsent(k, () => e.genre!.toLowerCase());
+        }
+        if (!skipped && e.at.isAfter(weekAgo) && !recent.contains(k)) {
+          recent.add(k);
+        }
       }
     }
     s.moreLikeThis.forEach((a, n) => add(a, w.moreLikeThis * n));
     s.dismissalsByArtist.forEach((a, n) => add(a, -w.dismissal * n));
     for (final a in s.dismissedArtists) {
-      aff[normalize(a)] = -1e6;
+      for (final k in keysOf(a)) {
+        aff[k] = -1e6;
+      }
     }
 
     final genreTotals = <String, double>{};
@@ -275,10 +296,12 @@ List<TasteSeed> pickSeeds(
   TasteProfile p,
   math.Random rng, {
   int count = 8,
+  Set<String> exclude = const {},
 }) {
   final picked = <String, TasteSeed>{};
   void take(String k, SeedReason r) {
     if (picked.length >= count || picked.containsKey(k)) return;
+    if (exclude.contains(k)) return;
     final a = p.affinity[k] ?? 0;
     if (a <= 0) return;
     picked[k] = TasteSeed(p.displayName[k] ?? k, r, a);
@@ -304,13 +327,17 @@ List<TasteSeed> pickSeeds(
 
   final positive = p.affinity.keys.where((k) => p.affinity[k]! > 0).toList();
   final quarter = math.max(1, count ~/ 4);
-  for (final k in weightedDraw(p.likedArtists, quarter)) {
+  final liked = p.likedArtists.where((k) => !exclude.contains(k)).toList();
+  final recent = p.recentArtists.where((k) => !exclude.contains(k));
+  for (final k in weightedDraw(liked, quarter)) {
     take(k, SeedReason.liked);
   }
-  for (final k in weightedDraw(p.recentArtists.take(12).toList(), quarter)) {
+  for (final k in weightedDraw(recent.take(12).toList(), quarter)) {
     take(k, SeedReason.recent);
   }
-  final rest = positive.where((k) => !picked.containsKey(k)).toList();
+  final rest = positive
+      .where((k) => !picked.containsKey(k) && !exclude.contains(k))
+      .toList();
   for (final k in weightedDraw(rest, count - picked.length)) {
     take(k, SeedReason.topArtist);
   }
@@ -524,10 +551,16 @@ class RecommendationResult {
   final List<ScoredTrack> tracks;
   final List<TasteSeed> seeds;
 
-  /// Seed artist → error, for radios that failed.
+  /// Seed artist → error, for radios that failed to load (network, quota).
+  /// Retrying can help, so the UI names them.
   final Map<String, Object> failedSeeds;
 
-  const RecommendationResult(this.tracks, this.seeds, this.failedSeeds);
+  /// Seed artists Deezer has no radio for. Each was replaced by the next
+  /// artist in line, so the list is not shorter; retrying would not help.
+  final List<String> unknownArtists;
+
+  const RecommendationResult(this.tracks, this.seeds, this.failedSeeds,
+      [this.unknownArtists = const []]);
 }
 
 /// Runs the whole model: profile → seeds → radios → ranking. [radio] fetches
@@ -535,6 +568,11 @@ class RecommendationResult {
 /// empty list, or "Deezer is down" would look like "no music"). Throws a
 /// [RecsFailure] when no list can be made; one failing seed only shows up in
 /// [RecommendationResult.failedSeeds].
+///
+/// A seed whose radio throws [NoDeezerRadio] (Deezer doesn't know the
+/// artist) is replaced by the next artist the profile would pick, so a few
+/// obscure artists in the history don't shorten every list. It is listed in
+/// [RecommendationResult.unknownArtists].
 ///
 /// [focusArtist] ("More like this") always seeds, first and at full weight,
 /// even for an artist never played; if its radio fails the whole call fails,
@@ -558,17 +596,37 @@ Future<RecommendationResult> recommend({
         .where((s) => normalize(s.artist) != focusKey),
   ];
   if (seeds.isEmpty) throw const NoTasteYet();
+  // Drawn only when a seed turns out unknown, so lists without one use the
+  // random stream exactly as before.
+  List<TasteSeed>? reserve;
 
   final failed = <String, Object>{};
+  final unknown = <String, NoDeezerRadio>{};
   final radios = <TasteSeed, List<RecommendedTrack>>{};
-  await Future.wait(seeds.map((seed) async {
+  final replacements = <TasteSeed>[];
+  Future<void> fetch(TasteSeed seed) async {
     try {
       radios[seed] = await radio(seed);
+    } on NoDeezerRadio catch (e) {
+      if (seed.reason == SeedReason.requested) {
+        failed[seed.artist] = e;
+        return;
+      }
+      unknown[seed.artist] = e;
+      final r = reserve ??= pickSeeds(profile, rng,
+          count: 8, exclude: {for (final s in seeds) normalize(s.artist)});
+      if (r.isNotEmpty) {
+        final next = r.removeAt(0);
+        replacements.add(next);
+        await fetch(next);
+      }
     } catch (e) {
       failed[seed.artist] = e;
     }
-  }));
-  if (failed.length == seeds.length) throw AllRadiosFailed(failed);
+  }
+
+  await Future.wait(seeds.map(fetch));
+  if (radios.isEmpty) throw AllRadiosFailed({...unknown, ...failed});
   if (focusArtist != null && failed.containsKey(focusArtist)) {
     throw FocusRadioFailed(focusArtist, failed[focusArtist]!);
   }
@@ -582,7 +640,11 @@ Future<RecommendationResult> recommend({
   final tracks =
       rankCandidates(radios, profile, signals, rng, w: weights, limit: limit);
   if (tracks.isEmpty) throw NothingNew(candidates);
-  return RecommendationResult(tracks, seeds, failed);
+  return RecommendationResult(
+      tracks,
+      [for (final s in [...seeds, ...replacements]) if (radios.containsKey(s)) s],
+      failed,
+      unknown.keys.toList());
 }
 
 /// Short reason label for a recommendation card.
