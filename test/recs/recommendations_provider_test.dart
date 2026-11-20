@@ -164,12 +164,47 @@ void main() {
     expect((r as RecsError).reason, contains('Nobody Knows'));
   });
 
-  test('an artist Deezer doesn\'t know is named, not dropped', () async {
+  test('an artist Deezer doesn\'t know is replaced, not reported as a '
+      'failure', () async {
+    // Retrying can't fix an artist Deezer doesn't have, so it must not put
+    // "couldn't load" under every list; the next artist takes its place.
     await play('Kaito Ren', 'Tokyo Rain');
     await play('Nobody Knows', 'Track');
     final c = await container(FakeDeezer(unknown: {'Nobody Knows'}));
     final r = await c.read(recommendationsProvider.future) as RecsReady;
-    expect(r.failedSeeds, ['Nobody Knows']);
+    expect(r.failedSeeds, isEmpty);
+    expect(r.songs, isNotEmpty);
+  });
+
+  test('a Navidrome credit "A • B" seeds A and B, not the joined name',
+      () async {
+    // The bug behind the permanent "couldn't load suggestions" note: the
+    // joined display artist was searched on Deezer and never found.
+    await play('qaraqshy • !Nxght • KIXIA', 'Track');
+    final deezer = FakeDeezer(unknown: {'qaraqshy • !Nxght • KIXIA'});
+    final c = await container(deezer);
+    final r = await c.read(recommendationsProvider.future) as RecsReady;
+    expect(r.failedSeeds, isEmpty);
+    expect(deezer.searched, isNot(contains('qaraqshy • !Nxght • KIXIA')));
+    expect(deezer.searched, containsAll(['qaraqshy', '!Nxght', 'KIXIA']));
+  });
+
+  test('"A, B" is tried whole first, then each part', () async {
+    await play('MC KAIQUE SP, merunes', 'Track');
+    final deezer = FakeDeezer(unknown: {'MC KAIQUE SP, merunes'});
+    final c = await container(deezer);
+    final r = await c.read(recommendationsProvider.future) as RecsReady;
+    expect(r.failedSeeds, isEmpty);
+    expect(deezer.searched.take(2), ['MC KAIQUE SP, merunes', 'MC KAIQUE SP']);
+  });
+
+  test('"Earth, Wind & Fire" stays one artist when Deezer knows it',
+      () async {
+    await play('Earth, Wind & Fire', 'September');
+    final deezer = FakeDeezer();
+    final c = await container(deezer);
+    await c.read(recommendationsProvider.future);
+    expect(deezer.searched, ['Earth, Wind & Fire']);
   });
 
   test('More like this builds around that artist and is remembered',

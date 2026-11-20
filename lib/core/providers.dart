@@ -51,6 +51,7 @@ import 'models/search_results.dart';
 import 'utils/title_normalize.dart';
 import 'library/local_search.dart';
 import 'likes/pending_like_match.dart';
+import 'recs/artist_credit.dart';
 import 'recs/taste_model.dart';
 
 // --- Database ---
@@ -876,13 +877,20 @@ final recommendationsProvider =
   }
 
   final signals = await loadTasteSignals(db);
+  // Keyed by each artist of a credit: seeds are single artists, while
+  // history rows can read "A • B".
+  Iterable<String> keysOf(String credit) =>
+      splitArtistCredit(credit).map(normalize);
   final titleOf = <String, String>{
-    for (final e in signals.history.reversed) normalize(e.artist): e.title,
-    for (final l in signals.likes) normalize(l.artist): l.title,
+    for (final e in signals.history.reversed)
+      for (final k in keysOf(e.artist)) k: e.title,
+    for (final l in signals.likes)
+      for (final k in keysOf(l.artist)) k: l.title,
     if (override != null) normalize(override.artist): override.title,
   };
   final genreOf = <String, String>{
-    for (final e in signals.genreByArtist.entries) normalize(e.key): e.value,
+    for (final e in signals.genreByArtist.entries)
+      for (final k in keysOf(e.key)) k: e.value,
     if (override?.genre != null) normalize(override!.artist): override.genre!,
   };
 
@@ -890,11 +898,17 @@ final recommendationsProvider =
   // radio" only if errors reach it.
   Future<List<RecommendedTrack>> radio(TasteSeed seed) async {
     final key = normalize(seed.artist);
-    final id = await deezer.searchBestArtist(
-      artistName: seed.artist,
-      trackTitle: titleOf[key],
-      genreHint: genreOf[key],
-    );
+    // "MC KAIQUE SP, merunes": the whole name first, then each part, since a
+    // comma or "&" can also belong to one artist's name.
+    int? id;
+    for (final name in artistLookupNames(seed.artist)) {
+      id = await deezer.searchBestArtist(
+        artistName: name,
+        trackTitle: titleOf[key],
+        genreHint: genreOf[key],
+      );
+      if (id != null) break;
+    }
     if (id == null) throw NoDeezerRadio(seed.artist);
     final tracks = await deezer.artistRadio(id, limit: 20);
     if (tracks.isEmpty) throw NoDeezerRadio(seed.artist);

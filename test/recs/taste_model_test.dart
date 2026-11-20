@@ -185,6 +185,21 @@ void main() {
     });
   });
 
+  test('a joined credit "A • B" gives affinity to A and to B', () {
+    final now = DateTime(2026, 11, 19);
+    final p = TasteProfile.build(
+        TasteSignals(history: [
+          ListenEvent(artist: 'qaraqshy • !Nxght • KIXIA', title: 'T', at: now),
+          ListenEvent(artist: 'Kaito Ren feat. Mio', title: 'T', at: now),
+        ]),
+        now: now);
+    expect(p.affinityOf('qaraqshy'), greaterThan(0));
+    expect(p.affinityOf('KIXIA'), greaterThan(0));
+    expect(p.affinityOf('Mio'), greaterThan(0));
+    expect(p.displayName.values,
+        isNot(contains('qaraqshy • !Nxght • KIXIA')));
+  });
+
   group('recommend() fails loudly', () {
     final now = DateTime(2026, 11, 19);
     final played = TasteSignals(history: [
@@ -229,6 +244,31 @@ void main() {
         expect(e.errors.keys, containsAll(['Kaito Ren', 'Orbit Theory']));
         expect(e.message, contains('HTTP 503'));
       }
+    });
+
+    test('an artist Deezer has no radio for is swapped for the next one',
+        () async {
+      final signals = TasteSignals(history: [
+        for (final a in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'])
+          ListenEvent(artist: a, title: 'T', at: now),
+      ]);
+      final asked = <String>[];
+      final r = await recommend(
+          signals: signals,
+          now: now,
+          radio: (seed) async {
+            asked.add(seed.artist);
+            if (seed.artist == 'A' || seed.artist == 'B') {
+              throw NoDeezerRadio(seed.artist);
+            }
+            return [for (var i = 0; i < 5; i++) _t('${seed.artist} $i', i)];
+          },
+          rng: math.Random(1));
+      expect(r.failedSeeds, isEmpty);
+      // Eight radios loaded: the two unknown seeds were replaced.
+      expect(r.seeds, hasLength(8));
+      expect(r.unknownArtists.toSet(),
+          {'A', 'B'}.intersection(asked.toSet()));
     });
 
     test('one radio failing: a list, with the failure reported', () async {
