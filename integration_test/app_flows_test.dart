@@ -23,8 +23,7 @@ void main() {
     final h = handlerOf(tester);
 
     // Library → Albums → album page → Play plays the album in track order.
-    await openTab(tester, 'Library');
-    await tapVisible(tester, find.text('Albums'));
+    await openLibraryView(tester, 'albums');
     await tapVisible(tester, find.text('Electro Album'));
     await tapVisible(tester, find.text('Play'));
     await pumpUntilTrue(tester, () => h.currentSong?.title == 'Electro 1',
@@ -37,7 +36,7 @@ void main() {
     await goBack(tester);
 
     // Library → Artists → artist page lists both of the artist's albums.
-    await tapVisible(tester, find.text('Artists'));
+    await openLibraryView(tester, 'artists');
     await tapVisible(tester, find.text('Test Artist'));
     await pumpUntil(tester, find.text('Rock Album'));
     expect(find.text('Electro Album'), findsWidgets);

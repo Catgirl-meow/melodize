@@ -456,8 +456,14 @@ class _Sidebar extends ConsumerWidget {
     final sort = PlaylistSort.values.firstWhere((s) => s.name == sortName,
         orElse: () => PlaylistSort.updated);
 
-    Widget nav(_Pane target, IconData icon, String label, int? count,
-        {Key? key}) {
+    Widget nav(_Pane target, IconData icon, String label, int? count) {
+      final key = Key('library-nav-${switch (target) {
+        _ViewPane(:final view) => view.name,
+        _LikedPane() => 'liked',
+        _DownloadedPane() => 'downloaded',
+        _RecentPane() => 'recent',
+        _PlaylistPane() => 'playlist',
+      }}');
       final selected = target.runtimeType == pane.runtimeType &&
           (target is! _ViewPane || target == pane);
       return Padding(
@@ -570,6 +576,7 @@ class _Sidebar extends ConsumerWidget {
               children: [
                 Expanded(
                   child: InkWell(
+                    key: const Key('library-nav-playlists'),
                     onTap: () => onPane(const _ViewPane(LibraryView.playlists)),
                     child: Text('Playlists',
                         style: text.labelLarge?.copyWith(

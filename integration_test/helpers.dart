@@ -232,3 +232,19 @@ Future<void> pauseIfPlaying(WidgetTester tester) async {
   if (h.player.playing) await h.pause();
   await tester.pump();
 }
+
+/// Switches Library to one of its views ('all', 'playlists', 'albums',
+/// 'artists', 'songs', or on desktop also 'liked', 'downloaded', 'recent').
+/// Phones show filter chips; wide windows (the Linux runner) a sidebar.
+Future<void> openLibraryView(WidgetTester tester, String name) async {
+  await openTab(tester, 'Library');
+  final chip = find.byKey(Key('library-chip-$name'));
+  final nav = find.byKey(Key('library-nav-$name'));
+  await pumpUntil(tester, find.byWidgetPredicate((w) =>
+      w.key == Key('library-chip-$name') || w.key == Key('library-nav-$name')));
+  await tapVisible(tester, chip.evaluate().isNotEmpty ? chip : nav);
+}
+
+/// True when Library shows its desktop sidebar.
+bool libraryIsWide() =>
+    find.byKey(const Key('library-nav-all')).evaluate().isNotEmpty;

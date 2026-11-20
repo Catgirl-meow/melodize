@@ -32,8 +32,7 @@ void main() {
     expect(find.byType(SetupScreen), findsNothing);
 
     // Library lists songs. Sorted by name, "Electro" is on the first screen.
-    await openTab(tester, 'Library');
-    await pumpUntil(tester, find.text('Songs'));
+    await openLibraryView(tester, 'songs');
     await pumpUntil(tester, find.textContaining('Electro'));
 
     // Play a song and skip through a few quickly.
