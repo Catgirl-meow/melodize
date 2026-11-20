@@ -130,7 +130,8 @@ class RecImpressions extends Table {
   Set<Column> get primaryKey => {trackKey};
 }
 
-/// "More like this" taps per artist (as written).
+/// "Song radio" starts per artist (as written); the table predates the
+/// feature and keeps its old name.
 class MoreLikeThisTaps extends Table {
   TextColumn get artist => text()();
   IntColumn get taps => integer().withDefault(const Constant(0))();

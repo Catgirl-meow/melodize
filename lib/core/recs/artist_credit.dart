@@ -40,7 +40,7 @@ List<String> artistLookupNames(String artist) {
     }
   }
 
-  // A joined credit can still arrive whole ("More like this" on a library
+  // A joined credit can still arrive whole (song radio on a library
   // track by "A • B"), so split that first.
   final credited = splitArtistCredit(artist);
   addAll(credited);
