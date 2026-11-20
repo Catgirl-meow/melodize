@@ -246,6 +246,69 @@ class SubsonicClient {
         .toList();
   }
 
+  /// One playlist's details (name, owner, counts) without its songs.
+  Future<Playlist> getPlaylist(String playlistId) async {
+    final resp = await _get('getPlaylist', {'id': playlistId});
+    final json = resp['playlist'];
+    if (json is! Map<String, dynamic>) {
+      throw const FormatException('The server sent no playlist');
+    }
+    return Playlist.fromSubsonicJson(json);
+  }
+
+  /// Creates a playlist holding [songIds] in order and returns it.
+  Future<Playlist> createPlaylist(String name,
+      {List<String> songIds = const []}) async {
+    final resp = await _get('createPlaylist', {
+      'name': name,
+      if (songIds.isNotEmpty) 'songId': songIds,
+    });
+    final json = resp['playlist'];
+    // Subsonic 1.14+ returns the new playlist; older servers return nothing,
+    // so look it up by name (newest first) rather than guessing.
+    if (json is Map<String, dynamic>) return Playlist.fromSubsonicJson(json);
+    final all = await getPlaylists();
+    final matches = all.where((p) => p.name == name).toList()
+      ..sort((a, b) => b.changed.compareTo(a.changed));
+    if (matches.isEmpty) {
+      throw StateError('The server did not return the new playlist');
+    }
+    return matches.first;
+  }
+
+  /// Replaces the whole song list of an existing playlist (used to reorder).
+  /// `createPlaylist` with a `playlistId` overwrites the songs in one
+  /// request; `updatePlaylist` can only append and remove.
+  Future<void> replacePlaylistSongs(
+      String playlistId, List<String> songIds) async {
+    await _get('createPlaylist', {
+      'playlistId': playlistId,
+      if (songIds.isNotEmpty) 'songId': songIds,
+    });
+  }
+
+  /// Renames, describes, appends to or removes from a playlist. Indices in
+  /// [removeIndices] refer to the playlist as it is on the server before
+  /// this call.
+  Future<void> updatePlaylist(
+    String playlistId, {
+    String? name,
+    String? comment,
+    List<String> addSongIds = const [],
+    List<int> removeIndices = const [],
+  }) async {
+    await _get('updatePlaylist', {
+      'playlistId': playlistId,
+      if (name != null) 'name': name,
+      if (comment != null) 'comment': comment,
+      if (addSongIds.isNotEmpty) 'songIdToAdd': addSongIds,
+      if (removeIndices.isNotEmpty) 'songIndexToRemove': removeIndices,
+    });
+  }
+
+  Future<void> deletePlaylist(String playlistId) =>
+      _get('deletePlaylist', {'id': playlistId});
+
   // --- Search ---
   Future<SearchResults> search(String query, {int songCount = 30}) async {
     final resp = await _get('search3', {

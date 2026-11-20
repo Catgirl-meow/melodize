@@ -51,6 +51,8 @@ import 'models/search_results.dart';
 import 'utils/title_normalize.dart';
 import 'library/local_search.dart';
 import 'likes/pending_like_match.dart';
+import 'playlists/playlist_cache.dart';
+import 'playlists/playlist_edits.dart';
 import 'recs/taste_model.dart';
 
 // --- Database ---
@@ -1171,20 +1173,198 @@ final artistAllSongsProvider =
 });
 
 // --- Playlists ---
+final playlistCacheProvider = Provider<PlaylistCache>((_) => PlaylistCache());
+
+/// The signed-in Navidrome user, for "is this my playlist?" checks.
+final currentUsernameProvider = Provider<String?>(
+    (ref) => ref.watch(serverConfigProvider).valueOrNull?.username);
+
+String? _playlistAccount(Ref ref) {
+  final config = ref.watch(serverConfigProvider).valueOrNull;
+  if (config == null) return null;
+  return playlistCacheAccount(config.serverUrl, config.username);
+}
+
+/// The server's playlists. Saved for offline use on every successful load;
+/// offline, the saved list is shown (an error when nothing was saved yet).
 final playlistsProvider = FutureProvider<List<Playlist>>((ref) async {
   final client = ref.watch(subsonicClientProvider);
-  if (client == null) return const [];
-  if (_deviceOffline(ref)) throw const DeviceOfflineException();
-  return await client.getPlaylists();
+  final account = _playlistAccount(ref);
+  if (client == null || account == null) return const [];
+  final cache = ref.read(playlistCacheProvider);
+  if (_deviceOffline(ref)) {
+    final saved = await cache.playlists(account);
+    if (saved == null) throw const DeviceOfflineException();
+    return saved;
+  }
+  final playlists = await client.getPlaylists();
+  try {
+    await cache.savePlaylists(account, playlists);
+  } catch (e) {
+    AppErrors.report("Couldn't save playlists for offline use", e);
+  }
+  return playlists;
 });
 
 final playlistSongsProvider =
     FutureProvider.family<List<Song>, String>((ref, playlistId) async {
   final client = ref.watch(subsonicClientProvider);
-  if (client == null) return [];
-  if (_deviceOffline(ref)) throw const DeviceOfflineException();
-  return await client.getPlaylistSongs(playlistId);
+  final account = _playlistAccount(ref);
+  if (client == null || account == null) return [];
+  final cache = ref.read(playlistCacheProvider);
+  if (_deviceOffline(ref)) {
+    final ids = await cache.songIds(account, playlistId);
+    if (ids == null) throw const DeviceOfflineException();
+    final byId = {for (final s in await _cachedSongs(ref)) s.id: s};
+    // Songs deleted from the library since are no longer in the cache.
+    return [for (final id in ids) if (byId[id] != null) byId[id]!];
+  }
+  final songs = await client.getPlaylistSongs(playlistId);
+  try {
+    await cache.saveSongIds(
+        account, playlistId, [for (final s in songs) s.id]);
+  } catch (e) {
+    AppErrors.report("Couldn't save the playlist for offline use", e);
+  }
+  return songs;
 });
+
+final playlistActionsProvider =
+    Provider<PlaylistActions>((ref) => PlaylistActions(ref));
+
+/// Result of adding songs: how many went in and how many were already there.
+typedef PlaylistAddResult = ({int added, int skipped});
+
+/// Every playlist edit goes through here: one Subsonic call, then the
+/// affected providers reload from the server so the screen always shows what
+/// Navidrome has. Methods throw on failure; callers show the error.
+class PlaylistActions {
+  final Ref _ref;
+  PlaylistActions(this._ref);
+
+  SubsonicClient get _client {
+    final client = _ref.read(subsonicClientProvider);
+    if (client == null) throw StateError('Not connected to a server');
+    if (!(_ref.read(isOnlineProvider).valueOrNull ?? true)) {
+      throw const DeviceOfflineException();
+    }
+    return client;
+  }
+
+  void _refresh([String? playlistId]) {
+    _ref.invalidate(playlistsProvider);
+    if (playlistId != null) _ref.invalidate(playlistSongsProvider(playlistId));
+  }
+
+  Future<Playlist> create(String name, {List<String> songIds = const []}) async {
+    final playlist =
+        await _client.createPlaylist(name.trim(), songIds: songIds);
+    _refresh(playlist.id);
+    return playlist;
+  }
+
+  /// Renames and/or re-describes. An empty [comment] clears it.
+  Future<void> updateDetails(Playlist playlist,
+      {String? name, String? comment}) async {
+    await _client.updatePlaylist(playlist.id,
+        name: name?.trim(), comment: comment?.trim());
+    _refresh(playlist.id);
+  }
+
+  /// Adds [songIds] at the end. Songs already in the playlist are skipped
+  /// unless [allowDuplicates].
+  Future<PlaylistAddResult> addSongs(String playlistId, List<String> songIds,
+      {bool allowDuplicates = false}) async {
+    final client = _client;
+    var toAdd = songIds;
+    var skipped = 0;
+    if (!allowDuplicates) {
+      final current = await client.getPlaylistSongs(playlistId);
+      final split = splitNewSongs(current.map((s) => s.id), songIds);
+      toAdd = split.fresh;
+      skipped = split.already.length;
+    }
+    if (toAdd.isNotEmpty) {
+      await client.updatePlaylist(playlistId, addSongIds: toAdd);
+    }
+    _refresh(playlistId);
+    return (added: toAdd.length, skipped: skipped);
+  }
+
+  /// Removes every copy of [songId].
+  Future<void> removeSong(String playlistId, String songId) async {
+    final client = _client;
+    final current = await client.getPlaylistSongs(playlistId);
+    final indices = [
+      for (var i = 0; i < current.length; i++)
+        if (current[i].id == songId) i,
+    ];
+    if (indices.isNotEmpty) {
+      await client.updatePlaylist(playlistId, removeIndices: indices);
+    }
+    _refresh(playlistId);
+  }
+
+  /// Removes the entry at [index] of the list as last loaded.
+  Future<void> removeAt(String playlistId, int index) async {
+    await _client.updatePlaylist(playlistId, removeIndices: [index]);
+    _refresh(playlistId);
+  }
+
+  /// Puts the playlist's songs back to exactly [songIds] (Undo, reorders).
+  Future<void> replaceSongs(String playlistId, List<String> songIds) async {
+    await _client.replacePlaylistSongs(playlistId, songIds);
+    _refresh(playlistId);
+  }
+
+  /// Saves the edit screen: details, then songs, with the fewest requests.
+  Future<void> saveEdits(
+    Playlist playlist, {
+    required String name,
+    required String comment,
+    required List<String> originalSongIds,
+    required List<String> editedSongIds,
+  }) async {
+    final client = _client;
+    final newName = name.trim();
+    final newComment = comment.trim();
+    if (newName != playlist.name || newComment != (playlist.comment ?? '')) {
+      await client.updatePlaylist(playlist.id,
+          name: newName, comment: newComment);
+    }
+    switch (planSongChange(originalSongIds, editedSongIds)) {
+      case NoSongChange():
+        break;
+      case RemoveSongs(:final indices):
+        await client.updatePlaylist(playlist.id, removeIndices: indices);
+      case AppendSongs(:final songIds):
+        await client.updatePlaylist(playlist.id, addSongIds: songIds);
+      case ReplaceSongs(:final songIds):
+        await client.replacePlaylistSongs(playlist.id, songIds);
+    }
+    _refresh(playlist.id);
+  }
+
+  Future<Playlist> duplicate(Playlist playlist) async {
+    final client = _client;
+    final songs = await client.getPlaylistSongs(playlist.id);
+    final existing = await client.getPlaylists();
+    final copy = await client.createPlaylist(
+      copyName(playlist.name, existing.map((p) => p.name)),
+      songIds: [for (final s in songs) s.id],
+    );
+    if (playlist.comment != null) {
+      await client.updatePlaylist(copy.id, comment: playlist.comment);
+    }
+    _refresh(copy.id);
+    return copy;
+  }
+
+  Future<void> delete(Playlist playlist) async {
+    await _client.deletePlaylist(playlist.id);
+    _refresh(playlist.id);
+  }
+}
 
 // --- Search ---
 /// App-wide failures for the main shell to show. autoDispose on purpose:
