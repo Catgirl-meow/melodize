@@ -29,13 +29,23 @@ List<String> splitArtistCredit(String credit) {
 }
 
 /// Names to try, in order, when looking [artist] up on Deezer: the name as
-/// written, then its parts split on "," "&" "x" "vs" ("MC KAIQUE SP,
-/// merunes" → "MC KAIQUE SP", "merunes").
+/// written, then each artist of a joined credit, then parts split on ","
+/// "&" "x" "vs" ("MC KAIQUE SP, merunes" → "MC KAIQUE SP", "merunes").
 List<String> artistLookupNames(String artist) {
   final out = [artist.trim()];
-  for (final part in artist.split(_weakSeparator)) {
-    final p = part.trim();
-    if (p.isNotEmpty && !out.contains(p)) out.add(p);
+  void addAll(Iterable<String> parts) {
+    for (final part in parts) {
+      final p = part.trim();
+      if (p.isNotEmpty && !out.contains(p)) out.add(p);
+    }
+  }
+
+  // A joined credit can still arrive whole ("More like this" on a library
+  // track by "A • B"), so split that first.
+  final credited = splitArtistCredit(artist);
+  addAll(credited);
+  for (final a in credited) {
+    addAll(a.split(_weakSeparator));
   }
   return out;
 }

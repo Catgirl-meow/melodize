@@ -198,6 +198,18 @@ void main() {
     expect(deezer.searched.take(2), ['MC KAIQUE SP, merunes', 'MC KAIQUE SP']);
   });
 
+  test('More like this on a track by "A • B" finds A on Deezer', () async {
+    await play('Kaito Ren', 'Tokyo Rain');
+    final deezer = FakeDeezer(unknown: {'Glass Parade • Mio'});
+    final c = await container(deezer);
+    c.read(recommendationsSeedOverrideProvider.notifier).state =
+        (artist: 'Glass Parade • Mio', title: 'Mirror', genre: null);
+    final r = await c.read(recommendationsProvider.future);
+    expect(r, isA<RecsReady>());
+    expect(deezer.searched, containsAll(['Glass Parade • Mio', 'Glass Parade']));
+    expect(deezer.searched, isNot(contains('Mio')));
+  });
+
   test('"Earth, Wind & Fire" stays one artist when Deezer knows it',
       () async {
     await play('Earth, Wind & Fire', 'September');
