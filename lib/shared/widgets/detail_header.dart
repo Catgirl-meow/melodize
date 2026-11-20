@@ -18,6 +18,9 @@ class DetailHeader extends StatelessWidget {
   final double expandedHeight;
   final bool stretch;
 
+  /// Toolbar buttons, e.g. Edit and ⋮ on a playlist.
+  final List<Widget>? actions;
+
   const DetailHeader({
     super.key,
     required this.title,
@@ -26,6 +29,7 @@ class DetailHeader extends StatelessWidget {
     this.cover,
     this.expandedHeight = 280,
     this.stretch = false,
+    this.actions,
   });
 
   @override
@@ -35,6 +39,7 @@ class DetailHeader extends StatelessWidget {
       expandedHeight: expandedHeight,
       pinned: true,
       stretch: stretch,
+      actions: actions,
       flexibleSpace: Stack(
         fit: StackFit.expand,
         children: [
@@ -70,7 +75,10 @@ class DetailHeader extends StatelessWidget {
               ],
             ),
           ),
-          _HeaderTitles(title: title, subtitle: subtitle),
+          _HeaderTitles(
+              title: title,
+              subtitle: subtitle,
+              actionCount: actions?.length ?? 0),
         ],
       ),
     );
@@ -80,7 +88,9 @@ class DetailHeader extends StatelessWidget {
 class _HeaderTitles extends StatelessWidget {
   final String title;
   final String? subtitle;
-  const _HeaderTitles({required this.title, this.subtitle});
+  final int actionCount;
+  const _HeaderTitles(
+      {required this.title, this.subtitle, this.actionCount = 0});
 
   @override
   Widget build(BuildContext context) {
@@ -143,7 +153,7 @@ class _HeaderTitles extends StatelessWidget {
           Positioned(
             top: top,
             left: 64,
-            right: 16,
+            right: 16 + 48.0 * actionCount,
             height: kToolbarHeight,
             child: Opacity(
               opacity: barOpacity,
