@@ -16,6 +16,19 @@ class PlaylistCache {
   PlaylistCache({Future<Directory> Function()? directory})
       : _dir = directory ?? getAppStorageDirectory;
 
+  // Saves read, change and rewrite the whole file, and the playlist list and
+  // several playlists' songs load at once. Every save runs through this
+  // chain so one never renames another's temp file away or drops its
+  // changes.
+  Future<void> _queue = Future.value();
+  int _writes = 0;
+
+  Future<T> _serial<T>(Future<T> Function() op) {
+    final result = _queue.then((_) => op());
+    _queue = result.then((_) {}, onError: (_) {});
+    return result;
+  }
+
   Future<File> get _file async =>
       File('${(await _dir()).path}/melodize_playlists.json');
 
@@ -31,14 +44,14 @@ class PlaylistCache {
 
   Future<void> _write(Map<String, dynamic> data) async {
     final f = await _file;
-    final tmp = File('${f.path}.tmp');
+    final tmp = File('${f.path}.$pid.${_writes++}.tmp');
     await tmp.writeAsString(jsonEncode(data), flush: true);
     await tmp.rename(f.path);
   }
 
   /// Null when nothing was cached for [account] yet.
   Future<List<Playlist>?> playlists(String account) async {
-    final data = await _read(account);
+    final data = await _serial(() => _read(account));
     final list = data?['playlists'];
     if (list is! List) return null;
     return [
@@ -48,32 +61,34 @@ class PlaylistCache {
 
   /// Null when this playlist's songs were never cached.
   Future<List<String>?> songIds(String account, String playlistId) async {
-    final data = await _read(account);
+    final data = await _serial(() => _read(account));
     final songs = data?['songs'];
     if (songs is! Map) return null;
     final ids = songs[playlistId];
     return ids is List ? ids.map((e) => e.toString()).toList() : null;
   }
 
-  Future<void> savePlaylists(String account, List<Playlist> playlists) async {
-    final data = await _read(account) ?? {'account': account};
-    final live = playlists.map((p) => p.id).toSet();
-    final songs = Map<String, dynamic>.from(data['songs'] as Map? ?? {})
-      ..removeWhere((id, _) => !live.contains(id));
-    await _write({
-      ...data,
-      'playlists': [for (final p in playlists) p.toJson()],
-      'songs': songs,
-    });
-  }
+  Future<void> savePlaylists(String account, List<Playlist> playlists) =>
+      _serial(() async {
+        final data = await _read(account) ?? {'account': account};
+        final live = playlists.map((p) => p.id).toSet();
+        final songs = Map<String, dynamic>.from(data['songs'] as Map? ?? {})
+          ..removeWhere((id, _) => !live.contains(id));
+        await _write({
+          ...data,
+          'playlists': [for (final p in playlists) p.toJson()],
+          'songs': songs,
+        });
+      });
 
   Future<void> saveSongIds(
-      String account, String playlistId, List<String> ids) async {
-    final data = await _read(account) ?? {'account': account};
-    final songs = Map<String, dynamic>.from(data['songs'] as Map? ?? {});
-    songs[playlistId] = ids;
-    await _write({...data, 'songs': songs});
-  }
+          String account, String playlistId, List<String> ids) =>
+      _serial(() async {
+        final data = await _read(account) ?? {'account': account};
+        final songs = Map<String, dynamic>.from(data['songs'] as Map? ?? {});
+        songs[playlistId] = ids;
+        await _write({...data, 'songs': songs});
+      });
 }
 
 /// Cache key for a server account.

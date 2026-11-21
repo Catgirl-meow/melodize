@@ -119,23 +119,39 @@ void main() {
 
     test('editable only by its owner and never when readonly', () {
       const mine = Playlist(
-          id: '1', name: 'a', songCount: 0, duration: 0, changed: '',
+          id: '1',
+          name: 'a',
+          songCount: 0,
+          duration: 0,
+          changed: '',
           owner: 'test');
       expect(mine.isEditableBy('test'), isTrue);
       expect(mine.isEditableBy('other'), isFalse);
       const smart = Playlist(
-          id: '2', name: 'b', songCount: 0, duration: 0, changed: '',
-          owner: 'test', readonly: true);
+          id: '2',
+          name: 'b',
+          songCount: 0,
+          duration: 0,
+          changed: '',
+          owner: 'test',
+          readonly: true);
       expect(smart.isEditableBy('test'), isFalse);
-      const unknownOwner = Playlist(
-          id: '3', name: 'c', songCount: 0, duration: 0, changed: '');
+      const unknownOwner =
+          Playlist(id: '3', name: 'c', songCount: 0, duration: 0, changed: '');
       expect(unknownOwner.isEditableBy('test'), isTrue);
     });
 
     test('toJson round-trips', () {
       const p = Playlist(
-          id: '1', name: 'a', comment: 'c', songCount: 2, duration: 9,
-          coverArt: 'pl-1', changed: 'x', owner: 'o', public: true);
+          id: '1',
+          name: 'a',
+          comment: 'c',
+          songCount: 2,
+          duration: 9,
+          coverArt: 'pl-1',
+          changed: 'x',
+          owner: 'o',
+          public: true);
       final back = Playlist.fromSubsonicJson(p.toJson());
       expect(back.toJson(), p.toJson());
     });
@@ -174,8 +190,7 @@ void main() {
       expect(uri.queryParameters['name'], 'Road trip');
     });
 
-    test('updatePlaylist sends adds and removals as repeated params',
-        () async {
+    test('updatePlaylist sends adds and removals as repeated params', () async {
       await client.updatePlaylist('p1',
           name: 'New', addSongIds: ['x', 'y'], removeIndices: [0, 3]);
       final uri = calls.single;
@@ -232,10 +247,10 @@ void main() {
     });
     tearDown(() => dir.delete(recursive: true));
 
-    const a = Playlist(
-        id: '1', name: 'A', songCount: 2, duration: 1, changed: '');
-    const b = Playlist(
-        id: '2', name: 'B', songCount: 1, duration: 1, changed: '');
+    const a =
+        Playlist(id: '1', name: 'A', songCount: 2, duration: 1, changed: '');
+    const b =
+        Playlist(id: '2', name: 'B', songCount: 1, duration: 1, changed: '');
 
     test('empty cache answers null, not an empty list', () async {
       expect(await cache.playlists('acc'), isNull);
@@ -256,5 +271,32 @@ void main() {
       await cache.savePlaylists('acc', [a]);
       expect(await cache.songIds('acc', '2'), isNull);
     });
+
+    test('concurrent saves neither fail nor drop each other', () async {
+      // The playlist list and several playlists' songs load at once.
+      await Future.wait([
+        cache.savePlaylists('acc', [a, b]),
+        for (var i = 0; i < 20; i++)
+          cache.saveSongIds('acc', i.isEven ? '1' : '2', ['s$i']),
+      ]);
+      expect(await cache.songIds('acc', '1'), ['s18']);
+      expect(await cache.songIds('acc', '2'), ['s19']);
+      expect(dir.listSync().where((f) => f.path.endsWith('.tmp')), isEmpty);
+    });
+  });
+
+  test('a playlist without "public" (Navidrome omits false) is private', () {
+    final p = Playlist.fromSubsonicJson({
+      'id': 'x',
+      'name': 'N',
+      'songCount': 6,
+      'duration': 660,
+      'owner': 'test',
+      'changed': '2026-11-12T17:29:05.214Z',
+      'readonly': false,
+    });
+    expect(p.public, isFalse);
+    expect(p.isEditableBy('test'), isTrue);
+    expect(p.isEditableBy('other'), isFalse);
   });
 }
