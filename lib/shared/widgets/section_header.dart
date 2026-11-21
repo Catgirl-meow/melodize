@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
+
 /// Header above a list section on the search and detail pages: a bold
 /// title with an optional muted count, e.g. "Albums 3".
 class SectionHeader extends StatelessWidget {
@@ -27,7 +29,7 @@ class SectionHeader extends StatelessWidget {
               title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: text.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              style: AppTheme.emphasized(context).titleMedium,
             ),
           ),
           if (count != null) ...[

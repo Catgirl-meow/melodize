@@ -6,6 +6,8 @@ import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../playlists/add_to_playlist_sheet.dart';
+import '../../core/utils/haptics.dart';
+import '../../shared/theme/motion.dart';
 
 class QueueScreen extends ConsumerStatefulWidget {
   const QueueScreen({super.key});
@@ -210,6 +212,7 @@ class _QueueScreenState extends ConsumerState<QueueScreen> {
                                             key: ValueKey(rowKey),
                                             direction: DismissDirection.endToStart,
                                             onDismissed: (_) {
+                                              Haptics.tap(ref);
                                               setState(() =>
                                                   _dismissedKeys.add(rowKey));
                                               handler?.removeFromQueue(
@@ -442,7 +445,8 @@ class _SectionHeader extends StatelessWidget {
                     const SizedBox(width: 4),
                     AnimatedRotation(
                       turns: expanded ? 0.5 : 0,
-                      duration: const Duration(milliseconds: 200),
+                      duration: Motion.short.duration,
+                      curve: Motion.short.curve,
                       child: Icon(
                         Icons.expand_more,
                         size: 18,

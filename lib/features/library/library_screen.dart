@@ -20,6 +20,7 @@ import 'artist_detail_screen.dart';
 import 'library_views.dart';
 import 'playlist_detail_screen.dart';
 import 'song_collection_screen.dart';
+import '../../shared/theme/motion.dart';
 
 /// Window width from which Library shows its sidebar layout.
 const kLibraryWideBreakpoint = 900.0;
@@ -418,7 +419,7 @@ class _WideLibraryState extends ConsumerState<_WideLibrary>
                 Expanded(
                   child: SongDragScope(
                     child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 180),
+                      duration: Motion.short.duration,
                       child: _content(),
                     ),
                   ),

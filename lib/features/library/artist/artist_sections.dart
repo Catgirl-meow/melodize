@@ -601,13 +601,13 @@ class _SimilarAvatar extends StatelessWidget {
         width: size,
         height: size,
         fit: BoxFit.cover,
-        errorWidget: (_, __, ___) => _initials(scheme),
+        errorWidget: (_, __, ___) => _initials(context, scheme),
       );
     } else if (item.coverArt != null) {
       image = CoverArtImage(
           coverArtId: item.coverArt, size: size, borderRadius: 0);
     } else {
-      image = _initials(scheme);
+      image = _initials(context, scheme);
     }
 
     return SizedBox(
@@ -682,13 +682,12 @@ class _SimilarAvatar extends StatelessWidget {
     );
   }
 
-  Widget _initials(ColorScheme scheme) => ColoredBox(
+  Widget _initials(BuildContext context, ColorScheme scheme) => ColoredBox(
         color: scheme.secondaryContainer,
         child: Center(
           child: Text(
             item.name.isEmpty ? '?' : item.name.characters.first.toUpperCase(),
-            style: TextStyle(
-                fontSize: 32,
+            style: Theme.of(context).textTheme.headlineLarge?.copyWith(
                 fontWeight: FontWeight.w700,
                 color: scheme.onSecondaryContainer),
           ),

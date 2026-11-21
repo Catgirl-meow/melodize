@@ -8,6 +8,8 @@ import '../utils/song_actions.dart';
 import 'cover_art_image.dart';
 import 'song_drag.dart';
 import '../../features/playlists/add_to_playlist_sheet.dart';
+import '../theme/app_theme.dart';
+import '../theme/motion.dart';
 
 /// An extra entry in a song's ⋮ sheet, e.g. "Remove from this playlist".
 class SongMenuAction {
@@ -94,7 +96,7 @@ class SongTile extends ConsumerWidget {
       leading: !selecting
           ? cover
           : AnimatedSwitcher(
-              duration: const Duration(milliseconds: 150),
+              duration: Motion.short.duration,
               child: selected!
                   ? Container(
                       key: const ValueKey('checked'),
@@ -193,11 +195,9 @@ class _QualityBadge extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: TextStyle(
-          fontSize: 9,
-          fontWeight: FontWeight.bold,
-          color: scheme.onSecondaryContainer,
-        ),
+        style: AppTheme.emphasized(context)
+            .labelSmall
+            ?.copyWith(color: scheme.onSecondaryContainer),
       ),
     );
   }

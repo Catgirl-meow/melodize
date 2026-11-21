@@ -13,6 +13,7 @@ import 'artist/artist_actions.dart';
 import 'artist/artist_discography.dart';
 import 'artist/artist_portrait.dart';
 import 'artist/artist_sections.dart';
+import '../../shared/theme/motion.dart';
 
 /// Width from which the page splits into an identity pane and content.
 const double kArtistWideBreakpoint = 900;
@@ -325,7 +326,8 @@ class _ArtistHero extends ConsumerWidget {
                     Expanded(
                       child: AnimatedOpacity(
                         opacity: barVisible ? 1 : 0,
-                        duration: const Duration(milliseconds: 150),
+                        duration: Motion.short.duration,
+                        curve: Motion.short.curve,
                         child: IgnorePointer(
                           ignoring: !barVisible,
                           child: Row(

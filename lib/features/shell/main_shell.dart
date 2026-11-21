@@ -11,6 +11,7 @@ import '../search/search_screen.dart';
 import '../settings/settings_screen.dart';
 import '../player/mini_player.dart';
 import '../player/now_playing_screen.dart';
+import '../../shared/theme/motion.dart';
 
 // Android-first Material 3 navigation geometry, shared by Android and Linux.
 // Shared Android-first navigation geometry on every platform.
@@ -20,10 +21,6 @@ const _kDockHorizontal = 16.0;
 const _kDockRadius = 24.0;
 const _kPillRadius = 16.0;
 const _kPillPadding = EdgeInsets.symmetric(horizontal: 8, vertical: 5);
-const _kPillSlideDuration = Duration(milliseconds: 320);
-// Starts moving on the tap and glides into place, without the near-jump of
-// emphasized decelerate over a short distance.
-const _kPillCurve = Curves.easeOutCubic;
 // Mini player footprint, including its own bottom gap
 // (floating: 56 card + 8 gap, classic: 72 bar).
 const _kFloatingMiniPlayerHeight = 64.0;
@@ -68,7 +65,7 @@ class _MainShellState extends ConsumerState<MainShell>
     super.initState();
     _playerAnim = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 450),
+      duration: Motion.enter.duration,
     );
     HardwareKeyboard.instance.addHandler(_handleNavKey);
   }
@@ -112,14 +109,14 @@ class _MainShellState extends ConsumerState<MainShell>
 
   void _openPlayer() => _playerAnim.animateTo(
         1.0,
-        curve: Curves.easeOutCubic,
-        duration: const Duration(milliseconds: 450),
+        curve: Motion.enter.curve,
+        duration: Motion.enter.duration,
       );
 
   void _closePlayer() => _playerAnim.animateTo(
         0.0,
-        curve: Curves.easeOutCubic,
-        duration: const Duration(milliseconds: 350),
+        curve: Motion.exit.curve,
+        duration: Motion.exit.duration,
       );
 
   void _invalidateServerProviders() {
@@ -176,8 +173,8 @@ class _MainShellState extends ConsumerState<MainShell>
                       -1 + 2 * selectedIndex / (_labels.length - 1),
                       0,
                     ),
-                    duration: _kPillSlideDuration,
-                    curve: _kPillCurve,
+                    duration: Motion.glide.duration,
+                    curve: Motion.glide.curve,
                     child: FractionallySizedBox(
                       widthFactor: 1 / _labels.length,
                       heightFactor: 1,
@@ -471,11 +468,16 @@ class _MainShellState extends ConsumerState<MainShell>
             animation: _playerAnim,
             builder: (_, child) {
               final t = _playerAnim.value;
-              return IgnorePointer(
-                ignoring: t < 0.01,
-                child: Transform.translate(
-                  offset: Offset(0, screenH * (1 - t)),
-                  child: child,
+              // Tickers (the wavy progress line, marquees) stop while the
+              // player is off screen.
+              return TickerMode(
+                enabled: t >= 0.01,
+                child: IgnorePointer(
+                  ignoring: t < 0.01,
+                  child: Transform.translate(
+                    offset: Offset(0, screenH * (1 - t)),
+                    child: child,
+                  ),
                 ),
               );
             },
@@ -551,8 +553,8 @@ class _FloatingNavItem extends StatelessWidget {
             child: Center(
               child: TweenAnimationBuilder<Color?>(
                 tween: ColorTween(end: color),
-                duration: _kPillSlideDuration,
-                curve: _kPillCurve,
+                duration: Motion.glide.duration,
+                curve: Motion.glide.curve,
                 builder: (_, c, __) => Icon(
                   selected ? selectedIcon : icon,
                   size: 26,

@@ -25,6 +25,10 @@ import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/marquee_text.dart';
 import '../../shared/widgets/rec_widgets.dart';
 import 'queue_screen.dart';
+import '../../core/utils/haptics.dart';
+import '../../shared/theme/motion.dart';
+import '../../shared/widgets/morph_button.dart';
+import '../../shared/widgets/wavy_slider.dart';
 
 // ---------------------------------------------------------------------------
 
@@ -84,8 +88,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
       // Snap back to fully open.
       widget.controller.animateTo(
         1.0,
-        curve: Curves.easeOutCubic,
-        duration: const Duration(milliseconds: 300),
+        curve: Motion.glide.curve,
+        duration: Motion.glide.duration,
       );
     }
   }
@@ -136,8 +140,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
             children: [
               // Base linear gradient
               AnimatedContainer(
-                duration: const Duration(milliseconds: 600),
-                curve: Curves.easeOut,
+                duration: Motion.emphasized.duration,
+                curve: Motion.standard.curve,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
@@ -149,8 +153,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
               ),
               // Radial colour bloom — centred on the album-art zone
               AnimatedContainer(
-                duration: const Duration(milliseconds: 600),
-                curve: Curves.easeOut,
+                duration: Motion.emphasized.duration,
+                curve: Motion.standard.curve,
                 decoration: BoxDecoration(
                   gradient: RadialGradient(
                     center: const Alignment(0, -0.28),
@@ -192,8 +196,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
                               onQueueOpen: () => _openQueue(context),
                               onLyricsOpen: () => _pageController.animateToPage(
                                 1,
-                                duration: const Duration(milliseconds: 300),
-                                curve: Curves.easeInOut,
+                                duration: Motion.standard.duration,
+                                curve: Motion.standard.curve,
                               ),
                             ),
                             _LyricsPage(song: song),
@@ -209,7 +213,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen>
                         children: List.generate(
                           2,
                           (i) => AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
+                            duration: Motion.standard.duration,
+                            curve: Motion.standard.curve,
                             margin: const EdgeInsets.symmetric(horizontal: 3),
                             width: _currentPage == i ? 20 : 6,
                             height: 6,
@@ -385,7 +390,7 @@ class _SlideDismissState extends State<_SlideDismiss>
     final ms =
         (remaining / math.max(vel, 600) * 1000).clamp(80.0, 280.0).round();
     final anim = Tween<double>(begin: _dy.value, end: screenH).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeIn),
+      CurvedAnimation(parent: _ctrl, curve: Motion.exit.curve),
     );
     _ctrl
       ..duration = Duration(milliseconds: ms)
@@ -404,10 +409,10 @@ class _SlideDismissState extends State<_SlideDismiss>
   void _snapBack() {
     final startDy = _dy.value;
     final anim = Tween<double>(begin: startDy, end: 0).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic),
+      CurvedAnimation(parent: _ctrl, curve: Motion.glide.curve),
     );
     _ctrl
-      ..duration = const Duration(milliseconds: 240)
+      ..duration = Motion.glide.duration
       ..reset();
     late final VoidCallback listener;
     listener = () {
@@ -519,8 +524,8 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
                         Text(song.title,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 14, fontWeight: FontWeight.w600)),
+                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w600)),
                         Text(song.artist,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
@@ -722,7 +727,8 @@ class _AlbumArt extends ConsumerWidget {
     );
     final w = isPlaying ? artSize : artSize * 0.85;
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
+      duration: Motion.emphasized.duration,
+      curve: Motion.emphasized.curve,
       width: w,
       height: w,
       decoration: BoxDecoration(
@@ -798,10 +804,9 @@ class _SongInfoRow extends StatelessWidget {
               MarqueeText(
                 song.title,
                 key: ValueKey('title-${song.id}'),
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: scheme.onSurface,
-                      fontWeight: FontWeight.bold,
-                    ),
+                style: AppTheme.emphasized(context)
+                    .headlineSmall
+                    ?.copyWith(color: scheme.onSurface),
               ),
               Row(
                 children: [
@@ -829,8 +834,9 @@ class _SongInfoRow extends StatelessWidget {
                       ),
                       child: Text(
                         song.suffix!.toUpperCase(),
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: fgAccent, fontWeight: FontWeight.bold),
+                        style: AppTheme.emphasized(context)
+                            .labelSmall
+                            ?.copyWith(color: fgAccent),
                       ),
                     ),
                   ],
@@ -965,46 +971,61 @@ class _SeekSliderState extends ConsumerState<_SeekSlider> {
         ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
         : 0.0;
 
+    final playerState = ref.watch(
+      playerStateStreamProvider.select((s) => s.valueOrNull),
+    );
+    // The wave moves only while sound is actually coming out.
+    final moving = (playerState?.playing ?? false) &&
+        playerState?.processingState == ProcessingState.ready;
+    final shown = _isDragging ? _sliderValue : progress.toDouble();
+    final dur = duration ?? Duration.zero;
+    // While dragging, the left label shows where the seek will land.
+    final shownPos = _isDragging
+        ? Duration(milliseconds: (_sliderValue * dur.inMilliseconds).round())
+        : position;
+    final labelStyle = Theme.of(context)
+        .textTheme
+        .bodySmall
+        ?.copyWith(
+            color: scheme.onSurfaceVariant,
+            fontFeatures: const [FontFeature.tabularFigures()]);
+
     return Column(
       children: [
-        SliderTheme(
-          data: SliderTheme.of(context).copyWith(
-            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-            trackHeight: 3,
-            activeTrackColor: fg,
-            inactiveTrackColor: scheme.surfaceContainerHighest,
-            thumbColor: fg,
-            overlayShape: SliderComponentShape.noOverlay,
-          ),
-          child: Slider(
-            value: _isDragging ? _sliderValue : progress.toDouble(),
-            onChangeStart: (v) => setState(() {
+        WavySlider(
+          value: shown,
+          playing: moving,
+          color: fg,
+          trackColor: scheme.surfaceContainerHighest,
+          semanticLabel: 'Seek',
+          semanticFormatter: (v) => '${_fmt(Duration(
+                milliseconds: (v * dur.inMilliseconds).round()))} of ${_fmt(dur)}',
+          onChangeStart: (v) {
+            Haptics.tick(ref);
+            setState(() {
               _isDragging = true;
               _sliderValue = v;
-            }),
-            onChanged: (v) => setState(() => _sliderValue = v),
-            onChangeEnd: (v) {
-              setState(() => _isDragging = false);
-              final handler = ref.read(audioHandlerNotifierProvider);
-              final dur = ref.read(durationStreamProvider).valueOrNull;
-              if (handler != null && dur != null) {
-                handler.seek(
-                    Duration(milliseconds: (v * dur.inMilliseconds).round()));
-              }
-            },
-          ),
+            });
+          },
+          onChanged: (v) => setState(() => _sliderValue = v),
+          onChangeEnd: (v) {
+            Haptics.tick(ref);
+            setState(() => _isDragging = false);
+            final handler = ref.read(audioHandlerNotifierProvider);
+            final d = ref.read(durationStreamProvider).valueOrNull;
+            if (handler != null && d != null) {
+              handler.seek(
+                  Duration(milliseconds: (v * d.inMilliseconds).round()));
+            }
+          },
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(_fmt(position),
-                  style:
-                      Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-              Text(_fmt(duration ?? Duration.zero),
-                  style:
-                      Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+              Text(_fmt(shownPos), style: labelStyle),
+              Text(_fmt(dur), style: labelStyle),
             ],
           ),
         ),
@@ -1037,6 +1058,15 @@ class _PlayControls extends ConsumerWidget {
     final loopMode = ref.watch(
       loopModeStreamProvider.select((s) => s.valueOrNull ?? LoopMode.off),
     );
+    // The accent comes from the cover, so pick the icon colour by contrast
+    // rather than assuming onPrimary fits it.
+    final onAccent =
+        ThemeData.estimateBrightnessForColor(fg) == Brightness.dark
+            ? Colors.white
+            : Colors.black;
+    // Narrow phones (320 dp) get slightly smaller buttons so the row fits.
+    final compact = MediaQuery.sizeOf(context).width < 360;
+    final skip = compact ? 44.0 : 52.0;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -1054,6 +1084,7 @@ class _PlayControls extends ConsumerWidget {
           onPressed: () async {
             final h = ref.read(audioHandlerNotifierProvider);
             if (h == null) return;
+            Haptics.tick(ref);
             await h.toggleShuffle();
             // Persist the new mode.
             final prefsNotifier =
@@ -1064,35 +1095,54 @@ class _PlayControls extends ConsumerWidget {
             ));
           },
         ),
-        IconButton(
-          icon: Icon(Icons.skip_previous_rounded, color: scheme.onSurface),
-          iconSize: 40,
-          onPressed: () =>
-              ref.read(audioHandlerNotifierProvider)?.skipToPrevious(),
+        // Previous / next: tonal circles that square up while pressed.
+        MorphButton(
+          width: skip,
+          height: skip,
+          radius: skip / 2,
+          pressedRadius: 14,
+          color: fg.withValues(alpha: 0.16),
+          tooltip: 'Previous',
+          onPressed: () {
+            Haptics.tick(ref);
+            ref.read(audioHandlerNotifierProvider)?.skipToPrevious();
+          },
+          child: Icon(Icons.skip_previous_rounded,
+              color: scheme.onSurface, size: 32),
         ),
-        Container(
-          width: 68,
-          height: 68,
-          decoration: BoxDecoration(
-            color: fg,
-            shape: BoxShape.circle,
-          ),
-          child: IconButton(
-            icon: Icon(
-              isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-              color: scheme.onPrimary,
-            ),
-            iconSize: 38,
-            onPressed: () {
-              final h = ref.read(audioHandlerNotifierProvider);
-              isPlaying ? h?.pause() : h?.play();
-            },
+        // Play / pause: a circle when paused, a wider rounded square while
+        // playing (M3 Expressive shape morph).
+        MorphButton(
+          width: isPlaying ? (compact ? 76 : 84) : 72,
+          height: 72,
+          radius: isPlaying ? 22 : 36,
+          pressedRadius: 16,
+          color: fg,
+          tooltip: isPlaying ? 'Pause' : 'Play',
+          onPressed: () {
+            Haptics.tap(ref);
+            final h = ref.read(audioHandlerNotifierProvider);
+            isPlaying ? h?.pause() : h?.play();
+          },
+          child: Icon(
+            isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            color: onAccent,
+            size: 38,
           ),
         ),
-        IconButton(
-          icon: Icon(Icons.skip_next_rounded, color: scheme.onSurface),
-          iconSize: 40,
-          onPressed: () => ref.read(audioHandlerNotifierProvider)?.skipToNext(),
+        MorphButton(
+          width: skip,
+          height: skip,
+          radius: skip / 2,
+          pressedRadius: 14,
+          color: fg.withValues(alpha: 0.16),
+          tooltip: 'Next',
+          onPressed: () {
+            Haptics.tick(ref);
+            ref.read(audioHandlerNotifierProvider)?.skipToNext();
+          },
+          child:
+              Icon(Icons.skip_next_rounded, color: scheme.onSurface, size: 32),
         ),
         IconButton(
           icon: Icon(
@@ -1104,8 +1154,10 @@ class _PlayControls extends ConsumerWidget {
                 : scheme.onSurface.withValues(alpha: 0.38),
           ),
           iconSize: 26,
-          onPressed: () =>
-              ref.read(audioHandlerNotifierProvider)?.cycleLoopMode(),
+          onPressed: () {
+            Haptics.tick(ref);
+            ref.read(audioHandlerNotifierProvider)?.cycleLoopMode();
+          },
         ),
       ],
     );
@@ -1208,8 +1260,7 @@ class _ActionButton extends StatelessWidget {
                     : scheme.onSurface.withValues(alpha: 0.6)),
             const SizedBox(height: 4),
             Text(label,
-                style: TextStyle(
-                    fontSize: 11,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: active
                         ? activeColor
                         : scheme.onSurface.withValues(alpha: 0.6))),
@@ -1356,8 +1407,8 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
       Scrollable.ensureVisible(
         targetContext,
         alignment: 0.35,
-        duration: const Duration(milliseconds: 350),
-        curve: Curves.easeOutCubic,
+        duration: Motion.glide.duration,
+        curve: Motion.glide.curve,
       );
       return;
     }
@@ -1378,8 +1429,8 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
     _scrollCtrl
         .animateTo(
           estimated,
-          duration: const Duration(milliseconds: 350),
-          curve: Curves.easeOutCubic,
+          duration: Motion.glide.duration,
+          curve: Motion.glide.curve,
         )
         .whenComplete(() {
           // The row should now be within the cache extent of the estimate.
@@ -1394,8 +1445,8 @@ class _LyricsPageState extends ConsumerState<_LyricsPage> {
           Scrollable.ensureVisible(
             ctx,
             alignment: 0.35,
-            duration: const Duration(milliseconds: 350),
-            curve: Curves.easeOutCubic,
+            duration: Motion.glide.duration,
+            curve: Motion.glide.curve,
           );
         });
   }
@@ -1612,8 +1663,8 @@ class _LyricLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeOut,
+      duration: Motion.standard.duration,
+      curve: Motion.standard.curve,
       margin: const EdgeInsets.symmetric(vertical: 4),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
@@ -1622,8 +1673,8 @@ class _LyricLine extends StatelessWidget {
         border: isActive ? Border.all(color: fg.withValues(alpha: 0.22)) : null,
       ),
       child: AnimatedDefaultTextStyle(
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
+        duration: Motion.standard.duration,
+        curve: Motion.standard.curve,
         style: Theme.of(context).textTheme.headlineSmall!.copyWith(
               fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
               color: isActive ? fg : fg.withValues(alpha: 0.35),

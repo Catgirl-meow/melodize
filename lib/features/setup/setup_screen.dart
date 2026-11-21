@@ -213,7 +213,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                     label: Text(_loading ? 'Connecting...' : 'Connect'),
                     style: FilledButton.styleFrom(
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                      textStyle: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
                     ),
                   ),
                 ),
