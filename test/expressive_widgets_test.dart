@@ -93,7 +93,73 @@ void main() {
     });
   });
 
+  group('WavySlider semantics', () {
+    testWidgets('an interactive slider builds valid semantics', (tester) async {
+      // Integration runs enable semantics; a value without increasedValue /
+      // decreasedValue next to increase/decrease actions asserts there.
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(_host(WavySlider(
+        value: 0.5,
+        playing: true,
+        color: Colors.purple,
+        trackColor: Colors.grey,
+        semanticLabel: 'Seek',
+        semanticFormatter: (v) => '${(v * 200).round()} s',
+        onChanged: (_) {},
+      )));
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(tester.takeException(), isNull);
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('Seek')),
+        isSemantics(
+          label: 'Seek',
+          value: '100 s',
+          increasedValue: '110 s',
+          decreasedValue: '90 s',
+          isSlider: true,
+          hasIncreaseAction: true,
+          hasDecreaseAction: true,
+          isFocusable: true,
+        ),
+      );
+      handle.dispose();
+    });
+  });
+
   group('MorphButton', () {
+    testWidgets('survives tooltip changes and ticker mode toggles',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      Widget button(bool playing, bool tickers) => _host(TickerMode(
+            enabled: tickers,
+            child: Center(
+              child: MorphButton(
+                width: playing ? 84 : 72,
+                height: 72,
+                radius: playing ? 22 : 36,
+                color: Colors.purple,
+                tooltip: playing ? 'Pause' : 'Play',
+                onPressed: () {},
+                child: const Icon(Icons.play_arrow_rounded),
+              ),
+            ),
+          ));
+      for (final state in [
+        (true, true),
+        (false, true),
+        (false, false),
+        (true, false),
+        (true, true)
+      ]) {
+        await tester.pumpWidget(button(state.$1, state.$2));
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      await tester.tap(find.byType(MorphButton));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      handle.dispose();
+    });
+
     testWidgets('fires onPressed and settles after a shape change',
         (tester) async {
       var taps = 0;

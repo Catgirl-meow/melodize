@@ -31,7 +31,7 @@ class WavySlider extends StatefulWidget {
     this.wavelength = 40,
     this.showHandle = true,
     this.semanticLabel,
-    this.semanticValue,
+    this.semanticFormatter,
   });
 
   /// Progress, 0 to 1.
@@ -49,8 +49,10 @@ class WavySlider extends StatefulWidget {
   final bool showHandle;
   final String? semanticLabel;
 
-  /// Spoken value, such as "1:23 of 3:36".
-  final String? semanticValue;
+  /// Spoken form of a value, such as "1:23 of 3:36". Defaults to a
+  /// percentage. Also used for the values a screen reader's increase and
+  /// decrease gestures would reach.
+  final String Function(double value)? semanticFormatter;
 
   @override
   State<WavySlider> createState() => _WavySliderState();
@@ -139,7 +141,7 @@ class _WavySliderState extends State<WavySlider> with TickerProviderStateMixin {
     if (!_interactive) {
       return Semantics(
         label: widget.semanticLabel,
-        value: widget.semanticValue,
+        value: _spoken(widget.value),
         child: SizedBox(height: widget.height, child: painter),
       );
     }
@@ -148,9 +150,13 @@ class _WavySliderState extends State<WavySlider> with TickerProviderStateMixin {
       return Semantics(
         slider: true,
         label: widget.semanticLabel,
-        value: widget.semanticValue,
-        onIncrease: () => _nudge(0.05),
-        onDecrease: () => _nudge(-0.05),
+        // Flutter requires value, increasedValue and decreasedValue together
+        // whenever increase/decrease actions are present.
+        value: _spoken(widget.value),
+        increasedValue: _spoken((widget.value + _a11yStep).clamp(0.0, 1.0)),
+        decreasedValue: _spoken((widget.value - _a11yStep).clamp(0.0, 1.0)),
+        onIncrease: () => _nudge(_a11yStep),
+        onDecrease: () => _nudge(-_a11yStep),
         child: Focus(
           onKeyEvent: (_, e) {
             if (e is! KeyDownEvent && e is! KeyRepeatEvent) {
@@ -205,6 +211,11 @@ class _WavySliderState extends State<WavySlider> with TickerProviderStateMixin {
       );
     });
   }
+
+  static const _a11yStep = 0.05;
+
+  String _spoken(double v) =>
+      widget.semanticFormatter?.call(v) ?? '${(v * 100).round()}%';
 
   void _nudge(double delta) {
     final v = (widget.value + delta).clamp(0.0, 1.0);

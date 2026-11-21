@@ -998,7 +998,8 @@ class _SeekSliderState extends ConsumerState<_SeekSlider> {
           color: fg,
           trackColor: scheme.surfaceContainerHighest,
           semanticLabel: 'Seek',
-          semanticValue: '${_fmt(shownPos)} of ${_fmt(dur)}',
+          semanticFormatter: (v) => '${_fmt(Duration(
+                milliseconds: (v * dur.inMilliseconds).round()))} of ${_fmt(dur)}',
           onChangeStart: (v) {
             Haptics.tick(ref);
             setState(() {
