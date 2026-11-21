@@ -42,7 +42,8 @@ Use the theme's text styles, never a raw `fontSize:`.
 
 ## App bars
 
-- Top-level tabs: a 64 px bar with the bold page title, no collapsing (Library keeps its tabs under it).
+- Top-level tabs: a 64 px bar with the bold page title, no collapsing. Large or collapsing bars
+  on top-level tabs were tried and dropped (they don't fit the app).
 - Sub-pages (Settings pages, Downloads, Downloaded songs): `SliverAppBar.medium`.
 - Album and playlist detail screens: a full-bleed cover-art `SliverAppBar` with
   `flexibleSpace`. Intentional; keep it.
@@ -50,6 +51,37 @@ Use the theme's text styles, never a raw `fontSize:`.
 - Home has no collapsing bar. M3's medium and large bars bottom-align the title, which left a
   ~100 px gap under the Android status bar (tried and reverted in v1.9.9). A second attempt must
   move the title inside the flexible space.
+
+## Library
+
+`lib/features/library/library_screen.dart`, views in `library_views.dart`.
+
+- **Phone:** the 64 px title bar (Search, tonal + for New playlist), then single-select chips:
+  All, Playlists, Albums, Artists, Songs. The chip used last is remembered (`libraryView`).
+  Views are built on first visit and kept, so switching chips keeps scroll positions.
+- **All (overview):** four pinned collections in a 2-column grid (4 at ≥ 700 px), each with an M3
+  Expressive icon shape: Liked songs (cookie), Downloaded (pill), Recently added (rounded square),
+  Shuffle all (circle). Then shelves under `titleLarge` bold headers with See all: Playlists
+  (a dashed New playlist tile first, then most recently updated), Recently added albums, and
+  Artists (most played locally). Everything comes from the cached library, so it works offline.
+- **Lists:** a sort row (sort button left, count right, grid/list toggle for Albums and
+  Playlists). Playlists you can't edit (Navidrome smart playlists, other users') carry a lock.
+- **Search** filters the current chip; on All it searches playlists, artists, albums and songs.
+- **Multi-select:** long-press a song; `SongSelectionAppBar` (secondary container) replaces the
+  title bar with Add to playlist, Play next, Add to queue and an overflow (Download, Select all).
+- **Wide (≥ 900 px):** a 288 px sidebar (Overview, Liked songs, Downloaded, Recently added,
+  Albums, Artists, Songs, then every playlist) beside the content. Songs dragged from the content
+  can be dropped on a playlist in the sidebar (`SongDragScope`).
+
+## Playlists
+
+- The playlist page and collection pages (Liked songs, Recently added) use `PlayButtonGroup`:
+  a wide Play pill and square tonal buttons, like the artist page. Playlist: Shuffle, Add songs,
+  Download; Edit and ⋮ (Rename, Duplicate, Delete) sit in the header's toolbar.
+- Editing happens on its own screen (rename, description, remove with Undo, drag handles) and is
+  sent on Done in as few requests as possible (`planSongChange`).
+- "Add to playlist" is one sheet everywhere (song ⋮, album header, queue, selections): playlists
+  already holding the song start ticked; New playlist sits at the top.
 
 ## Detail pages
 

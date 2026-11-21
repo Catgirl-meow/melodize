@@ -129,6 +129,45 @@ void main() {
           isNot(contains(song.id)));
     });
 
+    test('playlists: create, rename, add, remove, reorder, delete', () async {
+      final songs = (await client.getAllSongs()).take(4).toList();
+      final ids = [for (final s in songs) s.id];
+      final name = 'Melodize live test ${DateTime.now().millisecondsSinceEpoch}';
+      final created = await client.createPlaylist(name, songIds: ids.sublist(0, 2));
+      try {
+        expect(created.name, name);
+        expect(created.owner, user);
+        expect(created.isEditableBy(user), isTrue);
+        Future<List<String>> order() async =>
+            [for (final s in await client.getPlaylistSongs(created.id)) s.id];
+        expect(await order(), ids.sublist(0, 2));
+
+        await client.updatePlaylist(created.id,
+            name: '$name renamed', comment: 'about it');
+        final renamed = await client.getPlaylist(created.id);
+        expect(renamed.name, '$name renamed');
+        expect(renamed.comment, 'about it');
+        expect((await client.getPlaylists()).map((p) => p.id),
+            contains(created.id));
+
+        await client.updatePlaylist(created.id, addSongIds: ids.sublist(2));
+        expect(await order(), ids);
+
+        await client.updatePlaylist(created.id, removeIndices: [0, 2]);
+        expect(await order(), [ids[1], ids[3]]);
+
+        await client.replacePlaylistSongs(created.id, [ids[3], ids[0], ids[1]]);
+        expect(await order(), [ids[3], ids[0], ids[1]]);
+        final after = await client.getPlaylist(created.id);
+        expect(after.name, '$name renamed',
+            reason: 'replacing songs keeps the name');
+      } finally {
+        await client.deletePlaylist(created.id);
+      }
+      expect((await client.getPlaylists()).map((p) => p.id),
+          isNot(contains(created.id)));
+    });
+
     test('unknown ids fail cleanly', () async {
       expect(() => client.getAlbumSongs('does-not-exist'), throwsException);
       // Navidrome 0.64 answers error 70 "data not found".

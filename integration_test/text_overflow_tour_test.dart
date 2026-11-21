@@ -21,7 +21,7 @@ import 'package:melodize/features/player/mini_player.dart';
 import 'package:melodize/features/shell/main_shell.dart';
 import 'package:melodize/main.dart' as app;
 
-import 'helpers.dart' show pumpUntil, fillSetup;
+import 'helpers.dart' show pumpUntil, fillSetup, openLibraryView;
 
 const _url = String.fromEnvironment('ND_URL');
 const _user = String.fromEnvironment('ND_USER');
@@ -132,14 +132,18 @@ void main() {
     await shot('playlist-detail-collapsed');
     await back();
 
-    await tab('Library');
-    await pumpUntil(tester, find.text('Songs'));
+    await openLibraryView(tester, 'all');
+    await pumpUntil(tester, find.textContaining(_longPlaylist));
+    await shot('library-overview');
+    await openLibraryView(tester, 'playlists');
+    await pumpUntil(tester, find.textContaining(_longPlaylist));
+    await shot('library-playlists');
+    await openLibraryView(tester, 'songs');
     await tester.scrollUntilVisible(find.textContaining('Another Painfully'), 200,
         scrollable: find.byType(Scrollable).last);
     await shot('library-songs');
 
-    await tester.tap(find.text('Albums'));
-    await tester.pump(const Duration(milliseconds: 800));
+    await openLibraryView(tester, 'albums');
     await pumpUntil(tester, find.textContaining(_longAlbum));
     await shot('library-albums');
     await tapText(_longAlbum);
@@ -148,8 +152,7 @@ void main() {
     await shot('album-detail-collapsed');
     await back();
 
-    await tester.tap(find.text('Artists'));
-    await tester.pump(const Duration(milliseconds: 800));
+    await openLibraryView(tester, 'artists');
     await pumpUntil(tester, find.textContaining('Test Artist'));
     await tester.scrollUntilVisible(find.text(_longArtistFull), 200,
         scrollable: find.byType(Scrollable).last);

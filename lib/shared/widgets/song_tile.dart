@@ -6,6 +6,22 @@ import '../../core/providers.dart';
 import '../utils/snack.dart';
 import '../utils/song_actions.dart';
 import 'cover_art_image.dart';
+import 'song_drag.dart';
+import '../../features/playlists/add_to_playlist_sheet.dart';
+
+/// An extra entry in a song's ⋮ sheet, e.g. "Remove from this playlist".
+class SongMenuAction {
+  final IconData icon;
+  final String label;
+  final bool destructive;
+  final VoidCallback onTap;
+  const SongMenuAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.destructive = false,
+  });
+}
 
 class SongTile extends ConsumerWidget {
   final Song song;
@@ -19,6 +35,16 @@ class SongTile extends ConsumerWidget {
   /// Replaces the artist (· album) line, e.g. "Glasshouse · 38 plays".
   final String? subtitle;
 
+  /// Long-press, usually to start selecting several songs.
+  final VoidCallback? onLongPress;
+
+  /// Non-null while the list is in selection mode: the cover becomes a
+  /// check mark and the ⋮ button is hidden.
+  final bool? selected;
+
+  /// Extra entries at the end of the ⋮ sheet.
+  final List<SongMenuAction> menuActions;
+
   const SongTile({
     super.key,
     required this.song,
@@ -27,6 +53,9 @@ class SongTile extends ConsumerWidget {
     this.trailing,
     this.leading,
     this.subtitle,
+    this.onLongPress,
+    this.selected,
+    this.menuActions = const [],
   });
 
   @override
@@ -46,14 +75,39 @@ class SongTile extends ConsumerWidget {
       downloadNotifierProvider.select((m) => m[song.id]?.status),
     );
 
-    return ListTile(
+    final selecting = selected != null;
+    final cover = leading ??
+        CoverArtImage(
+            coverArtId: song.coverArt,
+            localPath: song.localPath,
+            songId: song.id,
+            size: 48);
+    final tile = ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-      leading: leading ??
-          CoverArtImage(
-              coverArtId: song.coverArt,
-              localPath: song.localPath,
-              songId: song.id,
-              size: 48),
+      selected: selected ?? false,
+      selectedTileColor: scheme.secondaryContainer.withValues(alpha: 0.6),
+      selectedColor: scheme.onSurface,
+      shape: selecting
+          ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+          : null,
+      onLongPress: onLongPress,
+      leading: !selecting
+          ? cover
+          : AnimatedSwitcher(
+              duration: const Duration(milliseconds: 150),
+              child: selected!
+                  ? Container(
+                      key: const ValueKey('checked'),
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: scheme.primary,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(Icons.check_rounded, color: scheme.onPrimary),
+                    )
+                  : KeyedSubtree(key: const ValueKey('cover'), child: cover),
+            ),
       title: Text(
         song.title,
         maxLines: 1,
@@ -73,37 +127,53 @@ class SongTile extends ConsumerWidget {
             .bodySmall
             ?.copyWith(color: scheme.onSurfaceVariant),
       ),
-      trailing: trailing ??
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (song.suffix != null)
-                _QualityBadge(label: song.suffix!.toUpperCase()),
-              if (isDownloaded)
-                Padding(
-                  padding: const EdgeInsets.only(left: 4),
-                  child: Icon(Icons.download_done_rounded,
-                      size: 16, color: scheme.primary),
-                )
-              else if (downloadStatus == 'queued' ||
-                  downloadStatus == 'downloading')
-                const Padding(
-                  padding: EdgeInsets.only(left: 6),
-                  child: SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                )
-              else if (downloadStatus == 'error')
-                Padding(
-                  padding: const EdgeInsets.only(left: 4),
-                  child: Icon(Icons.error_outline_rounded,
-                      size: 16, color: scheme.error),
-                ),
-              _MoreButton(song: song, isDownloaded: isDownloaded),
-            ],
-          ),
+      trailing: selecting
+          ? null
+          : trailing ??
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (song.suffix != null)
+                    _QualityBadge(label: song.suffix!.toUpperCase()),
+                  if (isDownloaded)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Icon(Icons.download_done_rounded,
+                          size: 16, color: scheme.primary),
+                    )
+                  else if (downloadStatus == 'queued' ||
+                      downloadStatus == 'downloading')
+                    const Padding(
+                      padding: EdgeInsets.only(left: 6),
+                      child: SizedBox.square(
+                        dimension: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  else if (downloadStatus == 'error')
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Icon(Icons.error_outline_rounded,
+                          size: 16, color: scheme.error),
+                    ),
+                  _MoreButton(
+                      song: song,
+                      isDownloaded: isDownloaded,
+                      extra: menuActions),
+                ],
+              ),
       onTap: onTap,
+    );
+    // Desktop Library: drag a song onto a playlist in the sidebar.
+    if (selecting || song.isExternal || !SongDragScope.enabled(context)) {
+      return tile;
+    }
+    return Draggable<SongDragData>(
+      data: SongDragData([song]),
+      dragAnchorStrategy: pointerDragAnchorStrategy,
+      feedback: SongDragFeedback(songs: [song]),
+      childWhenDragging: Opacity(opacity: 0.5, child: tile),
+      child: tile,
     );
   }
 }
@@ -136,7 +206,9 @@ class _QualityBadge extends StatelessWidget {
 class _MoreButton extends ConsumerWidget {
   final Song song;
   final bool isDownloaded;
-  const _MoreButton({required this.song, required this.isDownloaded});
+  final List<SongMenuAction> extra;
+  const _MoreButton(
+      {required this.song, required this.isDownloaded, this.extra = const []});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -217,6 +289,15 @@ class _MoreButton extends ConsumerWidget {
               },
             ),
             if (!song.isExternal)
+              ListTile(
+                leading: const Icon(Icons.playlist_add_rounded),
+                title: const Text('Add to playlist'),
+                onTap: () {
+                  Navigator.pop(context);
+                  showAddToPlaylistSheet(context, ref, [song]);
+                },
+              ),
+            if (!song.isExternal)
               Consumer(builder: (_, ref, __) {
                 final liked = ref.watch(isLikedProvider(song.id));
                 return ListTile(
@@ -250,7 +331,8 @@ class _MoreButton extends ConsumerWidget {
                 },
               ),
             if (!isDownloaded &&
-                (ref.read(downloadNotifierProvider.notifier)
+                (ref
+                    .read(downloadNotifierProvider.notifier)
                     .isDownloading(song.id)))
               ListTile(
                 leading: const Icon(Icons.cancel_outlined),
@@ -271,8 +353,8 @@ class _MoreButton extends ConsumerWidget {
               ),
             if (canDelete)
               ListTile(
-                leading: Icon(Icons.delete_forever_rounded,
-                    color: scheme.error),
+                leading:
+                    Icon(Icons.delete_forever_rounded, color: scheme.error),
                 title: Text('Delete from server',
                     style: TextStyle(color: scheme.error)),
                 onTap: () {
@@ -280,11 +362,21 @@ class _MoreButton extends ConsumerWidget {
                   confirmAndDeleteSong(context, ref, song);
                 },
               ),
+            for (final a in extra)
+              ListTile(
+                leading:
+                    Icon(a.icon, color: a.destructive ? scheme.error : null),
+                title: Text(a.label,
+                    style:
+                        a.destructive ? TextStyle(color: scheme.error) : null),
+                onTap: () {
+                  Navigator.pop(context);
+                  a.onTap();
+                },
+              ),
           ],
         ),
       ),
     );
   }
-
 }
-

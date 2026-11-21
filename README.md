@@ -14,6 +14,8 @@ shuffle with automatic crossfades, and Deezer-powered discovery, in a Material 3
 ## Features
 
 - Streams the original FLAC, Opus or MP3, or a transcode at 320, 192 or 128 kbps.
+- Playlists saved on your Navidrome server: create, rename, reorder, add from any song, album,
+  selection or the queue; they stay playable offline.
 - Offline downloads: single songs, whole albums, or automatic (when played, or the whole library).
 - Synced lyrics from LRCLIB that follow the song, with plain-text fallbacks.
 - Queue: drag to reorder, play next, add to queue, swipe to remove, in every shuffle mode.

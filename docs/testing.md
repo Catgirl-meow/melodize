@@ -53,7 +53,8 @@ Files in `integration_test/`, each a separate app launch with an empty app profi
 |---|---|
 | `test_server_smoke_test.dart` | setup form validation, wrong password, connect, library list, play and skip, Remove missing files, switching server |
 | `app_flows_test.dart` | album and artist pages, Play on an album, search, Play next, Add to queue, skip, shuffle and smart-shuffle cycling, repeat modes, the queue sheet, the sleep timer |
-| `downloads_test.dart` | downloading a song for offline, the Downloaded songs screen, removing the download |
+| `downloads_test.dart` | downloading a song for offline, the Downloaded songs screen and Library → Downloaded, removing the download |
+| `playlists_test.dart` | creating a playlist from Library, Add to playlist from song menus, opening it, rename and drag-reorder in the editor, Remove from this playlist, delete |
 | `shuffle_transition_test.dart` | natural song changes in shuffle and smart shuffle go straight to the planned next song (drives the audio handler, ~2.5 min) |
 | `text_overflow_tour_test.dart` | walks every main screen with the "Long Names" library and fails on any layout overflow |
 

@@ -78,6 +78,7 @@ Every Riverpod provider lives here (~1.4k lines). Key patterns:
 ### Data
 
 - **drift/SQLite** (`lib/core/db/database.dart`): `CachedSongs` (library cache incl. download state), `PlayHistory` (deliberately stores artist/title strings, not IDs, so Deezer recommendations survive server switches), `ServerConfig` (single active), `DownloadQueue` (persisted local-download queue: resumed on restart, failures kept with their reason), `LyricsCache`, plus recommendation feedback: `PendingLikes`, `DismissedRecs` ("Not interested"), `RecImpressions`, `MoreLikeThisTaps`; `PlayHistory` also records listen length and skips. Schema v7; migrations in `MigrationStrategy.onUpgrade`. Singleton via `AppDatabase()`.
+- **Playlists**: Navidrome playlists, edited through `PlaylistActions` (providers.dart), which picks the fewest Subsonic calls (`planSongChange` in `lib/core/playlists/playlist_edits.dart`; reorders use `createPlaylist?playlistId=…`) and reloads from the server. `PlaylistCache` keeps the last list and song order in `melodize_playlists.json` for offline use. Smart playlists and other users' playlists are read-only (`Playlist.isEditableBy`).
 - **APIs** (`lib/core/api/`): `SubsonicClient` (MD5-salted auth), `CompanionAudioApi` (analysis cache fetch, rendered-transition jobs, downloads with auth headers), `DeezerClient` (public API + ARL session validation), `LrcLibClient` + `lyrics_ovh_client.dart` (multi-provider lyrics fallback).
 
 ### Recommendations

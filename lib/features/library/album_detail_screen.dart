@@ -8,6 +8,7 @@ import '../../shared/utils/song_actions.dart';
 import '../../shared/widgets/detail_actions.dart';
 import '../../shared/widgets/detail_header.dart';
 import '../../shared/widgets/song_tile.dart';
+import '../playlists/add_to_playlist_sheet.dart';
 
 class AlbumDetailScreen extends ConsumerWidget {
   final Album album;
@@ -27,6 +28,16 @@ class AlbumDetailScreen extends ConsumerWidget {
                 ? '${album.artist} · ${album.year}'
                 : album.artist,
             coverArtId: album.coverArt,
+            actions: [
+              IconButton(
+                key: const Key('album-add-to-playlist'),
+                tooltip: 'Add album to playlist',
+                icon: const Icon(Icons.playlist_add_rounded),
+                onPressed: songs == null || songs.isEmpty
+                    ? null
+                    : () => showAddToPlaylistSheet(context, ref, songs),
+              ),
+            ],
           ),
           SliverToBoxAdapter(
             child: DetailActions(

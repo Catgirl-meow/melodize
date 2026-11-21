@@ -8,6 +8,7 @@ import '../../../shared/utils/snack.dart';
 import '../../../shared/utils/song_actions.dart';
 import '../../../shared/widgets/error_notice.dart';
 import '../../../shared/widgets/song_tile.dart';
+import '../../playlists/add_to_playlist_sheet.dart';
 
 enum ArtistSongsOrder { mostPlayed, byAlbum, title, newest, downloaded }
 
@@ -137,6 +138,15 @@ class _ArtistSongsScreenState extends ConsumerState<ArtistSongsScreen> {
                 ),
           actions: _selecting
               ? [
+                  IconButton(
+                    tooltip: 'Add to playlist',
+                    onPressed: () async {
+                      await showAddToPlaylistSheet(
+                          context, ref, selectedSongs);
+                      if (mounted) setState(_selected.clear);
+                    },
+                    icon: const Icon(Icons.playlist_add_rounded),
+                  ),
                   IconButton(
                     tooltip: 'Add to queue',
                     onPressed: () async {

@@ -7,7 +7,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:melodize/core/api/subsonic_client.dart';
 import 'package:melodize/core/db/database.dart';
 import 'package:melodize/core/errors/app_errors.dart';
+import 'dart:io';
+
+import 'package:melodize/core/models/playlist.dart';
 import 'package:melodize/core/models/recommendations_state.dart';
+import 'package:melodize/core/playlists/playlist_cache.dart';
 import 'package:melodize/core/providers.dart';
 
 CachedSongsCompanion _row(String id, String title,
@@ -25,8 +29,10 @@ CachedSongsCompanion _row(String id, String title,
 
 void main() {
   late AppDatabase db;
+  late Directory cacheDir;
 
   setUp(() async {
+    cacheDir = await Directory.systemTemp.createTemp('melodize-pl');
     db = AppDatabase.forTesting(NativeDatabase.memory());
     await db.upsertSongs([
       _row('1', 'Diamonds', track: 2),
@@ -34,7 +40,10 @@ void main() {
       _row('3', 'Something Else', albumId: 'al-2'),
     ]);
   });
-  tearDown(() => db.close());
+  tearDown(() async {
+    await db.close();
+    await cacheDir.delete(recursive: true);
+  });
 
   // Port 9 (discard) on loopback: nothing listens, so requests are refused
   // at once — a stand-in for a server that can't be reached.
@@ -49,6 +58,8 @@ void main() {
       databaseProvider.overrideWithValue(db),
       isOnlineProvider.overrideWith((_) => Stream.value(online)),
       subsonicClientProvider.overrideWithValue(unreachable),
+      playlistCacheProvider.overrideWithValue(
+          PlaylistCache(directory: () async => cacheDir)),
     ]);
     addTearDown(c.dispose);
     // Keep connectivity alive and resolved before the providers under test
@@ -100,5 +111,23 @@ void main() {
         throwsA(isA<DeviceOfflineException>()));
     final recs = await c.read(recommendationsProvider.future);
     expect(recs, isA<RecsError>());
+  });
+
+  test('offline playlists come from the last server answer', () async {
+    final cache = PlaylistCache(directory: () async => cacheDir);
+    final account = playlistCacheAccount('http://127.0.0.1:9', 'u');
+    await cache.savePlaylists(account, const [
+      Playlist(id: 'p1', name: 'Road trip', songCount: 2, duration: 0,
+          changed: ''),
+    ]);
+    await cache.saveSongIds(account, 'p1', ['3', 'gone', '1']);
+    final c = await container(online: false);
+    final playlists = await c.read(playlistsProvider.future);
+    expect(playlists.single.name, 'Road trip');
+    final songs = await c.read(playlistSongsProvider('p1').future);
+    // Order kept; a song no longer in the library cache is left out.
+    expect(songs.map((s) => s.id), ['3', '1']);
+    await expectLater(c.read(playlistSongsProvider('never-opened').future),
+        throwsA(isA<DeviceOfflineException>()));
   });
 }
