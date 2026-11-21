@@ -70,6 +70,9 @@ class _WavySliderState extends State<WavySlider> with TickerProviderStateMixin {
   );
   bool _dragging = false;
   bool _reduced = false;
+  // Last value reported during a drag; the parent may not have rebuilt
+  // with it yet when the drag ends.
+  double? _dragValue;
 
   bool get _interactive => widget.onChanged != null;
 
@@ -169,17 +172,24 @@ class _WavySliderState extends State<WavySlider> with TickerProviderStateMixin {
               behavior: HitTestBehavior.opaque,
               onHorizontalDragStart: (d) {
                 _setDragging(true);
-                final v = _valueAt(d.localPosition, w);
+                final v = _dragValue = _valueAt(d.localPosition, w);
                 widget.onChangeStart?.call(v);
                 widget.onChanged?.call(v);
               },
-              onHorizontalDragUpdate: (d) =>
-                  widget.onChanged?.call(_valueAt(d.localPosition, w)),
+              onHorizontalDragUpdate: (d) => widget.onChanged
+                  ?.call(_dragValue = _valueAt(d.localPosition, w)),
               onHorizontalDragEnd: (_) {
                 _setDragging(false);
-                widget.onChangeEnd?.call(widget.value);
+                widget.onChangeEnd?.call(_dragValue ?? widget.value);
+                _dragValue = null;
               },
-              onHorizontalDragCancel: () => _setDragging(false),
+              onHorizontalDragCancel: () {
+                _setDragging(false);
+                // Ends the drag where it was, so the caller never stays
+                // stuck in its dragging state.
+                widget.onChangeEnd?.call(_dragValue ?? widget.value);
+                _dragValue = null;
+              },
               onTapUp: (d) {
                 final v = _valueAt(d.localPosition, w);
                 widget.onChangeStart?.call(v);
