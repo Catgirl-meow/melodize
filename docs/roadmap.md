@@ -18,17 +18,12 @@ playback rework, the queue rewrite) is in git history and the release notes.
 |---|---|---|
 | Keep the password, companion key and Deezer ARL in the platform keystore | medium | They sit in plain text in the app database and preferences ([audit](audit-2026-10.md)). `flutter_secure_storage` with a one-time migration. On Linux it needs a Secret Service (GNOME Keyring or KWallet), which minimal desktops don't run, so keep a file fallback there. |
 
-## Visual polish (Material 3 Expressive)
-
-| Item | Effort | Notes |
-|---|---|---|
-| Remaining raw font sizes | small | Home cards (`_kCardTitleSize`), tiny badges (9 px) and a few banners still set `fontSize:` directly; the layout math depends on them, so move them to text styles together with that math. |
-
 ## Not planned
 
 CarPlay / Android Auto, macOS and iOS (macOS support was removed in November 2026), and
 recommendations from Navidrome's similar-songs API (Deezer finds music you don't already have).
 
-Dropped for now (October 2026): a wavy progress bar, haptics, and a collapsing app bar on
-Library. Likes (Subsonic star) and "not interested" on recommendations were picked back up in
+Dropped: large or collapsing app bars on the top-level tabs (tried again and declined in
+November 2026; they don't fit the app). The wavy progress bar and haptics, dropped in October,
+shipped in November 2026. Likes (Subsonic star) and "not interested" on recommendations were picked back up in
 November 2026 as part of taste-aware recommendations.

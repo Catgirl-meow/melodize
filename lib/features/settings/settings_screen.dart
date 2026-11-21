@@ -176,11 +176,12 @@ class SettingsScreen extends ConsumerWidget {
                 );
               },
             ),
-            const ListTile(
-              leading: Icon(Icons.auto_awesome_rounded),
-              title: Text('Smart transitions'),
-              subtitle: Text('Auto crossfade per song pair'),
-              trailing: Icon(Icons.info_outline_rounded, size: 18),
+            ListTile(
+              leading: const Icon(Icons.auto_awesome_rounded),
+              title: const Text('Smart transitions'),
+              subtitle: const Text('Auto crossfade per song pair'),
+              trailing: const _TileTrailing(),
+              onTap: () => _showSmartTransitionsSheet(context),
             ),
           ],
         ),
@@ -1106,6 +1107,84 @@ class _SettingsPageScaffold extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Explains how transitions are picked, with the companion's status, since
+/// the behavior has no setting of its own.
+void _showSmartTransitionsSheet(BuildContext context) {
+  showModalBottomSheet<void>(
+    context: context,
+    builder: (context) => const _SmartTransitionsSheet(),
+  );
+}
+
+class _SmartTransitionsSheet extends ConsumerWidget {
+  const _SmartTransitionsSheet();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final text = theme.textTheme;
+    final scheme = theme.colorScheme;
+    final configured = ref.watch(preferencesNotifierProvider).hasCompanion;
+    final available = ref.watch(companionAvailableProvider);
+    final analysis = ref.watch(companionAnalysisProvider);
+
+    final String status;
+    if (!configured) {
+      status = 'Companion not set up. Transitions use tempo and energy '
+          'estimates from genres.';
+    } else {
+      status = available.when(
+        loading: () => 'Checking the companion…',
+        error: (e, _) => "Couldn't reach the companion: $e",
+        data: (up) {
+          if (!up) return "Companion isn't reachable right now.";
+          return analysis.when(
+            loading: () => 'Companion connected. Loading analysis…',
+            error: (e, _) => "Couldn't load the companion's analysis: $e",
+            data: (cache) {
+              final n = cache?.bpm.length ?? 0;
+              return n == 0
+                  ? 'Companion connected. No songs analysed yet.'
+                  : 'Companion connected · $n songs analysed';
+            },
+          );
+        },
+      );
+    }
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Smart transitions',
+                style: AppTheme.emphasized(context).headlineSmall),
+            const SizedBox(height: 12),
+            Text(
+              'Melodize picks a crossfade for each pair of songs from their '
+              'tempo, energy and how quietly the first one ends.',
+              style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'With the companion connected, songs with matching tempo and key '
+              'get a beat-matched DJ blend, and fades start at phrase '
+              'boundaries instead of mid-vocal.',
+              style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 16),
+            Text(status,
+                style: text.bodyMedium?.copyWith(
+                    color: scheme.primary, fontWeight: FontWeight.w600)),
+          ],
+        ),
       ),
     );
   }

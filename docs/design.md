@@ -23,20 +23,28 @@ them.
 | Cover thumbnails (`CoverArtImage`, always use it; `externalUrl:` for Deezer art) | 8 |
 | Grid album covers (`AlbumGridTile`, Library and artist pages) | 12 |
 | Quality badges (FLAC, MP3) | 8 |
-| Cards, banners, grouped-list sections | 16 |
+| Cards, banners | 16 |
+| Grouped settings sections (`GroupedSection`) | 24 outer, 4 inner, 2 px gaps; a held tile rounds to 20 |
 | Bottom sheets (theme default; no hand-made `Material(borderRadius:)`) | 28 top |
 | Floating dock | 16, selection pill 19 (a stadium on its 38 px height) |
-| Mini player | paused: 28 pill with a round thumbnail; playing: 16 card with a 10 thumbnail |
+| Floating mini player | paused: 28 pill with a round thumbnail; playing: 16 card with a 10 thumbnail |
+| Classic mini player | top corners 24 paused / 16 playing; thumbnail 21 / 10; tonal play button 22 → 14 |
+| Now Playing play button | paused: 72 circle; playing: 84 × 72, radius 22; pressed 16. Previous/next: tonal circles, 14 pressed (`MorphButton`) |
 
 ## Type
 
-Use the theme's text styles, never a raw `fontSize:`.
+Use the theme's text styles, never a raw `fontSize:`. Emphasized styles
+(`AppTheme.emphasized(context)`) are the regular scale with a heavier weight and tighter tracking;
+keep them for the few things that should stand out. Body text stays regular.
 
 | Text | Style |
 |---|---|
-| Top-level tab titles (Home greeting, Library, Settings) | `AppTheme.pageTitleStyle` (`headlineMedium` bold) |
-| Home feed sections | `titleLarge` bold |
-| List sections on search, detail pages and the queue | `SectionHeader`: `titleMedium` bold + muted count |
+| Top-level tab titles (Home greeting, Library, Settings) | `AppTheme.pageTitleStyle` (emphasized `headlineMedium`) |
+| Now Playing song title | emphasized `headlineSmall` |
+| Home feed sections | emphasized `titleLarge` |
+| List sections on search, detail pages and the queue | `SectionHeader`: emphasized `titleMedium` + muted count |
+| Quality badges | emphasized `labelSmall` |
+| Home carousel cards | `AppTheme.cardTitleStyle` / `cardSubtitleStyle` (the carousel height is computed from them) |
 | Settings group labels | `labelLarge` in `primary` |
 | Detail-page header titles | `headlineSmall` bold |
 
@@ -113,6 +121,28 @@ track number in the cover slot.
 
 ## Motion
 
-Home sections enter with a staggered fade and slide on the M3 emphasized-decelerate curve
-(`Cubic(0.05, 0.7, 0.1, 1.0)`, 400 ms). Scroll physics follow the platform: bouncing on desktop,
-clamping on Android.
+Every UI animation uses a token from `lib/shared/theme/motion.dart`, never its own duration and
+curve:
+
+| Token | Timing | Use for |
+|---|---|---|
+| `Motion.spring` | 500 ms, slight overshoot | shapes that answer a touch (play button, mini player corners, pressed tiles, the like heart) |
+| `Motion.emphasized` | 500 ms | large shape or layout changes that stay on screen |
+| `Motion.enter` | 400 ms, emphasized decelerate | things arriving (Now Playing opening, Home sections, banners) |
+| `Motion.exit` | 200 ms, emphasized accelerate | things leaving (Now Playing closing, dismissals) |
+| `Motion.glide` | 300 ms, standard decelerate | settling after a gesture, the dock pill, lyric auto-scroll |
+| `Motion.standard` | 300 ms | small state changes |
+| `Motion.short` | 150 ms | fades, icon swaps, rotations |
+
+Home sections enter with a staggered fade and slide on `Motion.enter`. The progress line on Now
+Playing and the classic mini player is a wave (`WavySlider`) that moves only while audio plays and
+stays flat under the system's reduce-motion setting (`Motion.reduced`). Scroll physics follow the
+platform: bouncing on desktop, clamping on Android.
+
+## Haptics
+
+Android only, behind Settings → Appearance → Haptic feedback (on by default). Call
+`Haptics.tap/tick/lift(ref)` from `lib/core/utils/haptics.dart`, never `HapticFeedback`
+directly, and only for the user's own touches: play/pause (tap), skip, seek grab and release,
+shuffle, repeat and switches (tick), swiping a song out of the queue (tap). Nothing vibrates on
+its own.
