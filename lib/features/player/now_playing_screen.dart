@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import '../../core/models/song.dart';
 import '../../core/models/lyrics_result.dart';
+import '../../core/models/recommendations_state.dart';
 import '../../core/downloads/local_cover_cache.dart';
 import '../../core/errors/app_errors.dart';
 import '../../core/providers.dart';
@@ -22,6 +23,7 @@ import '../../shared/utils/snack.dart';
 import '../../shared/utils/song_actions.dart';
 import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/marquee_text.dart';
+import '../../shared/widgets/rec_widgets.dart';
 import 'queue_screen.dart';
 
 // ---------------------------------------------------------------------------
@@ -539,13 +541,32 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
                 Navigator.pop(sheetCtx);
               },
             ),
+            if (isPreview)
+              Consumer(builder: (_, ref, __) {
+                final liked = ref.watch(isLikedProvider(song.id));
+                return ListTile(
+                  leading: Icon(
+                      liked
+                          ? Icons.favorite_rounded
+                          : Icons.favorite_border_rounded,
+                      color: liked ? scheme.primary : null),
+                  title: Text(liked ? 'Unlike' : 'Like'),
+                  subtitle: liked
+                      ? null
+                      : const Text('Add to your library and like it'),
+                  onTap: () {
+                    Navigator.pop(sheetCtx);
+                    toggleRecommendationLike(this, song, liked: liked);
+                  },
+                );
+              }),
             ListTile(
-              leading: const Icon(Icons.auto_awesome_rounded),
-              title: const Text('More like this'),
-              subtitle: const Text('Rebuild recommendations from this track'),
+              leading: const Icon(Icons.radio_rounded),
+              title: const Text('Song radio'),
+              subtitle: const Text('Queue songs like this one after it'),
               onTap: () {
                 Navigator.pop(sheetCtx);
-                _moreLikeThis();
+                startSongRadio(context, ref, song);
               },
             ),
             if (isPreview && canUseCompanion)
@@ -585,6 +606,17 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
                   confirmAndDeleteSong(context, ref, song);
                 },
               ),
+            if (isPreview)
+              NotInterestedTile(
+                artist: song.artist,
+                subtitle: 'Hide it and skip to the next song',
+                onChoose: (wholeArtist) {
+                  Navigator.pop(sheetCtx);
+                  dislikeAndSkip(context, ref, song,
+                      wholeArtist: wholeArtist);
+                },
+              ),
+            const SizedBox(height: 8),
           ],
         ),
       ),
@@ -595,11 +627,6 @@ class _TopBarState extends ConsumerState<_TopBar> with DownloadPollingMixin {
   // system navigation bar.
   void _snack(String msg, {bool isError = false}) =>
       showStyledSnack(context, msg, isError: isError);
-
-  void _moreLikeThis() {
-    requestMoreLikeThis(ref, song);
-    _snack('Refreshing recommendations from "${song.title}"');
-  }
 
   Future<void> _addToLibraryViaCompanion() async {
     final deezerId = deezerIdOf(song);
@@ -640,6 +667,10 @@ class _PlayerPage extends StatelessWidget {
       child: Column(
         children: [
           const Spacer(flex: 1),
+          if (song.isExternal) ...[
+            _RecommendationChips(song: song, fg: fgAccent),
+            const SizedBox(height: 16),
+          ],
           RepaintBoundary(
             child: _AlbumArt(
                 coverUrl: coverUrl,
@@ -810,7 +841,97 @@ class _SongInfoRow extends StatelessWidget {
         ),
         // Keeps a scrolling title from running into the heart.
         const SizedBox(width: 12),
+        // Recommendations only: one tap hides the song and skips it, so
+        // disliking while listening needs no menu.
+        if (song.isExternal) ...[
+          _DislikeButton(song: song, color: fgAccent),
+          const SizedBox(width: 8),
+        ],
         LikeButton(song: song, color: fgAccent),
+      ],
+    );
+  }
+}
+
+/// Thumbs-down next to the heart on a recommendation: "Not interested" in
+/// one tap, then the next song.
+class _DislikeButton extends ConsumerWidget {
+  final Song song;
+  final Color color;
+  const _DislikeButton({required this.song, required this.color});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return IconButton(
+      tooltip: 'Not interested',
+      onPressed: () => dislikeAndSkip(context, ref, song),
+      style: IconButton.styleFrom(
+        foregroundColor: color,
+        side: BorderSide(color: color.withValues(alpha: 0.4)),
+      ),
+      icon: const Icon(Icons.thumb_down_outlined),
+    );
+  }
+}
+
+/// Above the cover of a recommendation: why it was picked and that it is a
+/// 30-second Deezer preview (both used to sit on the Home card).
+class _RecommendationChips extends ConsumerWidget {
+  final Song song;
+  final Color fg;
+  const _RecommendationChips({required this.song, required this.fg});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final recs = ref.watch(recommendationsProvider).valueOrNull;
+    final seed = recs is RecsReady ? recs.reasons[song.id] : null;
+    final scheme = Theme.of(context).colorScheme;
+    final labelStyle = Theme.of(context).textTheme.labelLarge;
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        if (seed != null)
+          Builder(builder: (_) {
+            final (icon, label) = describeRecReason(seed);
+            return Container(
+              height: 32,
+              padding: const EdgeInsets.fromLTRB(10, 0, 12, 0),
+              decoration: BoxDecoration(
+                color: scheme.secondaryContainer,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 16, color: scheme.onSecondaryContainer),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: labelStyle?.copyWith(
+                            color: scheme.onSecondaryContainer)),
+                  ),
+                ],
+              ),
+            );
+          }),
+        if (song.externalStreamUrl != null)
+          Container(
+            height: 32,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              border: Border.all(color: fg.withValues(alpha: 0.5)),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text('30 s PREVIEW',
+                style: labelStyle?.copyWith(
+                    color: fg, fontWeight: FontWeight.w600,
+                    letterSpacing: 0.4)),
+          ),
       ],
     );
   }

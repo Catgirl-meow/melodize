@@ -53,6 +53,7 @@ import 'library/local_search.dart';
 import 'likes/pending_like_match.dart';
 import 'playlists/playlist_cache.dart';
 import 'playlists/playlist_edits.dart';
+import 'recs/artist_credit.dart';
 import 'recs/taste_model.dart';
 
 // --- Database ---
@@ -759,16 +760,6 @@ final randomSongsProvider = FutureProvider<List<Song>>((ref) async {
 
 final deezerClientProvider = Provider<DeezerClient>((_) => DeezerClient());
 
-/// When set, [recommendationsProvider] builds the next list around this
-/// artist ("More like this" on a recommendation card or in the player).
-///
-/// The consumer clears it back to null before a plain refresh, so the next
-/// refresh goes back to the user's whole taste.
-typedef RecommendationSeed = ({String artist, String title, String? genre});
-
-final recommendationsSeedOverrideProvider =
-    StateProvider<RecommendationSeed?>((_) => null);
-
 /// "Not interested" choices, newest first. Home hides matching cards at once
 /// (and shows them again on Undo) without rebuilding the list.
 final dismissedRecsProvider = StreamProvider<List<DismissedRec>>(
@@ -790,7 +781,8 @@ bool isDismissed(Song song, Iterable<DismissedRec> dismissed) {
 
 /// Collects everything the taste model reads from the local database:
 /// play history (with skips), likes, server play counts, "Not interested",
-/// "More like this" taps and how often each card was shown.
+/// "Song radio" starts (stored as "more like this") and how often each card
+/// was shown.
 Future<TasteSignals> loadTasteSignals(AppDatabase db) async {
   final library = await db.getAllCachedSongs();
   final genreByArtist = <String, String>{};
@@ -861,7 +853,6 @@ final recommendationsProvider =
   final db = ref.watch(databaseProvider);
   final client = ref.watch(subsonicClientProvider);
   final deezer = ref.watch(deezerClientProvider);
-  final override = ref.watch(recommendationsSeedOverrideProvider);
   // read, not watch: moving the slider applies on the next refresh instead
   // of reshuffling the list under the user's finger.
   final discovery = ref.read(preferencesNotifierProvider).recDiscovery;
@@ -878,25 +869,36 @@ final recommendationsProvider =
   }
 
   final signals = await loadTasteSignals(db);
+  // Keyed by each artist of a credit: seeds are single artists, while
+  // history rows can read "A • B".
+  Iterable<String> keysOf(String credit) =>
+      splitArtistCredit(credit).map(normalize);
   final titleOf = <String, String>{
-    for (final e in signals.history.reversed) normalize(e.artist): e.title,
-    for (final l in signals.likes) normalize(l.artist): l.title,
-    if (override != null) normalize(override.artist): override.title,
+    for (final e in signals.history.reversed)
+      for (final k in keysOf(e.artist)) k: e.title,
+    for (final l in signals.likes)
+      for (final k in keysOf(l.artist)) k: l.title,
   };
   final genreOf = <String, String>{
-    for (final e in signals.genreByArtist.entries) normalize(e.key): e.value,
-    if (override?.genre != null) normalize(override!.artist): override.genre!,
+    for (final e in signals.genreByArtist.entries)
+      for (final k in keysOf(e.key)) k: e.value,
   };
 
   // Throws on failure: the model tells "Deezer is down" apart from "no
   // radio" only if errors reach it.
   Future<List<RecommendedTrack>> radio(TasteSeed seed) async {
     final key = normalize(seed.artist);
-    final id = await deezer.searchBestArtist(
-      artistName: seed.artist,
-      trackTitle: titleOf[key],
-      genreHint: genreOf[key],
-    );
+    // "MC KAIQUE SP, merunes": the whole name first, then each part, since a
+    // comma or "&" can also belong to one artist's name.
+    int? id;
+    for (final name in artistLookupNames(seed.artist)) {
+      id = await deezer.searchBestArtist(
+        artistName: name,
+        trackTitle: titleOf[key],
+        genreHint: genreOf[key],
+      );
+      if (id != null) break;
+    }
     if (id == null) throw NoDeezerRadio(seed.artist);
     final tracks = await deezer.artistRadio(id, limit: 20);
     if (tracks.isEmpty) throw NoDeezerRadio(seed.artist);
@@ -911,7 +913,6 @@ final recommendationsProvider =
       radio: radio,
       rng: Random(),
       weights: TasteWeights(discovery: discovery),
-      focusArtist: override?.artist,
     );
   } on NoTasteYet {
     return const RecsEmptyNoHistory();
@@ -925,9 +926,6 @@ final recommendationsProvider =
     }
     return RecsError('Could not reach Deezer for ${network.length} of '
         '${e.errors.length} artists: ${describeError(network.first)}');
-  } on FocusRadioFailed catch (e) {
-    return RecsError("Couldn't load songs like ${e.artist} from Deezer: "
-        '${describeError(e.error)}');
   } on RecsFailure catch (e) {
     return RecsError(e.message);
   }

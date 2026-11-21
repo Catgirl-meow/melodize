@@ -117,72 +117,19 @@ void main() {
     expect(picks, hasLength(3));
   });
 
-  group('More like this (focusArtist)', () {
+  test('a joined credit "A • B" gives affinity to A and to B', () {
     final now = DateTime(2026, 11, 19);
-    final played = TasteSignals(history: [
-      ListenEvent(artist: 'Kaito Ren', title: 'Tokyo Rain', at: now),
-    ]);
-
-    test('seeds first, even for an artist never played', () async {
-      final asked = <String>[];
-      final r = await recommend(
-        signals: played,
-        now: now,
-        radio: (seed) async {
-          asked.add(seed.artist);
-          return [for (var i = 0; i < 10; i++) _t('${seed.artist} fan $i', i)];
-        },
-        rng: math.Random(1),
-        focusArtist: 'Glass Parade',
-      );
-      expect(r.seeds.first.artist, 'Glass Parade');
-      expect(r.seeds.first.reason, SeedReason.requested);
-      expect(asked, contains('Kaito Ren'));
-      expect(r.tracks.where((t) => t.because.artist == 'Glass Parade'),
-          isNotEmpty);
-      expect(reasonLabel(r.seeds.first), 'More like Glass Parade');
-    });
-
-    test('its radio failing fails the call, naming the artist', () async {
-      await expectLater(
-        recommend(
-          signals: played,
-          now: now,
-          radio: (seed) async => seed.artist == 'Glass Parade'
-              ? throw Exception('HTTP 500')
-              : [_t('Z', 1)],
-          rng: math.Random(1),
-          focusArtist: 'Glass Parade',
-        ),
-        throwsA(isA<FocusRadioFailed>()
-            .having((e) => e.message, 'message', contains('Glass Parade'))),
-      );
-    });
-
-    test('no radio for it: NoRadioTracks, not a list without it', () async {
-      await expectLater(
-        recommend(
-          signals: played,
-          now: now,
-          radio: (seed) async =>
-              seed.artist == 'Glass Parade' ? [] : [_t('Z', 1)],
-          rng: math.Random(1),
-          focusArtist: 'Glass Parade',
-        ),
-        throwsA(isA<NoRadioTracks>()),
-      );
-    });
-
-    test('works with no history at all', () async {
-      final r = await recommend(
-        signals: const TasteSignals(),
-        now: now,
-        radio: (seed) async => [_t('Fan', 1)],
-        rng: math.Random(1),
-        focusArtist: 'Glass Parade',
-      );
-      expect(r.tracks.single.track.artist, 'Fan');
-    });
+    final p = TasteProfile.build(
+        TasteSignals(history: [
+          ListenEvent(artist: 'qaraqshy • !Nxght • KIXIA', title: 'T', at: now),
+          ListenEvent(artist: 'Kaito Ren feat. Mio', title: 'T', at: now),
+        ]),
+        now: now);
+    expect(p.affinityOf('qaraqshy'), greaterThan(0));
+    expect(p.affinityOf('KIXIA'), greaterThan(0));
+    expect(p.affinityOf('Mio'), greaterThan(0));
+    expect(p.displayName.values,
+        isNot(contains('qaraqshy • !Nxght • KIXIA')));
   });
 
   group('recommend() fails loudly', () {
@@ -229,6 +176,31 @@ void main() {
         expect(e.errors.keys, containsAll(['Kaito Ren', 'Orbit Theory']));
         expect(e.message, contains('HTTP 503'));
       }
+    });
+
+    test('an artist Deezer has no radio for is swapped for the next one',
+        () async {
+      final signals = TasteSignals(history: [
+        for (final a in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'])
+          ListenEvent(artist: a, title: 'T', at: now),
+      ]);
+      final asked = <String>[];
+      final r = await recommend(
+          signals: signals,
+          now: now,
+          radio: (seed) async {
+            asked.add(seed.artist);
+            if (seed.artist == 'A' || seed.artist == 'B') {
+              throw NoDeezerRadio(seed.artist);
+            }
+            return [for (var i = 0; i < 5; i++) _t('${seed.artist} $i', i)];
+          },
+          rng: math.Random(1));
+      expect(r.failedSeeds, isEmpty);
+      // Eight radios loaded: the two unknown seeds were replaced.
+      expect(r.seeds, hasLength(8));
+      expect(r.unknownArtists.toSet(),
+          {'A', 'B'}.intersection(asked.toSet()));
     });
 
     test('one radio failing: a list, with the failure reported', () async {
