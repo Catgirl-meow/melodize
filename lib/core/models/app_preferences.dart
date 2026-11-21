@@ -34,6 +34,9 @@ class AppPreferences {
   /// Recommendations: boost for artists never played, 0 (familiar) – 2
   /// (adventurous). See TasteWeights.discovery.
   final double recDiscovery;
+  /// Light vibration on playback controls, queue moves and switches
+  /// (Android only; desktop has no motor).
+  final bool hapticFeedback;
 
   const AppPreferences({
     this.streamQuality = 'lossless',
@@ -57,6 +60,7 @@ class AppPreferences {
     this.shuffleMode = 'off',
     this.downloadLikedOffline = false,
     this.recDiscovery = 0.5,
+    this.hapticFeedback = true,
   });
 
   bool get hasCompanion =>
@@ -85,6 +89,7 @@ class AppPreferences {
     String? shuffleMode,
     bool? downloadLikedOffline,
     double? recDiscovery,
+    bool? hapticFeedback,
   }) =>
       AppPreferences(
         streamQuality: streamQuality ?? this.streamQuality,
@@ -110,6 +115,7 @@ class AppPreferences {
         shuffleMode: shuffleMode ?? this.shuffleMode,
         downloadLikedOffline: downloadLikedOffline ?? this.downloadLikedOffline,
         recDiscovery: recDiscovery ?? this.recDiscovery,
+        hapticFeedback: hapticFeedback ?? this.hapticFeedback,
       );
 
   // Tolerant field readers: one field with an unexpected type must not make
@@ -141,6 +147,7 @@ class AppPreferences {
         shuffleMode: _str(j['shuffleMode'], 'off'),
         downloadLikedOffline: _bool(j['downloadLikedOffline'], false),
         recDiscovery: _discovery(j['recDiscovery']),
+        hapticFeedback: _bool(j['hapticFeedback'], true),
       );
 
   Map<String, dynamic> toJson() => {
@@ -165,6 +172,7 @@ class AppPreferences {
         'shuffleMode': shuffleMode,
         'downloadLikedOffline': downloadLikedOffline,
         'recDiscovery': recDiscovery,
+        'hapticFeedback': hapticFeedback,
       };
 
   static Future<File> get _file async {
