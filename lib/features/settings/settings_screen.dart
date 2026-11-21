@@ -998,18 +998,16 @@ class _DeezerInfoCard extends StatelessWidget {
                 children: [
                   Text(
                     title,
-                    style: TextStyle(
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: textColor,
                       fontWeight: FontWeight.w600,
-                      fontSize: 14,
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    style: TextStyle(
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: textColor.withValues(alpha: 0.8),
-                      fontSize: 13,
                     ),
                   ),
                 ],
@@ -1154,8 +1152,7 @@ class _Step extends StatelessWidget {
             child: Center(
               child: Text(
                 '$n',
-                style: TextStyle(
-                  fontSize: 12,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   fontWeight: FontWeight.bold,
                   color: scheme.onPrimary,
                 ),

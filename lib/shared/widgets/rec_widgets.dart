@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/recs/taste_model.dart' show SeedReason, TasteSeed;
+import '../theme/motion.dart';
 
 /// Icon and label for why a recommendation was picked ("You like Kaito
 /// Ren"), shown as a chip in the player.
@@ -52,8 +53,8 @@ class _NotInterestedTileState extends State<NotInterestedTile> {
           onTap: () => setState(() => _open = !_open),
         ),
         AnimatedSize(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
+          duration: Motion.standard.duration,
+          curve: Motion.standard.curve,
           child: !_open
               ? const SizedBox(width: double.infinity)
               : Padding(

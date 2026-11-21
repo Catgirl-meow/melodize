@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
 import '../../features/settings/downloaded_songs_screen.dart';
+import '../theme/motion.dart';
 
 /// Inline offline banner. Animates in/out as the device goes offline/online.
 /// Shows "Offline. Browse downloads" with "downloads" tappable as a link.
@@ -60,8 +61,8 @@ class _OfflineBannerState extends ConsumerState<OfflineBanner> {
     final visible = _mode != null;
 
     return AnimatedSize(
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeOut,
+      duration: Motion.standard.duration,
+      curve: Motion.standard.curve,
       child: visible ? _BannerRow(isOffline: _mode!) : const SizedBox.shrink(),
     );
   }
@@ -75,6 +76,11 @@ class _BannerRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final bg = isOffline ? const Color(0xFFBF360C) : const Color(0xFF2E7D32);
 
+    final textStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: Colors.white,
+          fontWeight: FontWeight.w500,
+          decoration: TextDecoration.none,
+        );
     Widget content;
     if (isOffline) {
       content = Text.rich(
@@ -97,24 +103,11 @@ class _BannerRow extends StatelessWidget {
                     ),
             ),
           ],
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-            decoration: TextDecoration.none,
-          ),
+          style: textStyle,
         ),
       );
     } else {
-      content = const Text(
-        'Back online',
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: 13,
-          fontWeight: FontWeight.w500,
-          decoration: TextDecoration.none,
-        ),
-      );
+      content = Text('Back online', style: textStyle);
     }
 
     return Container(
@@ -130,7 +123,8 @@ class _BannerRow extends StatelessWidget {
             color: Colors.white,
           ),
           const SizedBox(width: 6),
-          content,
+          // Wraps instead of overflowing on narrow phones or large fonts.
+          Flexible(child: content),
         ],
       ),
     );

@@ -17,9 +17,8 @@ import '../../shared/widgets/offline_banner.dart';
 import '../../shared/widgets/song_tile.dart';
 import '../library/album_detail_screen.dart';
 import '../library/artist_detail_screen.dart';
+import '../../shared/theme/motion.dart';
 
-const _kEmphasizedDecelerate = Cubic(0.05, 0.7, 0.1, 1.0);
-const _kEmphasizedDuration = Duration(milliseconds: 400);
 
 // Search filters are local UI state: the query remains shared so the tab keeps
 // its query when IndexedStack switches screens.
@@ -499,8 +498,8 @@ class _AnimatedSection extends StatelessWidget {
     return TweenAnimationBuilder<double>(
       key: ValueKey(label),
       tween: Tween(begin: 0, end: 1),
-      duration: _kEmphasizedDuration,
-      curve: _kEmphasizedDecelerate,
+      duration: Motion.enter.duration,
+      curve: Motion.enter.curve,
       builder: (_, value, child) => Opacity(
         opacity: value,
         child: Transform.translate(

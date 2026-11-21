@@ -5,6 +5,7 @@ import '../../core/models/song.dart';
 import '../../core/providers.dart';
 import '../utils/download_polling_mixin.dart';
 import '../utils/snack.dart';
+import '../theme/motion.dart';
 
 /// Likes or unlikes a library song (a Navidrome star). Failures are reported
 /// by [LikesNotifier] as an error snackbar.
@@ -58,8 +59,8 @@ class _LikeButtonState extends ConsumerState<LikeButton>
           // A quick spring when the heart fills.
           key: ValueKey('liked-${widget.song.id}'),
           tween: Tween(begin: 0.6, end: 1),
-          duration: const Duration(milliseconds: 450),
-          curve: Curves.elasticOut,
+          duration: Motion.spring.duration,
+          curve: Motion.spring.curve,
           builder: (_, scale, child) =>
               Transform.scale(scale: scale, child: child),
           child: const Icon(Icons.favorite_rounded),

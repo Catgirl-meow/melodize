@@ -17,10 +17,8 @@ import '../library/album_detail_screen.dart';
 import '../library/playlist_detail_screen.dart';
 import '../settings/downloaded_songs_screen.dart';
 import '../settings/settings_screen.dart';
+import '../../shared/theme/motion.dart';
 
-// M3 Expressive motion tokens.
-const _kEmphasizedDecelerate = Cubic(0.05, 0.7, 0.1, 1.0);
-const _kEmphasizedDuration = Duration(milliseconds: 400);
 
 // Stagger delays per section (cascading entrance).
 const _kStagger0 = Duration.zero;
@@ -77,16 +75,13 @@ const _kCardExtent = _kCardImageSize + 8 + _kCarouselItemInset;
 // few characters on one line) and a one-line subtitle. The carousel's
 // height follows the text scale, so large system fonts don't clip the
 // subtitle. Card text uses an explicit line height to keep this exact.
-const _kCardLineHeight = 1.3;
-const _kCardTitleSize = 13.0;
-const _kCardSubtitleSize = 12.0;
-
 double _carouselHeight(BuildContext context) {
   final scaler = MediaQuery.textScalerOf(context);
+  const line = AppTheme.cardLineHeight;
   return _kCardImageSize +
       8 +
-      scaler.scale(_kCardTitleSize) * _kCardLineHeight * 2 +
-      scaler.scale(_kCardSubtitleSize) * _kCardLineHeight +
+      scaler.scale(AppTheme.cardTitleStyle(context).fontSize!) * line * 2 +
+      scaler.scale(AppTheme.cardSubtitleStyle(context).fontSize!) * line +
       2;
 }
 
@@ -432,11 +427,11 @@ class HomeScreen extends ConsumerWidget {
   static Widget _fadeIn({required Widget child, Duration delay = Duration.zero}) {
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
-      duration: _kEmphasizedDuration + delay,
+      duration: Motion.enter.duration + delay,
       curve: Interval(
-        delay.inMilliseconds / (_kEmphasizedDuration + delay).inMilliseconds,
+        delay.inMilliseconds / (Motion.enter.duration + delay).inMilliseconds,
         1.0,
-        curve: _kEmphasizedDecelerate,
+        curve: Motion.enter.curve,
       ),
       builder: (_, value, ch) => Opacity(
         opacity: value,
@@ -641,10 +636,7 @@ class _Section extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.2,
-                      ),
+                  style: AppTheme.emphasized(context).titleLarge,
                 ),
               ),
               if (trailing != null) trailing!,
@@ -667,7 +659,6 @@ class _SongCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Column(
@@ -693,17 +684,11 @@ class _SongCard extends ConsumerWidget {
           Text(song.title,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  fontSize: _kCardTitleSize,
-                  height: _kCardLineHeight,
-                  fontWeight: FontWeight.w600)),
+              style: AppTheme.cardTitleStyle(context)),
           Text(song.artist,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: _kCardSubtitleSize,
-                  height: _kCardLineHeight,
-                  color: scheme.onSurfaceVariant)),
+              style: AppTheme.cardSubtitleStyle(context)),
         ],
       ),
     );
@@ -719,7 +704,6 @@ class _AlbumCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
     Widget child = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Column(
@@ -741,17 +725,11 @@ class _AlbumCard extends ConsumerWidget {
           Text(album.name,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  fontSize: _kCardTitleSize,
-                  height: _kCardLineHeight,
-                  fontWeight: FontWeight.w600)),
+              style: AppTheme.cardTitleStyle(context)),
           Text(album.artist,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: _kCardSubtitleSize,
-                  height: _kCardLineHeight,
-                  color: scheme.onSurfaceVariant)),
+              style: AppTheme.cardSubtitleStyle(context)),
         ],
       ),
     );
@@ -774,7 +752,6 @@ class _PlaylistCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Column(
@@ -796,19 +773,13 @@ class _PlaylistCard extends ConsumerWidget {
           Text(playlist.name,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  fontSize: _kCardTitleSize,
-                  height: _kCardLineHeight,
-                  fontWeight: FontWeight.w600)),
+              style: AppTheme.cardTitleStyle(context)),
           Text(
               '${playlist.songCount} '
               '${playlist.songCount == 1 ? 'song' : 'songs'}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: _kCardSubtitleSize,
-                  height: _kCardLineHeight,
-                  color: scheme.onSurfaceVariant)),
+              style: AppTheme.cardSubtitleStyle(context)),
         ],
       ),
     );

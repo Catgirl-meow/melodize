@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../../shared/widgets/cover_art_image.dart';
+import '../../../shared/theme/motion.dart';
 
 /// Material 3 Expressive "cookie" shape: a circle with [lobes] soft scallops.
 class CookieShape extends ShapeBorder {
@@ -75,7 +76,7 @@ class ArtistImage extends StatelessWidget {
       width: size,
       height: size,
       fit: BoxFit.cover,
-      fadeInDuration: const Duration(milliseconds: 200),
+      fadeInDuration: Motion.short.duration,
       placeholder: (_, __) => fallback,
       errorWidget: (_, __, ___) => fallback,
     );

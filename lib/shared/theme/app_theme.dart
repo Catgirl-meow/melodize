@@ -2,6 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 
+/// Emphasized variants of a [TextTheme]; see [AppTheme.emphasized].
+class EmphasizedTextTheme {
+  const EmphasizedTextTheme(this._base);
+
+  final TextTheme _base;
+
+  static TextStyle? _emph(TextStyle? s, FontWeight weight, double tracking) =>
+      s?.copyWith(fontWeight: weight, letterSpacing: tracking);
+
+  TextStyle? get displaySmall =>
+      _emph(_base.displaySmall, FontWeight.w800, -0.6);
+  TextStyle? get headlineMedium =>
+      _emph(_base.headlineMedium, FontWeight.w800, -0.5);
+  TextStyle? get headlineSmall =>
+      _emph(_base.headlineSmall, FontWeight.w800, -0.3);
+  TextStyle? get titleLarge => _emph(_base.titleLarge, FontWeight.w700, -0.2);
+  TextStyle? get titleMedium => _emph(_base.titleMedium, FontWeight.w700, 0);
+  TextStyle? get labelSmall => _emph(_base.labelSmall, FontWeight.w800, 0.6);
+}
+
 class AppTheme {
   /// System bar style for a page of the given [brightness]: transparent bars
   /// (edge-to-edge) with icons that contrast with the page.
@@ -23,10 +43,29 @@ class AppTheme {
   }
 
   /// Title of a top-level tab (Home greeting, Library, Settings).
-  static TextStyle? pageTitleStyle(BuildContext context) => Theme.of(context)
+  static TextStyle? pageTitleStyle(BuildContext context) =>
+      emphasized(context).headlineMedium;
+
+  /// M3 Expressive emphasized type: the regular scale with a heavier weight
+  /// and slightly tighter tracking. Use it sparingly, for the few things that
+  /// should stand out (page titles, the Now Playing title, Home section
+  /// titles, quality badges); body text stays regular.
+  static EmphasizedTextTheme emphasized(BuildContext context) =>
+      EmphasizedTextTheme(Theme.of(context).textTheme);
+
+  /// Home carousel card text. The carousel height is computed from these
+  /// sizes (see `_carouselHeight` in home_screen.dart), so they carry an
+  /// explicit line height.
+  static const double cardLineHeight = 1.3;
+  static TextStyle cardTitleStyle(BuildContext context) => Theme.of(context)
       .textTheme
-      .headlineMedium
-      ?.copyWith(fontWeight: FontWeight.bold);
+      .bodyMedium!
+      .copyWith(height: cardLineHeight, fontWeight: FontWeight.w600);
+  static TextStyle cardSubtitleStyle(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.textTheme.bodySmall!.copyWith(
+        height: cardLineHeight, color: theme.colorScheme.onSurfaceVariant);
+  }
 
   /// Toolbar height for the top-level tabs' title bars.
   static const double pageTitleBarHeight = 64;
@@ -64,19 +103,21 @@ class AppTheme {
       seedColor: dynamic.primary,
       brightness: brightness,
     );
-    return dynamic.copyWith(
-      surface: full.surface,
-      surfaceDim: full.surfaceDim,
-      surfaceBright: full.surfaceBright,
-      surfaceContainerLowest: full.surfaceContainerLowest,
-      surfaceContainerLow: full.surfaceContainerLow,
-      surfaceContainer: full.surfaceContainer,
-      surfaceContainerHigh: full.surfaceContainerHigh,
-      surfaceContainerHighest: full.surfaceContainerHighest,
-      onSurface: full.onSurface,
-      onSurfaceVariant: full.onSurfaceVariant,
-      outlineVariant: full.outlineVariant,
-    ).harmonized();
+    return dynamic
+        .copyWith(
+          surface: full.surface,
+          surfaceDim: full.surfaceDim,
+          surfaceBright: full.surfaceBright,
+          surfaceContainerLowest: full.surfaceContainerLowest,
+          surfaceContainerLow: full.surfaceContainerLow,
+          surfaceContainer: full.surfaceContainer,
+          surfaceContainerHigh: full.surfaceContainerHigh,
+          surfaceContainerHighest: full.surfaceContainerHighest,
+          onSurface: full.onSurface,
+          onSurfaceVariant: full.onSurfaceVariant,
+          outlineVariant: full.outlineVariant,
+        )
+        .harmonized();
   }
 
   static ThemeData dark(ColorScheme? dynamicScheme) =>
@@ -108,15 +149,15 @@ class AppTheme {
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: scheme.surfaceContainer,
         indicatorColor: scheme.secondaryContainer,
-        labelTextStyle: WidgetStateProperty.resolveWith((states) =>
-            text.labelMedium?.copyWith(
-              color: states.contains(WidgetState.selected)
-                  ? scheme.onSurface
-                  : scheme.onSurfaceVariant,
-              fontWeight: states.contains(WidgetState.selected)
-                  ? FontWeight.w700
-                  : FontWeight.w500,
-            )),
+        labelTextStyle: WidgetStateProperty.resolveWith(
+            (states) => text.labelMedium?.copyWith(
+                  color: states.contains(WidgetState.selected)
+                      ? scheme.onSurface
+                      : scheme.onSurfaceVariant,
+                  fontWeight: states.contains(WidgetState.selected)
+                      ? FontWeight.w700
+                      : FontWeight.w500,
+                )),
       ),
       cardTheme: CardThemeData(
         elevation: 0,
