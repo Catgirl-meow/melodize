@@ -20,6 +20,7 @@ void main() {
         floatingNavBar: false,
         themeMode: 'light',
         shuffleMode: 'smartShuffle',
+        hapticFeedback: false,
       );
       final back = AppPreferences.fromJson(prefs.toJson());
       expect(back.toJson(), prefs.toJson());
@@ -30,6 +31,8 @@ void main() {
       expect(prefs.toJson(), const AppPreferences().toJson());
       expect(prefs.hasCompanion, isFalse);
       expect(prefs.hasDeezerArl, isFalse);
+      // Haptics start on; the switch turns them off.
+      expect(prefs.hapticFeedback, isTrue);
     });
 
     test('a field with the wrong type does not discard the others', () {

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/companion_http.dart' show serverUrlError;
 import '../../core/api/navidrome_native_client.dart';
@@ -8,7 +9,9 @@ import '../../core/models/app_preferences.dart';
 import '../../core/errors/app_errors.dart';
 import '../../core/providers.dart';
 import '../../shared/utils/song_actions.dart';
+import '../../core/utils/haptics.dart';
 import '../../core/utils/platform_dirs.dart';
+import '../../core/utils/platform_info.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../widgets/grouped_list_tile.dart';
 import 'debug_screen.dart';
@@ -124,11 +127,27 @@ class SettingsScreen extends ConsumerWidget {
               secondary: const Icon(Icons.dock_rounded),
               value: prefs.floatingNavBar,
               onChanged: (value) {
+                Haptics.tick(ref);
                 ref.read(preferencesNotifierProvider.notifier).update(
                       prefs.copyWith(floatingNavBar: value),
                     );
               },
             ),
+            // Desktop has no vibration motor.
+            if (isMobilePlatform)
+              SwitchListTile.adaptive(
+                title: const Text('Haptic feedback'),
+                subtitle: const Text('Light taps on playback controls'),
+                secondary: const Icon(Icons.vibration_rounded),
+                value: prefs.hapticFeedback,
+                onChanged: (value) {
+                  ref.read(preferencesNotifierProvider.notifier).update(
+                        prefs.copyWith(hapticFeedback: value),
+                      );
+                  // Confirms turning it on; turning it off stays silent.
+                  if (value) HapticFeedback.selectionClick();
+                },
+              ),
           ],
         ),
         const _SectionHeader('Playback'),
@@ -220,6 +239,7 @@ class SettingsScreen extends ConsumerWidget {
               secondary: const Icon(Icons.favorite_rounded),
               value: prefs.downloadLikedOffline,
               onChanged: (value) async {
+                Haptics.tick(ref);
                 ref.read(preferencesNotifierProvider.notifier).update(
                       prefs.copyWith(downloadLikedOffline: value),
                     );

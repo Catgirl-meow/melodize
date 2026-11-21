@@ -139,6 +139,8 @@ class _MelodizeAppState extends ConsumerState<MelodizeApp>
   @override
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
+    final haptics = ref.watch(
+        preferencesNotifierProvider.select((p) => p.hapticFeedback));
 
     return DynamicColorBuilder(
       builder: (lightScheme, darkScheme) {
@@ -162,7 +164,16 @@ class _MelodizeAppState extends ConsumerState<MelodizeApp>
           // and the Now Playing screen set their own region on top of this.
           builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
             value: AppTheme.systemOverlayFor(Theme.of(context).brightness),
-            child: child!,
+            // The "Haptic feedback" switch also silences the long-press
+            // vibration Flutter's list tiles give on their own.
+            child: Theme(
+              data: Theme.of(context).copyWith(
+                listTileTheme: Theme.of(context)
+                    .listTileTheme
+                    .copyWith(enableFeedback: haptics),
+              ),
+              child: child!,
+            ),
           ),
           home: const _StartupRouter(),
         );

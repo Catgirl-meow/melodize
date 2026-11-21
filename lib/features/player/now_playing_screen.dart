@@ -25,6 +25,7 @@ import '../../shared/widgets/cover_art_image.dart';
 import '../../shared/widgets/marquee_text.dart';
 import '../../shared/widgets/rec_widgets.dart';
 import 'queue_screen.dart';
+import '../../core/utils/haptics.dart';
 import '../../shared/theme/motion.dart';
 import '../../shared/widgets/morph_button.dart';
 import '../../shared/widgets/wavy_slider.dart';
@@ -998,12 +999,16 @@ class _SeekSliderState extends ConsumerState<_SeekSlider> {
           trackColor: scheme.surfaceContainerHighest,
           semanticLabel: 'Seek',
           semanticValue: '${_fmt(shownPos)} of ${_fmt(dur)}',
-          onChangeStart: (v) => setState(() {
-            _isDragging = true;
-            _sliderValue = v;
-          }),
+          onChangeStart: (v) {
+            Haptics.tick(ref);
+            setState(() {
+              _isDragging = true;
+              _sliderValue = v;
+            });
+          },
           onChanged: (v) => setState(() => _sliderValue = v),
           onChangeEnd: (v) {
+            Haptics.tick(ref);
             setState(() => _isDragging = false);
             final handler = ref.read(audioHandlerNotifierProvider);
             final d = ref.read(durationStreamProvider).valueOrNull;
@@ -1078,6 +1083,7 @@ class _PlayControls extends ConsumerWidget {
           onPressed: () async {
             final h = ref.read(audioHandlerNotifierProvider);
             if (h == null) return;
+            Haptics.tick(ref);
             await h.toggleShuffle();
             // Persist the new mode.
             final prefsNotifier =
@@ -1096,8 +1102,10 @@ class _PlayControls extends ConsumerWidget {
           pressedRadius: 14,
           color: fg.withValues(alpha: 0.16),
           tooltip: 'Previous',
-          onPressed: () =>
-              ref.read(audioHandlerNotifierProvider)?.skipToPrevious(),
+          onPressed: () {
+            Haptics.tick(ref);
+            ref.read(audioHandlerNotifierProvider)?.skipToPrevious();
+          },
           child: Icon(Icons.skip_previous_rounded,
               color: scheme.onSurface, size: 32),
         ),
@@ -1111,6 +1119,7 @@ class _PlayControls extends ConsumerWidget {
           color: fg,
           tooltip: isPlaying ? 'Pause' : 'Play',
           onPressed: () {
+            Haptics.tap(ref);
             final h = ref.read(audioHandlerNotifierProvider);
             isPlaying ? h?.pause() : h?.play();
           },
@@ -1127,7 +1136,10 @@ class _PlayControls extends ConsumerWidget {
           pressedRadius: 14,
           color: fg.withValues(alpha: 0.16),
           tooltip: 'Next',
-          onPressed: () => ref.read(audioHandlerNotifierProvider)?.skipToNext(),
+          onPressed: () {
+            Haptics.tick(ref);
+            ref.read(audioHandlerNotifierProvider)?.skipToNext();
+          },
           child:
               Icon(Icons.skip_next_rounded, color: scheme.onSurface, size: 32),
         ),
@@ -1141,8 +1153,10 @@ class _PlayControls extends ConsumerWidget {
                 : scheme.onSurface.withValues(alpha: 0.38),
           ),
           iconSize: 26,
-          onPressed: () =>
-              ref.read(audioHandlerNotifierProvider)?.cycleLoopMode(),
+          onPressed: () {
+            Haptics.tick(ref);
+            ref.read(audioHandlerNotifierProvider)?.cycleLoopMode();
+          },
         ),
       ],
     );

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/song.dart';
 import '../../../core/providers.dart';
+import '../../../core/utils/haptics.dart';
 import '../../../shared/widgets/cover_art_image.dart';
 
 // The mini player uses the same Android-first tonal surface as the dock.
@@ -163,14 +164,17 @@ class _MiniPlayerControls extends ConsumerWidget {
         IconButton(
           icon: const Icon(Icons.skip_previous_rounded),
           iconSize: 22,
-          onPressed: () =>
-              ref.read(audioHandlerNotifierProvider)?.skipToPrevious(),
+          onPressed: () {
+            Haptics.tick(ref);
+            ref.read(audioHandlerNotifierProvider)?.skipToPrevious();
+          },
         ),
         IconButton(
           icon:
               Icon(isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
           iconSize: 26,
           onPressed: () {
+            Haptics.tap(ref);
             final h = ref.read(audioHandlerNotifierProvider);
             isPlaying ? h?.pause() : h?.play();
           },
@@ -178,7 +182,10 @@ class _MiniPlayerControls extends ConsumerWidget {
         IconButton(
           icon: const Icon(Icons.skip_next_rounded),
           iconSize: 22,
-          onPressed: () => ref.read(audioHandlerNotifierProvider)?.skipToNext(),
+          onPressed: () {
+            Haptics.tick(ref);
+            ref.read(audioHandlerNotifierProvider)?.skipToNext();
+          },
         ),
       ],
     );
