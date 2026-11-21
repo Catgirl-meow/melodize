@@ -468,11 +468,16 @@ class _MainShellState extends ConsumerState<MainShell>
             animation: _playerAnim,
             builder: (_, child) {
               final t = _playerAnim.value;
-              return IgnorePointer(
-                ignoring: t < 0.01,
-                child: Transform.translate(
-                  offset: Offset(0, screenH * (1 - t)),
-                  child: child,
+              // Tickers (the wavy progress line, marquees) stop while the
+              // player is off screen.
+              return TickerMode(
+                enabled: t >= 0.01,
+                child: IgnorePointer(
+                  ignoring: t < 0.01,
+                  child: Transform.translate(
+                    offset: Offset(0, screenH * (1 - t)),
+                    child: child,
+                  ),
                 ),
               );
             },

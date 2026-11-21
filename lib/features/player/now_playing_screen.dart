@@ -26,6 +26,8 @@ import '../../shared/widgets/marquee_text.dart';
 import '../../shared/widgets/rec_widgets.dart';
 import 'queue_screen.dart';
 import '../../shared/theme/motion.dart';
+import '../../shared/widgets/morph_button.dart';
+import '../../shared/widgets/wavy_slider.dart';
 
 // ---------------------------------------------------------------------------
 
@@ -968,46 +970,56 @@ class _SeekSliderState extends ConsumerState<_SeekSlider> {
         ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
         : 0.0;
 
+    final playerState = ref.watch(
+      playerStateStreamProvider.select((s) => s.valueOrNull),
+    );
+    // The wave moves only while sound is actually coming out.
+    final moving = (playerState?.playing ?? false) &&
+        playerState?.processingState == ProcessingState.ready;
+    final shown = _isDragging ? _sliderValue : progress.toDouble();
+    final dur = duration ?? Duration.zero;
+    // While dragging, the left label shows where the seek will land.
+    final shownPos = _isDragging
+        ? Duration(milliseconds: (_sliderValue * dur.inMilliseconds).round())
+        : position;
+    final labelStyle = Theme.of(context)
+        .textTheme
+        .bodySmall
+        ?.copyWith(
+            color: scheme.onSurfaceVariant,
+            fontFeatures: const [FontFeature.tabularFigures()]);
+
     return Column(
       children: [
-        SliderTheme(
-          data: SliderTheme.of(context).copyWith(
-            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-            trackHeight: 3,
-            activeTrackColor: fg,
-            inactiveTrackColor: scheme.surfaceContainerHighest,
-            thumbColor: fg,
-            overlayShape: SliderComponentShape.noOverlay,
-          ),
-          child: Slider(
-            value: _isDragging ? _sliderValue : progress.toDouble(),
-            onChangeStart: (v) => setState(() {
-              _isDragging = true;
-              _sliderValue = v;
-            }),
-            onChanged: (v) => setState(() => _sliderValue = v),
-            onChangeEnd: (v) {
-              setState(() => _isDragging = false);
-              final handler = ref.read(audioHandlerNotifierProvider);
-              final dur = ref.read(durationStreamProvider).valueOrNull;
-              if (handler != null && dur != null) {
-                handler.seek(
-                    Duration(milliseconds: (v * dur.inMilliseconds).round()));
-              }
-            },
-          ),
+        WavySlider(
+          value: shown,
+          playing: moving,
+          color: fg,
+          trackColor: scheme.surfaceContainerHighest,
+          semanticLabel: 'Seek',
+          semanticValue: '${_fmt(shownPos)} of ${_fmt(dur)}',
+          onChangeStart: (v) => setState(() {
+            _isDragging = true;
+            _sliderValue = v;
+          }),
+          onChanged: (v) => setState(() => _sliderValue = v),
+          onChangeEnd: (v) {
+            setState(() => _isDragging = false);
+            final handler = ref.read(audioHandlerNotifierProvider);
+            final d = ref.read(durationStreamProvider).valueOrNull;
+            if (handler != null && d != null) {
+              handler.seek(
+                  Duration(milliseconds: (v * d.inMilliseconds).round()));
+            }
+          },
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(_fmt(position),
-                  style:
-                      Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-              Text(_fmt(duration ?? Duration.zero),
-                  style:
-                      Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+              Text(_fmt(shownPos), style: labelStyle),
+              Text(_fmt(dur), style: labelStyle),
             ],
           ),
         ),
@@ -1040,6 +1052,15 @@ class _PlayControls extends ConsumerWidget {
     final loopMode = ref.watch(
       loopModeStreamProvider.select((s) => s.valueOrNull ?? LoopMode.off),
     );
+    // The accent comes from the cover, so pick the icon colour by contrast
+    // rather than assuming onPrimary fits it.
+    final onAccent =
+        ThemeData.estimateBrightnessForColor(fg) == Brightness.dark
+            ? Colors.white
+            : Colors.black;
+    // Narrow phones (320 dp) get slightly smaller buttons so the row fits.
+    final compact = MediaQuery.sizeOf(context).width < 360;
+    final skip = compact ? 44.0 : 52.0;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -1067,35 +1088,48 @@ class _PlayControls extends ConsumerWidget {
             ));
           },
         ),
-        IconButton(
-          icon: Icon(Icons.skip_previous_rounded, color: scheme.onSurface),
-          iconSize: 40,
+        // Previous / next: tonal circles that square up while pressed.
+        MorphButton(
+          width: skip,
+          height: skip,
+          radius: skip / 2,
+          pressedRadius: 14,
+          color: fg.withValues(alpha: 0.16),
+          tooltip: 'Previous',
           onPressed: () =>
               ref.read(audioHandlerNotifierProvider)?.skipToPrevious(),
+          child: Icon(Icons.skip_previous_rounded,
+              color: scheme.onSurface, size: 32),
         ),
-        Container(
-          width: 68,
-          height: 68,
-          decoration: BoxDecoration(
-            color: fg,
-            shape: BoxShape.circle,
-          ),
-          child: IconButton(
-            icon: Icon(
-              isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-              color: scheme.onPrimary,
-            ),
-            iconSize: 38,
-            onPressed: () {
-              final h = ref.read(audioHandlerNotifierProvider);
-              isPlaying ? h?.pause() : h?.play();
-            },
+        // Play / pause: a circle when paused, a wider rounded square while
+        // playing (M3 Expressive shape morph).
+        MorphButton(
+          width: isPlaying ? (compact ? 76 : 84) : 72,
+          height: 72,
+          radius: isPlaying ? 22 : 36,
+          pressedRadius: 16,
+          color: fg,
+          tooltip: isPlaying ? 'Pause' : 'Play',
+          onPressed: () {
+            final h = ref.read(audioHandlerNotifierProvider);
+            isPlaying ? h?.pause() : h?.play();
+          },
+          child: Icon(
+            isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            color: onAccent,
+            size: 38,
           ),
         ),
-        IconButton(
-          icon: Icon(Icons.skip_next_rounded, color: scheme.onSurface),
-          iconSize: 40,
+        MorphButton(
+          width: skip,
+          height: skip,
+          radius: skip / 2,
+          pressedRadius: 14,
+          color: fg.withValues(alpha: 0.16),
+          tooltip: 'Next',
           onPressed: () => ref.read(audioHandlerNotifierProvider)?.skipToNext(),
+          child:
+              Icon(Icons.skip_next_rounded, color: scheme.onSurface, size: 32),
         ),
         IconButton(
           icon: Icon(
