@@ -21,14 +21,20 @@ Future<List<Song>> songRadio({
 }) async {
   int? id;
   for (final name in artistLookupNames(seed.artist)) {
-    id = await deezer.searchBestArtist(artistName: name, trackTitle: seed.title);
+    id =
+        await deezer.searchBestArtist(artistName: name, trackTitle: seed.title);
     if (id != null) break;
   }
   if (id == null) throw NoDeezerRadio(seed.artist);
-  final tracks = await deezer.artistRadio(id, limit: limit + 10);
+  final tracks = (await deezer.artistRadio(id, limit: limit + 10))
+      .where((track) => track.previewUrl?.trim().isNotEmpty ?? false);
   if (tracks.isEmpty) throw NoDeezerRadio(seed.artist);
 
-  final seen = {keyFor(seed.title, seed.artist)};
+  final seen = {
+    keyFor(seed.title, seed.artist),
+    for (final artist in splitArtistCredit(seed.artist))
+      keyFor(seed.title, artist),
+  };
   final out = <Song>[];
   for (final t in tracks) {
     if (out.length >= limit) break;

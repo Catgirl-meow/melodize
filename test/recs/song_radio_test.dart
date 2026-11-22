@@ -14,7 +14,9 @@ class _FakeDeezer extends DeezerClient {
 
   @override
   Future<int?> searchBestArtist(
-      {required String artistName, String? trackTitle, String? genreHint}) async {
+      {required String artistName,
+      String? trackTitle,
+      String? genreHint}) async {
     searched.add(artistName);
     if (down) throw Exception('HTTP 503');
     return known.contains(artistName) ? 7 : null;
@@ -25,15 +27,34 @@ class _FakeDeezer extends DeezerClient {
           {int limit = 10}) async =>
       [
         const RecommendedTrack(
-            deezerId: 1, title: 'Tokyo Rain', artist: 'Kaito Ren',
-            album: 'A', durationSeconds: 200),
+            deezerId: 1,
+            title: 'Tokyo Rain',
+            artist: 'Kaito Ren',
+            album: 'A',
+            durationSeconds: 200,
+            previewUrl: 'https://example.test/1.mp3'),
+        const RecommendedTrack(
+            deezerId: 2,
+            title: 'Unavailable',
+            artist: 'Fan',
+            album: 'A',
+            durationSeconds: 200,
+            previewUrl: ''),
         for (var i = 0; i < 5; i++)
           RecommendedTrack(
-              deezerId: 10 + i, title: 'Song $i', artist: 'Fan $i',
-              album: 'A', durationSeconds: 200),
+              deezerId: 10 + i,
+              title: 'Song $i',
+              artist: 'Fan $i',
+              album: 'A',
+              durationSeconds: 200,
+              previewUrl: 'https://example.test/$i.mp3'),
         const RecommendedTrack(
-            deezerId: 99, title: 'Song 0', artist: 'Fan 0',
-            album: 'A', durationSeconds: 200),
+            deezerId: 99,
+            title: 'Song 0',
+            artist: 'Fan 0',
+            album: 'A',
+            durationSeconds: 200,
+            previewUrl: 'https://example.test/99.mp3'),
       ];
 }
 
@@ -41,10 +62,13 @@ Song _song(String artist, String title) =>
     Song(id: 'x', title: title, artist: artist, album: 'A');
 
 void main() {
-  test('radio songs, without the seed itself or duplicates', () async {
+  test(
+      'radio queues playable previews without the joined-credit seed or duplicates',
+      () async {
     final songs = await songRadio(
-        deezer: _FakeDeezer(), seed: _song('Kaito Ren', 'Tokyo Rain'));
-    expect(songs.map((s) => s.title), ['Song 0', 'Song 1', 'Song 2', 'Song 3', 'Song 4']);
+        deezer: _FakeDeezer(), seed: _song('Kaito Ren • Mio', 'Tokyo Rain'));
+    expect(songs.map((s) => s.title),
+        ['Song 0', 'Song 1', 'Song 2', 'Song 3', 'Song 4']);
     expect(songs.every((s) => s.isExternal), isTrue);
   });
 
@@ -71,7 +95,8 @@ void main() {
 
   test('Deezer down: the error comes through', () async {
     await expectLater(
-        songRadio(deezer: _FakeDeezer(down: true), seed: _song('Kaito Ren', 'T')),
+        songRadio(
+            deezer: _FakeDeezer(down: true), seed: _song('Kaito Ren', 'T')),
         throwsA(isA<Exception>()));
   });
 }
